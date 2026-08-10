@@ -70,6 +70,7 @@ const leadValidator = v.object({
   arv: v.optional(v.number()),
   repairs: v.optional(v.number()),
   mao: v.optional(v.number()),
+  acquisitionPrice: v.optional(v.number()),
   notes: v.optional(v.string()),
 });
 
@@ -95,6 +96,7 @@ const leadPatchValidator = v.object({
   arv: v.optional(v.number()),
   repairs: v.optional(v.number()),
   mao: v.optional(v.number()),
+  acquisitionPrice: v.optional(v.number()),
   notes: v.optional(v.string()),
 });
 
@@ -113,6 +115,7 @@ const hotDealValidator = v.object({
   arv: v.optional(v.number()),
   repairs: v.optional(v.number()),
   mao: v.optional(v.number()),
+  acquisitionPrice: v.optional(v.number()),
   notes: v.optional(v.string()),
 });
 
@@ -131,6 +134,7 @@ const hotDealPatchValidator = v.object({
   arv: v.optional(v.number()),
   repairs: v.optional(v.number()),
   mao: v.optional(v.number()),
+  acquisitionPrice: v.optional(v.number()),
   notes: v.optional(v.string()),
 });
 
@@ -296,6 +300,12 @@ function objectId(id: string) {
   return new ObjectId(id);
 }
 
+function calculateEstimatedProfit(value: { mao?: unknown; acquisitionPrice?: unknown }) {
+  return typeof value.mao === "number" && typeof value.acquisitionPrice === "number"
+    ? value.mao - value.acquisitionPrice
+    : undefined;
+}
+
 function validateBuyer(buyer: {
   budgetMin: number;
   budgetMax: number;
@@ -417,8 +427,15 @@ export const insertLead = action({
     await requireOwner(ctx);
     validateApprovedLead(args.lead);
     const now = Date.now();
-    const document = { ...args.lead, fabricated: false, lastVerifiedAt: now, createdAt: now, updatedAt: now };
-    const result = await (await getDatabase()).collection(LEADS).insertOne(document);
+    const document = {
+      ...args.lead,
+      estimatedProfit: calculateEstimatedProfit(args.lead),
+      fabricated: false,
+      lastVerifiedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const result = await (await getDatabase()).collection(LEADS).insertOne(withoutUndefined(document));
     return { id: String(result.insertedId) };
   },
 });
@@ -440,11 +457,20 @@ export const updateLead = action({
       distressSignals: Array<{ evidence: string; verified: boolean; sourceUrl: string; sourceDate: string }>;
       verificationStatus: string;
       pipelineStatus: string;
+      mao?: number;
+      acquisitionPrice?: number;
     };
     validateApprovedLead(next);
     await database.collection(LEADS).updateOne(
       { _id: existing._id },
-      { $set: { ...withoutUndefined(args.patch), fabricated: false, updatedAt: Date.now() } },
+      {
+        $set: withoutUndefined({
+          ...args.patch,
+          estimatedProfit: calculateEstimatedProfit(next),
+          fabricated: false,
+          updatedAt: Date.now(),
+        }),
+      },
     );
     return { id: args.id };
   },
@@ -492,7 +518,13 @@ export const listLeads = action({
       ];
     }
     const documents = await (await getDatabase()).collection(LEADS).find(filter).sort({ distressScore: -1, updatedAt: -1 }).limit(100).toArray();
-    return { meta: { dataOrigin: "verified" as const, live: false }, leads: documents.map(serialize) };
+    return {
+      meta: { dataOrigin: "verified" as const, live: false },
+      leads: documents.map((document) => {
+        const lead = serialize(document);
+        return { ...lead, estimatedProfit: calculateEstimatedProfit(lead) };
+      }),
+    };
   },
 });
 
@@ -504,7 +536,7 @@ export const insertHotDeal = action({
       throw new Error("Hot deals require verified, non-seed records with distress score 80 or higher");
     }
     const now = Date.now();
-    const result = await (await getDatabase()).collection(HOT_DEALS).insertOne({ ...args.deal, fabricated: false, createdAt: now, updatedAt: now });
+    const result = await (await getDatabase()).collection(HOT_DEALS).insertOne(withoutUndefined({ ...args.deal, estimatedProfit: calculateEstimatedProfit(args.deal), fabricated: false, createdAt: now, updatedAt: now }));
     return { id: String(result.insertedId) };
   },
 });
@@ -518,7 +550,7 @@ export const updateHotDeal = action({
     if (!existing) throw new Error("Hot deal not found");
     const next = { ...existing, ...withoutUndefined(args.patch) };
     if (next.sourceType === "SEED" || next.verificationStatus !== "VERIFIED" || typeof next.distressScore !== "number" || next.distressScore < 80) throw new Error("Hot deals require verified, non-seed records with distress score 80 or higher");
-    await database.collection(HOT_DEALS).updateOne({ _id: existing._id }, { $set: { ...withoutUndefined(args.patch), fabricated: false, updatedAt: Date.now() } });
+    await database.collection(HOT_DEALS).updateOne({ _id: existing._id }, { $set: withoutUndefined({ ...args.patch, estimatedProfit: calculateEstimatedProfit(next), fabricated: false, updatedAt: Date.now() }) });
     return { id: args.id };
   },
 });
@@ -529,7 +561,10 @@ export const listHotDeals = action({
     await requireSignedIn(ctx);
     const filter: Document = { fabricated: { $ne: true }, verificationStatus: "VERIFIED", distressScore: { $gte: args.minDistressScore ?? 80 } };
     const documents = await (await getDatabase()).collection(HOT_DEALS).find(filter).sort({ distressScore: -1 }).limit(100).toArray();
-    return documents.map(serialize);
+    return documents.map((document) => {
+      const deal = serialize(document);
+      return { ...deal, estimatedProfit: calculateEstimatedProfit(deal) };
+    });
   },
 });
 

@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
 import type * as http from "../http.js";
 import type * as leads from "../leads.js";
+import type * as mongodb from "../mongodb.js";
 import type * as owner from "../owner.js";
 import type * as users from "../users.js";
 
@@ -26,6 +27,7 @@ declare const fullApi: ApiFromModules<{
   "auth/emailOtp": typeof auth_emailOtp;
   http: typeof http;
   leads: typeof leads;
+  mongodb: typeof mongodb;
   owner: typeof owner;
   users: typeof users;
 }>;

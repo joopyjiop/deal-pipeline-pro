@@ -19,6 +19,8 @@ export const sourceTypeValidator = v.union(
   v.literal("SHERIFF_SALE"),
   v.literal("TAX_SALE"),
   v.literal("AUCTION_COM"),
+  v.literal("PROBATE"),
+  v.literal("OFF_MARKET"),
   v.literal("ASSESSOR"),
   v.literal("RECORDER"),
   v.literal("MANUAL"),

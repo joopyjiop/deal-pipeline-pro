@@ -34,6 +34,9 @@ import { toast } from "sonner";
 const SOURCE_TYPES = [
   { value: "SHERIFF_SALE", label: "Sheriff sale" },
   { value: "TAX_SALE", label: "Tax sale" },
+  { value: "AUCTION_COM", label: "Auction.com public listing" },
+  { value: "PROBATE", label: "Probate / court record" },
+  { value: "OFF_MARKET", label: "Off-market evidence" },
   { value: "ASSESSOR", label: "Assessor" },
   { value: "RECORDER", label: "Recorder" },
   { value: "MANUAL", label: "Manual record" },

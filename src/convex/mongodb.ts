@@ -57,6 +57,8 @@ const sourceTypeValidator = v.union(
   v.literal("SHERIFF_SALE"),
   v.literal("TAX_SALE"),
   v.literal("AUCTION_COM"),
+  v.literal("PROBATE"),
+  v.literal("OFF_MARKET"),
   v.literal("ASSESSOR"),
   v.literal("RECORDER"),
   v.literal("PROPSTREAM"),
@@ -657,7 +659,7 @@ export const getAiToolManifest = action({
         {
           name: "scrape_source",
           enabled: aiEnabled && scraperEnabled,
-          description: "Fetch a public source URL, return a bounded evidence preview, and stage the source for owner review. Never creates or invents PII.",
+          description: "Fetch a public source URL, return a bounded evidence preview, and stage probate, auction, or off-market evidence for owner review. Never creates or invents PII.",
           permission: "owner",
           input: { url: "string (public http or https)", sourceType: "source type" },
         },
@@ -755,11 +757,15 @@ function extractSourcedCandidate(staged: Document): SourcedCandidate | { reason:
 
   const signal = sourceType === "TAX_SALE"
     ? { type: "TAX_DELINQUENT", weight: 25 }
-    : sourceType === "SHERIFF_SALE"
-      ? { type: "PRE_FORECLOSURE", weight: 30 }
-      : sourceType === "AUCTION_COM"
-        ? { type: "AUCTION_LISTING", weight: 15 }
-        : { type: "PUBLIC_RECORD_DISTRESS", weight: 15 };
+    : sourceType === "PROBATE"
+      ? { type: "INHERITED", weight: 15 }
+      : sourceType === "SHERIFF_SALE"
+        ? { type: "PRE_FORECLOSURE", weight: 30 }
+        : sourceType === "AUCTION_COM"
+          ? { type: "AUCTION_LISTING", weight: 15 }
+          : sourceType === "OFF_MARKET"
+            ? { type: "OFF_MARKET_REFERRAL", weight: 10 }
+            : { type: "PUBLIC_RECORD_DISTRESS", weight: 15 };
   return {
     propertyAddress: addressMatch[0].trim(),
     city: locationMatch[1].trim(),

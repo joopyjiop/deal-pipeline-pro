@@ -45,24 +45,24 @@
 /* CHANGE VALUES FOR THEME */
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --background: oklch(0.975 0.012 235);
+  --foreground: oklch(0.22 0.035 245);
+  --card: oklch(0.99 0.008 235);
+  --card-foreground: oklch(0.22 0.035 245);
+  --popover: oklch(0.99 0.008 235);
+  --popover-foreground: oklch(0.22 0.035 245);
+  --primary: oklch(0.47 0.14 242);
+  --primary-foreground: oklch(0.985 0.01 235);
+  --secondary: oklch(0.94 0.025 225);
+  --secondary-foreground: oklch(0.3 0.07 245);
+  --muted: oklch(0.945 0.018 235);
+  --muted-foreground: oklch(0.51 0.045 245);
+  --accent: oklch(0.92 0.055 190);
+  --accent-foreground: oklch(0.26 0.07 220);
+  --destructive: oklch(0.58 0.18 25);
+  --border: oklch(0.89 0.035 235);
+  --input: oklch(0.9 0.03 235);
+  --ring: oklch(0.62 0.12 235);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -118,9 +118,32 @@
   }
   body {
     @apply bg-background text-foreground;
+    min-width: 320px;
+    background-image:
+      radial-gradient(circle at 8% 4%, rgb(179 225 255 / 0.42), transparent 28rem),
+      radial-gradient(circle at 92% 12%, rgb(190 245 234 / 0.32), transparent 25rem),
+      linear-gradient(135deg, #f8fbff 0%, #eef7ff 52%, #f2fbf8 100%);
   }
   button:not([disabled]),
   [role="button"]:not([disabled]) {
     cursor: pointer;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply border border-white/75 bg-white/60 shadow-[0_18px_60px_rgb(84_125_161_/_0.12)] backdrop-blur-xl;
+  }
+
+  .glass-panel-strong {
+    @apply border border-white/85 bg-white/78 shadow-[0_24px_80px_rgb(84_125_161_/_0.16)] backdrop-blur-2xl;
+  }
+
+  .glass-inset {
+    @apply border border-white/70 bg-white/42 shadow-inner backdrop-blur-lg;
+  }
+
+  .eyebrow {
+    @apply text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-sky-700/80;
   }
 }

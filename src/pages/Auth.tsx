@@ -110,16 +110,16 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col px-5 py-6 sm:px-8">
 
       
       {/* Auth Content */}
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex flex-1 items-center justify-center py-10">
         <div className="flex items-center justify-center h-full flex-col">
-        <Card className="min-w-[350px] pb-0 border shadow-md">
+        <Card className="glass-panel-strong w-full min-w-0 max-w-md overflow-hidden rounded-[1.75rem] border-0 pb-0">
           {step === "signIn" ? (
             <>
-              <CardHeader className="text-center">
+              <CardHeader className="text-center sm:px-8 sm:pt-8">
               <div className="flex justify-center">
                     <img
                       src={logo}
@@ -130,9 +130,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       onClick={() => navigate("/")}
                     />
                   </div>
-                <CardTitle className="text-xl">Get Started</CardTitle>
-                <CardDescription>
-                  Enter your email to log in or sign up
+                <CardTitle className="text-xl tracking-tight text-slate-900">Enter the deal room</CardTitle>
+                <CardDescription className="leading-6 text-slate-500">
+                  Sign in to access the source-first verified lead workspace.
                 </CardDescription>
               </CardHeader>
               <form onSubmit={handleEmailSubmit}>
@@ -277,8 +277,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             </>
           )}
 
-          <div className="py-4 px-6 text-xs text-center text-muted-foreground bg-muted border-t rounded-b-lg">
-            Secured by{" "}
+          <div className="border-t border-white/70 bg-white/35 px-6 py-4 text-center text-xs text-slate-500">
+            Owner-controlled access · Secured by{" "}
             <a
               href="https://freebuff.com"
               target="_blank"

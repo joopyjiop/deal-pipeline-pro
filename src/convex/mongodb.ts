@@ -689,6 +689,161 @@ async function fetchAndStageSource(database: Awaited<ReturnType<typeof getDataba
   return { stagedId: String(staged.insertedId), url: parsedUrl.toString(), title, excerpt, links, contentType, fetchedAt, piiCreated: false };
 }
 
+type SourcedCandidate = {
+  propertyAddress: string;
+  city: string;
+  state: string;
+  zip: string;
+  county: string;
+  sourceType: string;
+  sourceUrl: string;
+  sourceRef: string;
+  sourceDate: string;
+  distressScore: number;
+  distressSignals: Array<{
+    type: string;
+    weight: number;
+    evidence: string;
+    verified: boolean;
+    sourceUrl: string;
+    sourceDate: string;
+  }>;
+};
+
+function normalizeSourceDate(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function extractSourcedCandidate(staged: Document): SourcedCandidate | { reason: string } {
+  const sourceType = typeof staged.sourceType === "string" ? staged.sourceType : "";
+  const raw = staged.rawJson && typeof staged.rawJson === "object" ? staged.rawJson as Record<string, unknown> : {};
+  const sourceUrl = typeof raw.url === "string" ? raw.url : "";
+  const excerpt = typeof raw.excerpt === "string" ? raw.excerpt : "";
+  const text = excerpt.replace(/\\s+/g, " ").trim();
+  const addressMatch = text.match(/\\b\\d{1,6}\\s+[A-Za-z0-9.'#-]+(?:\\s+[A-Za-z0-9.'#-]+){0,8}\\s+(?:ST|STREET|AVE|AVENUE|RD|ROAD|DR|DRIVE|LN|LANE|BLVD|BOULEVARD|CT|COURT|PL|PLACE|WAY|PKWY|PARKWAY)\\b(?:\\s+(?:APT|UNIT|#)\\s*[A-Za-z0-9-]+)?/i);
+  const locationMatch = text.match(/([A-Za-z][A-Za-z .'-]{1,40}),\\s*([A-Z]{2})\\s+(\\d{5}(?:-\\d{4})?)/i);
+  const countyMatch = text.match(/\\b([A-Za-z][A-Za-z .'-]{1,40})\\s+County\\b/i);
+  const referenceMatch = text.match(/\\b(?:case|parcel|sale|docket|reference|ref)\\s*(?:number|no\\.?|#|id)?\\s*[:#-]?\\s*([A-Z0-9][A-Z0-9./-]{2,})/i);
+  const dateMatch = text.match(/\\b(20\\d{2}[-/]\\d{1,2}[-/]\\d{1,2}|\\d{1,2}[-/]\\d{1,2}[-/]20\\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{1,2},?\\s+20\\d{2})\\b/i);
+  const sourceDate = dateMatch ? normalizeSourceDate(dateMatch[1]) : undefined;
+  if (!sourceUrl || !sourceType) return { reason: "The staged record is missing its source URL or source type" };
+  if (!addressMatch) return { reason: "No explicit property address was found in the source excerpt" };
+  if (!locationMatch) return { reason: "No explicit city, state, and ZIP were found in the source excerpt" };
+  if (!countyMatch) return { reason: "No explicit county was found in the source excerpt" };
+  if (!referenceMatch) return { reason: "No explicit case, parcel, sale, docket, or reference number was found" };
+  if (!sourceDate) return { reason: "No explicit sale or record date was found in the source excerpt" };
+
+  const signal = sourceType === "TAX_SALE"
+    ? { type: "TAX_DELINQUENT", weight: 25 }
+    : sourceType === "SHERIFF_SALE"
+      ? { type: "PRE_FORECLOSURE", weight: 30 }
+      : { type: "PUBLIC_RECORD_DISTRESS", weight: 15 };
+  return {
+    propertyAddress: addressMatch[0].trim(),
+    city: locationMatch[1].trim(),
+    state: locationMatch[2].toUpperCase(),
+    zip: locationMatch[3],
+    county: countyMatch[1].trim(),
+    sourceType,
+    sourceUrl,
+    sourceRef: referenceMatch[1],
+    sourceDate,
+    distressScore: signal.weight,
+    distressSignals: [{
+      ...signal,
+      evidence: `Candidate extracted from the official ${sourceType.replace(/_/g, " ").toLowerCase()} source. Owner must confirm this distress fact before approval.`,
+      verified: false,
+      sourceUrl,
+      sourceDate,
+    }],
+  };
+}
+
+async function qualifyStagedSourceImpl(database: Awaited<ReturnType<typeof getDatabase>>, stagedId: string) {
+  const stagingId = objectId(stagedId);
+  const staging = await database.collection(IMPORT_STAGING).findOne({ _id: stagingId });
+  if (!staging) throw new Error("Staged source not found");
+  if (staging.status !== "NEW") return { status: "SKIPPED" as const, stagedId, reason: "This staged source was already processed" };
+
+  const candidate = extractSourcedCandidate(staging);
+  if ("reason" in candidate) {
+    await database.collection(IMPORT_STAGING).updateOne({ _id: stagingId }, { $set: { status: "REJECTED", rejectReason: candidate.reason, updatedAt: Date.now() } });
+    return { status: "REJECTED" as const, stagedId, reason: candidate.reason };
+  }
+
+  const duplicateFilter = candidate.sourceRef
+    ? { $or: [{ parcelId: candidate.sourceRef }, { sourceType: candidate.sourceType, sourceUrl: candidate.sourceUrl, sourceRef: candidate.sourceRef }] }
+    : { sourceType: candidate.sourceType, sourceUrl: candidate.sourceUrl, sourceRef: candidate.sourceRef };
+  const duplicate = await database.collection(LEADS).findOne({ ...duplicateFilter, fabricated: { $ne: true } });
+  if (duplicate) {
+    await database.collection(IMPORT_STAGING).updateOne({ _id: stagingId }, { $set: { status: "DUPLICATE", rejectReason: "A non-fabricated lead with the same parcel or source reference already exists", updatedAt: Date.now() } });
+    return { status: "DUPLICATE" as const, stagedId, reason: "A matching lead already exists" };
+  }
+
+  const now = Date.now();
+  const lead = {
+    ...candidate,
+    verificationStatus: "UNVERIFIED",
+    pipelineStatus: "SOURCED",
+    absenteeOwner: false,
+    needsSkipTrace: true,
+    listedPhone: false,
+    fabricated: false,
+    stagingId,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const inserted = await database.collection(LEADS).insertOne(lead);
+  await database.collection(IMPORT_STAGING).updateOne({ _id: stagingId }, { $set: { status: "NEW", candidateLeadId: inserted.insertedId, updatedAt: now } });
+  return { status: "CANDIDATE_CREATED" as const, stagedId, leadId: String(inserted.insertedId), distressScore: candidate.distressScore };
+}
+
+export const qualifyStagedSource = action({
+  args: { stagedId: v.string() },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    return qualifyStagedSourceImpl(await getDatabase(), args.stagedId);
+  },
+});
+
+export const approveLead = action({
+  args: { id: v.string(), ownerConfirmation: v.literal("OWNER_REVIEWED_SOURCE") },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const existing = await database.collection(LEADS).findOne({ _id: objectId(args.id), fabricated: { $ne: true } });
+    if (!existing) throw new Error("Lead candidate not found");
+    if (existing.pipelineStatus !== "SOURCED" && existing.pipelineStatus !== "CRITIQUED") throw new Error("Only sourced candidates can be approved");
+    const signals = Array.isArray(existing.distressSignals) ? existing.distressSignals.map((signal) => ({ ...signal, verified: true })) : [];
+    const next = { ...existing, distressSignals: signals, verificationStatus: "VERIFIED", pipelineStatus: "APPROVED" } as unknown as {
+      sourceType: string;
+      sourceUrl: string;
+      sourceRef: string;
+      sourceDate: string;
+      distressScore: number;
+      distressSignals: Array<{ evidence: string; verified: boolean; sourceUrl: string; sourceDate: string }>;
+      verificationStatus: string;
+      pipelineStatus: string;
+    };
+    validateApprovedLead(next);
+    await database.collection(LEADS).updateOne({ _id: existing._id }, { $set: { distressSignals: signals, verificationStatus: "VERIFIED", pipelineStatus: "APPROVED", lastVerifiedAt: Date.now(), updatedAt: Date.now() } });
+    return { id: args.id, status: "APPROVED" as const };
+  },
+});
+
+export const rejectLead = action({
+  args: { id: v.string(), reason: v.string() },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    if (!args.reason.trim()) throw new Error("A rejection reason is required");
+    const result = await (await getDatabase()).collection(LEADS).updateOne({ _id: objectId(args.id), fabricated: { $ne: true }, pipelineStatus: { $in: ["SOURCED", "CRITIQUED"] } }, { $set: { pipelineStatus: "REJECTED", rejectionReason: args.reason.trim(), updatedAt: Date.now() } });
+    if (result.matchedCount !== 1) throw new Error("Lead candidate not found");
+    return { id: args.id, status: "REJECTED" as const };
+  },
+});
+
 export const scrapeSource = action({
   args: {
     url: v.string(),
@@ -776,7 +931,8 @@ async function runAutomationCycleImpl() {
             await database.collection(IMPORT_STAGING).updateOne({ _id: objectId(staged.stagedId) }, { $set: { aiReview: review, updatedAt: Date.now() } });
           }
         }
-        result = { kind: "SCRAPE", stagedId: staged.stagedId, sourceUrl: staged.url, ai: aiResult, piiCreated: false };
+        const qualification = await qualifyStagedSourceImpl(database, staged.stagedId);
+        result = { kind: "SCRAPE", stagedId: staged.stagedId, sourceUrl: staged.url, ai: aiResult, qualification, piiCreated: false };
       } else {
         if (!task.estimate || typeof task.estimate !== "object") throw new Error("Estimate task is missing its explicit inputs");
         result = { kind: "ESTIMATE", estimate: calculateDealEstimate(task.estimate as EstimateInput) };
@@ -959,9 +1115,18 @@ export const listLeads = action({
     sourceType: v.optional(sourceTypeValidator),
   },
   handler: async (ctx, args) => {
-    await requireSignedIn(ctx);
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Authentication required");
+    const owner = identity.email?.trim().toLowerCase() === OWNER_EMAIL;
+    if (!owner && args.pipelineStatus && args.pipelineStatus !== "APPROVED") {
+      throw new Error("Only the owner can view pending lead candidates");
+    }
     const filter: Document = { fabricated: { $ne: true } };
     if (args.pipelineStatus) filter.pipelineStatus = args.pipelineStatus;
+    if (!owner && !args.pipelineStatus) {
+      filter.pipelineStatus = "APPROVED";
+      filter.verificationStatus = "VERIFIED";
+    }
     if (args.verificationStatus) filter.verificationStatus = args.verificationStatus;
     if (args.sourceType) filter.sourceType = args.sourceType;
     if (args.minDistressScore !== undefined || args.maxDistressScore !== undefined) {

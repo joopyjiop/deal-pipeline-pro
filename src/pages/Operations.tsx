@@ -50,6 +50,21 @@ type Lead = {
   estimatedProfit?: number;
 };
 
+type Candidate = {
+  _id: string;
+  propertyAddress: string;
+  city: string;
+  state: string;
+  zip: string;
+  county: string;
+  sourceType: string;
+  sourceUrl: string;
+  sourceRef: string;
+  sourceDate: string;
+  distressScore: number;
+  distressSignals: Array<{ type: string; evidence: string; verified: boolean }>;
+};
+
 type Match = {
   _id: string;
   leadId: string;
@@ -98,10 +113,13 @@ export default function Operations() {
   const updateBuyer = useAction(api.mongodb.updateBuyer);
   const listLeads = useAction(api.mongodb.listLeads);
   const listMatches = useAction(api.mongodb.listMatches);
+  const approveLead = useAction(api.mongodb.approveLead);
+  const rejectLead = useAction(api.mongodb.rejectLead);
   const insertMatch = useAction(api.mongodb.insertMatch);
   const updateMatch = useAction(api.mongodb.updateMatch);
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [buyerFilter, setBuyerFilter] = useState<BuyerFilter>("PENDING");
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("ALL");
@@ -122,12 +140,14 @@ export default function Operations() {
     Promise.all([
       listBuyers({}),
       listLeads({ pipelineStatus: "APPROVED", verificationStatus: "VERIFIED" }),
+      listLeads({ pipelineStatus: "SOURCED" }),
       listMatches({ status: matchFilter === "ALL" ? undefined : matchFilter }),
     ])
-      .then(([buyerRows, leadResult, matchRows]) => {
+      .then(([buyerRows, leadResult, candidateResult, matchRows]) => {
         if (cancelled) return;
         setBuyers(buyerRows as Buyer[]);
         setLeads((leadResult as unknown as { leads: Lead[] }).leads);
+        setCandidates((candidateResult as unknown as { leads: Candidate[] }).leads);
         setMatches(matchRows as Match[]);
       })
       .catch((error) => {
@@ -173,6 +193,21 @@ export default function Operations() {
       refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update this buyer.");
+    }
+  };
+
+  const handleCandidateDecision = async (candidate: Candidate, decision: "APPROVE" | "REJECT") => {
+    try {
+      if (decision === "APPROVE") {
+        await approveLead({ id: candidate._id, ownerConfirmation: "OWNER_REVIEWED_SOURCE" });
+        toast.success("Candidate approved and moved to the verified lead workspace.");
+      } else {
+        await rejectLead({ id: candidate._id, reason: "Rejected during owner source review" });
+        toast.success("Candidate rejected and retained for audit history.");
+      }
+      refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update this source candidate.");
     }
   };
 
@@ -241,6 +276,14 @@ export default function Operations() {
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">Buyer queue</p><Users className="size-4 text-sky-600" /></div><p className="mt-3 text-2xl font-semibold text-slate-900">{buyerFilter === "PENDING" ? pendingCount : visibleBuyers.length}</p><p className="mt-1 text-xs text-slate-500">{buyerFilter === "PENDING" ? "Awaiting owner review" : "Current filter"}</p></div>
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">Approved buyers</p><UserRound className="size-4 text-teal-600" /></div><p className="mt-3 text-2xl font-semibold text-slate-900">{approvedBuyers.length}</p><p className="mt-1 text-xs text-slate-500">Eligible for candidate matches</p></div>
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">Match board</p><Handshake className="size-4 text-sky-600" /></div><p className="mt-3 text-2xl font-semibold text-slate-900">{matches.length}</p><p className="mt-1 text-xs text-slate-500">Owner-reviewed relationships</p></div>
+        </section>
+
+        <section className="glass-panel mt-5 overflow-hidden rounded-[1.75rem]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/70 px-4 py-4 sm:px-5">
+            <div><p className="eyebrow">Automatic sourcing</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Review sourced candidates</h2><p className="mt-1 text-xs text-slate-500">The machine extracts only explicit fields from official pages. Approval is still owner-controlled.</p></div>
+            <Badge className="border-0 bg-amber-100/80 text-amber-800">{candidates.length} awaiting review</Badge>
+          </div>
+          {candidates.length === 0 ? <div className="flex min-h-32 items-center justify-center px-6 text-center"><p className="text-sm text-slate-500">No candidates yet. Queue an official sheriff or tax source in the Toolkit, then run the cycle.</p></div> : <div className="divide-y divide-white/70">{candidates.map((candidate) => <article key={candidate._id} className="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-center sm:p-5"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{candidate.propertyAddress}</p><p className="mt-1 text-xs text-slate-500">{candidate.city}, {candidate.state} {candidate.zip} · {candidate.county} County</p><div className="mt-2 flex flex-wrap gap-1.5"><Badge variant="outline" className="border-white/90 bg-white/55 text-[0.65rem] text-slate-600">{pretty(candidate.sourceType)}</Badge><Badge variant="outline" className="border-amber-200/80 bg-amber-50/60 text-[0.65rem] text-amber-800">Score {candidate.distressScore}</Badge><span className="text-[0.68rem] text-slate-400">Ref {candidate.sourceRef} · {candidate.sourceDate}</span></div></div><a href={candidate.sourceUrl} target="_blank" rel="noreferrer" className="truncate text-xs font-semibold text-sky-700 hover:text-sky-900">Open official source</a><div className="flex gap-2 sm:justify-end"><Button type="button" onClick={() => void handleCandidateDecision(candidate, "APPROVE")} className="h-9 flex-1 rounded-xl bg-teal-700 text-xs hover:bg-teal-800 sm:flex-none">Approve</Button><Button type="button" variant="outline" onClick={() => void handleCandidateDecision(candidate, "REJECT")} className="h-9 rounded-xl border-rose-200/80 bg-rose-50/45 px-3 text-xs text-rose-700">Reject</Button></div></article>)}</div>}
         </section>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

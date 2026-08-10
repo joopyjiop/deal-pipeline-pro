@@ -109,6 +109,7 @@ export default function Toolkit() {
   const listAutomationTasks = useAction(api.mongodb.listAutomationTasks);
   const runAutomationNow = useAction(api.mongodb.runAutomationNow);
   const scrapeSource = useAction(api.mongodb.scrapeSource);
+  const qualifyStagedSource = useAction(api.mongodb.qualifyStagedSource);
   const estimateDeal = useAction(api.mongodb.estimateDeal);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
@@ -247,7 +248,14 @@ export default function Toolkit() {
     try {
       const result = await scrapeSource(scrapeForm) as ScrapeResult;
       setScrapeResult(result);
-      toast.success("Source fetched and staged for owner review.");
+      const qualification = await qualifyStagedSource({ stagedId: result.stagedId }) as { status: string; reason?: string };
+      if (qualification.status === "CANDIDATE_CREATED") {
+        toast.success("Source fetched and turned into a review candidate.");
+      } else if (qualification.status === "REJECTED") {
+        toast.warning(`Source staged, but no candidate was created: ${qualification.reason ?? "missing structured fields"}.`);
+      } else {
+        toast.success("Source fetched and staged for owner review.");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not fetch this source.");
     } finally {

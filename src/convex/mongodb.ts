@@ -10,6 +10,20 @@ const HOT_DEALS = "hot_deals";
 const BUYERS = "buyers";
 const MATCHES = "property_matches";
 const IMPORT_STAGING = "import_staging";
+const TOOL_ACCESS = "tool_access";
+
+type ToolAccessDocument = {
+  _id: string;
+  scraperEnabled?: boolean;
+  estimatorEnabled?: boolean;
+  aiEnabled?: boolean;
+  createdAt?: number;
+  updatedAt?: number;
+};
+
+const toolNameValidator = v.union(v.literal("SCRAPER"), v.literal("ESTIMATOR"));
+const repairTierValidator = v.union(v.literal("BASE"), v.literal("MEDIUM"), v.literal("GUT"));
+const estimateCompValidator = v.object({ salePrice: v.number() });
 
 let clientPromise: Promise<MongoClient> | null = null;
 
@@ -306,6 +320,77 @@ function calculateEstimatedProfit(value: { mao?: unknown; acquisitionPrice?: unk
     : undefined;
 }
 
+function assertPublicHttpUrl(value: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("Enter a valid public http(s) URL");
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const blocked =
+    parsed.protocol !== "http:" && parsed.protocol !== "https:" ||
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "0.0.0.0" ||
+    hostname === "::1" ||
+    hostname.endsWith(".local") ||
+    hostname.startsWith("10.") ||
+    hostname.startsWith("192.168.") ||
+    hostname.startsWith("169.254.") ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname);
+  if (blocked) throw new Error("Only public http(s) source URLs are allowed");
+  return parsed;
+}
+
+function decodeHtml(value: string) {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function htmlToText(value: string) {
+  return decodeHtml(
+    value
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+}
+
+function median(values: number[]) {
+  const sorted = [...values].sort((a, b) => a - b);
+  if (sorted.length === 0) return undefined;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+}
+
+function calculateRepairEstimate(squareFeet: number, tier: "BASE" | "MEDIUM" | "GUT", yearBuilt?: number) {
+  const tierRate = { BASE: 15, MEDIUM: 30, GUT: 50 }[tier];
+  const ageAdjustment = yearBuilt !== undefined && yearBuilt < 1960 ? 1.1 : 1;
+  const base = squareFeet * tierRate * ageAdjustment;
+  const items = {
+    roof: Math.round(base * 0.2),
+    hvac: Math.round(base * 0.15),
+    kitchen: Math.round(base * 0.2),
+    bath: Math.round(base * 0.1),
+    flooring: Math.round(base * 0.12),
+    paint: Math.round(base * 0.08),
+    electrical: Math.round(base * 0.05),
+  };
+  const subtotal = Object.values(items).reduce((total, value) => total + value, 0);
+  const contingency = Math.round(subtotal * 0.1);
+  return { items, subtotal, contingency, total: subtotal + contingency, ratePerSquareFoot: tierRate * ageAdjustment };
+}
+
 function validateBuyer(buyer: {
   budgetMin: number;
   budgetMax: number;
@@ -418,6 +503,149 @@ export const smokeTest = action({
       collection: "integration_checks",
       readBack: Boolean(readBack),
     };
+  },
+});
+
+export const getToolAccess = action({
+  args: {},
+  handler: async (ctx) => {
+    await requireOwner(ctx);
+    const document = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    return {
+      scraperEnabled: document?.scraperEnabled !== false,
+      estimatorEnabled: document?.estimatorEnabled !== false,
+      aiEnabled: document?.aiEnabled === true,
+    };
+  },
+});
+
+export const setToolAccess = action({
+  args: {
+    tool: toolNameValidator,
+    enabled: v.boolean(),
+    aiEnabled: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const field = args.tool === "SCRAPER" ? "scraperEnabled" : "estimatorEnabled";
+    const update: Record<string, unknown> = { [field]: args.enabled, updatedAt: Date.now() };
+    if (args.aiEnabled !== undefined) update.aiEnabled = args.aiEnabled;
+    await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).updateOne(
+      { _id: "admin_tools" },
+      { $set: update, $setOnInsert: { scraperEnabled: true, estimatorEnabled: true, aiEnabled: false, createdAt: Date.now() } },
+      { upsert: true },
+    );
+    return { tool: args.tool, enabled: args.enabled, aiEnabled: args.aiEnabled };
+  },
+});
+
+export const getAiToolManifest = action({
+  args: {},
+  handler: async (ctx) => {
+    await requireOwner(ctx);
+    const document = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    const scraperEnabled = document?.scraperEnabled !== false;
+    const estimatorEnabled = document?.estimatorEnabled !== false;
+    const aiEnabled = document?.aiEnabled === true;
+    return {
+      version: "1.0",
+      aiAccessEnabled: aiEnabled,
+      tools: [
+        {
+          name: "scrape_source",
+          enabled: aiEnabled && scraperEnabled,
+          description: "Fetch a public source URL, return a bounded evidence preview, and stage the source for owner review. Never creates or invents PII.",
+          permission: "owner",
+          input: { url: "string (public http or https)", sourceType: "source type" },
+        },
+        {
+          name: "estimate_deal",
+          enabled: aiEnabled && estimatorEnabled,
+          description: "Calculate sourced-comp ARV scenarios, repair tiers, MAO scenarios, and gross spread from explicit inputs. Missing comps produce NEEDS_APPRAISAL.",
+          permission: "owner",
+          input: { squareFeet: "number", soldComps: "number[]", repairTier: "BASE | MEDIUM | GUT", targetPct: "number" },
+        },
+      ],
+    };
+  },
+});
+
+export const scrapeSource = action({
+  args: {
+    url: v.string(),
+    sourceType: sourceTypeValidator,
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const access = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
+    const parsedUrl = assertPublicHttpUrl(args.url.trim());
+    const response = await fetch(parsedUrl, { headers: { "user-agent": "Groundwork-source-review/1.0" }, signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error(`Source returned HTTP ${response.status}`);
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/") && !contentType.includes("json") && !contentType.includes("xml")) {
+      throw new Error("This scraper currently supports text, HTML, XML, and JSON sources");
+    }
+    const body = (await response.text()).slice(0, 1_000_000);
+    const title = decodeHtml(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() ?? parsedUrl.hostname);
+    const excerpt = htmlToText(body).slice(0, 2000);
+    const links = [...body.matchAll(/href=["'](https?:\/\/[^"']+)["']/gi)].map((match) => match[1]).filter(Boolean).slice(0, 20);
+    const fetchedAt = new Date().toISOString();
+    const staged = await (await getDatabase()).collection(IMPORT_STAGING).insertOne({
+      sourceType: args.sourceType,
+      rawJson: { url: parsedUrl.toString(), title, excerpt, links, contentType, fetchedAt },
+      status: "NEW",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return { stagedId: String(staged.insertedId), url: parsedUrl.toString(), title, excerpt, links, contentType, fetchedAt, piiCreated: false };
+  },
+});
+
+export const estimateDeal = action({
+  args: {
+    leadId: v.optional(v.string()),
+    squareFeet: v.number(),
+    yearBuilt: v.optional(v.number()),
+    repairTier: repairTierValidator,
+    soldComps: v.array(estimateCompValidator),
+    compSourceUrl: v.optional(v.string()),
+    compSourceDate: v.optional(v.string()),
+    targetPct: v.number(),
+    wholesaleFee: v.number(),
+    closingCosts: v.number(),
+    holdingCosts: v.number(),
+    acquisitionPrice: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const access = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.estimatorEnabled === false) throw new Error("The estimator tool is disabled in Tool access settings");
+    if (args.squareFeet <= 0 || args.targetPct <= 0 || args.targetPct > 100) throw new Error("Square feet and target percentage must be positive; target must be 100 or less");
+    if ([args.wholesaleFee, args.closingCosts, args.holdingCosts, args.acquisitionPrice].some((value) => value !== undefined && value < 0)) throw new Error("Deal costs and price cannot be negative");
+    if (args.soldComps.length > 0 && (!args.compSourceUrl?.trim() || !args.compSourceDate?.trim())) throw new Error("Sold comps require a source URL and source date");
+    const compValues = args.soldComps.map((comp) => comp.salePrice).filter((value) => value > 0);
+    const compMedian = median(compValues);
+    const repairs = calculateRepairEstimate(args.squareFeet, args.repairTier, args.yearBuilt);
+    const arv = compMedian === undefined ? undefined : {
+      conservative: Math.round(compMedian * 0.9),
+      median: Math.round(compMedian),
+      aggressive: Math.round(compMedian * 1.1),
+    };
+    const mao = arv === undefined ? undefined : {
+      conservative: Math.round(arv.conservative * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
+      median: Math.round(arv.median * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
+      aggressive: Math.round(arv.aggressive * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
+    };
+    const estimatedProfit = mao && args.acquisitionPrice !== undefined ? mao.median - args.acquisitionPrice : undefined;
+    const result = { estimateStatus: arv ? "READY" as const : "NEEDS_APPRAISAL" as const, compCount: compValues.length, compMedian, arv, repairs, mao, estimatedProfit, inputs: { targetPct: args.targetPct, wholesaleFee: args.wholesaleFee, closingCosts: args.closingCosts, holdingCosts: args.holdingCosts, repairTier: args.repairTier, compSourceUrl: args.compSourceUrl, compSourceDate: args.compSourceDate } };
+    if (args.leadId) {
+      const database = await getDatabase();
+      const lead = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+      if (!lead) throw new Error("Lead not found");
+      await database.collection(LEADS).updateOne({ _id: lead._id }, { $set: withoutUndefined({ arv: arv?.median, repairs: repairs.total, mao: mao?.median, acquisitionPrice: args.acquisitionPrice, estimatedProfit, underwriting: result, updatedAt: Date.now() }) });
+    }
+    return result;
   },
 });
 

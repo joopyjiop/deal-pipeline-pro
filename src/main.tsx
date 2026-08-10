@@ -16,6 +16,7 @@ import AuthPage from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import BuyerIntake from "./pages/BuyerIntake";
 import Operations from "./pages/Operations";
+import Toolkit from "./pages/Toolkit";
 import NotFound from "./pages/NotFound";
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
@@ -73,6 +74,14 @@ createRoot(document.getElementById("root")!).render(
               element={
                 <RequireAuth>
                   <Operations />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/toolkit"
+              element={
+                <RequireAuth>
+                  <Toolkit />
                 </RequireAuth>
               }
             />

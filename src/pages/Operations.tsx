@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   UserRound,
   Users,
+  Wrench,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -230,6 +231,7 @@ export default function Operations() {
             <div><p className="eyebrow">Mongo operations</p><h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Buyers & matches</h1></div>
           </div>
           <div className="flex items-center gap-2">
+            <Link to="/toolkit" className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/85 bg-white/60 px-3 text-sm font-medium text-slate-700 transition-colors hover:text-sky-700"><Wrench className="size-4" /> Toolkit</Link>
             <Button type="button" variant="outline" onClick={refresh} className="gap-2 rounded-xl border-white/85 bg-white/60 text-slate-700"><RefreshCw className="size-4" /> Refresh</Button>
             <button type="button" onClick={handleSignOut} className="flex size-10 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500 hover:text-slate-800" aria-label="Sign out"><LogOut className="size-4" /></button>
           </div>

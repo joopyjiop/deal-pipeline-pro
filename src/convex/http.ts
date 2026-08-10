@@ -111,17 +111,47 @@ const queueN8nSource = httpAction(async (ctx, request) => {
 const mcpHeaders = {
   "cache-control": "no-store",
   "access-control-allow-origin": "*",
+  "mcp-protocol-version": "2025-06-18",
 };
 
-function mcpResult(id: JsonRpcId, value: unknown) {
-  return json({
-    jsonrpc: "2.0",
-    id,
-    result: {
-      content: [{ type: "text", text: JSON.stringify(value) }],
-      structuredContent: value,
+function mcpEventStream(body: string) {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      ...mcpHeaders,
+      "content-type": "text/event-stream",
     },
-  }, 200, mcpHeaders);
+  });
+}
+
+function mcpUnauthorized() {
+  return json({ error: "Unauthorized" }, 401, {
+    ...mcpHeaders,
+    "www-authenticate": "Bearer",
+  });
+}
+
+const mcpGet = httpAction(async (_, request) => {
+  if (!mcpAuthorized(request)) return mcpUnauthorized();
+  const accept = request.headers.get("accept") ?? "";
+  if (!accept.includes("text/event-stream")) {
+    return json({ error: "Streamable HTTP GET requires Accept: text/event-stream" }, 406, mcpHeaders);
+  }
+
+  // This server has synchronous tool responses and does not emit unsolicited
+  // notifications. Return a valid empty SSE stream for clients that probe GET.
+  return mcpEventStream(": mcp stream ready\\n\\n");
+});
+
+function mcpJsonRpcResult(id: JsonRpcId, value: unknown) {
+  return json({ jsonrpc: "2.0", id, result: value }, 200, mcpHeaders);
+}
+
+function mcpToolResult(id: JsonRpcId, value: unknown) {
+  return mcpJsonRpcResult(id, {
+    content: [{ type: "text", text: JSON.stringify(value) }],
+    structuredContent: value,
+  });
 }
 
 function mcpError(id: JsonRpcId, code: number, message: string) {
@@ -253,12 +283,7 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
 }
 
 const mcpToolServer = httpAction(async (ctx, request) => {
-  if (!mcpAuthorized(request)) {
-    return json({ error: "Unauthorized" }, 401, {
-      ...mcpHeaders,
-      "www-authenticate": "Bearer",
-    });
-  }
+  if (!mcpAuthorized(request)) return mcpUnauthorized();
 
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > 32_768) {
@@ -292,7 +317,7 @@ const mcpToolServer = httpAction(async (ctx, request) => {
   }
 
   if (method === "initialize") {
-    return mcpResult(requestId, {
+    return mcpJsonRpcResult(requestId, {
       protocolVersion: "2025-06-18",
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "groundwork-deal-tools", version: "1.0.0" },
@@ -300,10 +325,10 @@ const mcpToolServer = httpAction(async (ctx, request) => {
     });
   }
   if (method === "ping") {
-    return mcpResult(requestId, {});
+    return mcpJsonRpcResult(requestId, {});
   }
   if (method === "tools/list") {
-    return mcpResult(requestId, { tools: mcpTools() });
+    return mcpJsonRpcResult(requestId, { tools: mcpTools() });
   }
   if (method === "tools/call") {
     if (!isRecord(body.params)) return mcpError(requestId, -32602, "tools/call requires params");
@@ -311,9 +336,9 @@ const mcpToolServer = httpAction(async (ctx, request) => {
     if (typeof params.name !== "string") return mcpError(requestId, -32602, "tools/call requires a tool name");
     try {
       const value = await callMcpTool(ctx, params.name, params.arguments ?? {});
-      return mcpResult(requestId, value);
+      return mcpToolResult(requestId, value);
     } catch (error) {
-      return mcpResult(requestId, { isError: true, error: error instanceof Error ? error.message : "Tool call failed" });
+      return mcpToolResult(requestId, { isError: true, error: error instanceof Error ? error.message : "Tool call failed" });
     }
   }
 
@@ -322,7 +347,7 @@ const mcpToolServer = httpAction(async (ctx, request) => {
 
 const mcpOptions = httpAction(async () => empty(204, {
   ...mcpHeaders,
-  "access-control-allow-methods": "POST, OPTIONS",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
   "access-control-allow-headers": "authorization, content-type, x-mcp-api-key, mcp-session-id",
 }));
 
@@ -332,6 +357,12 @@ http.route({
   path: "/api/n8n/source",
   method: "POST",
   handler: queueN8nSource,
+});
+
+http.route({
+  path: "/api/mcp",
+  method: "GET",
+  handler: mcpGet,
 });
 
 http.route({

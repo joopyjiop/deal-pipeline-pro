@@ -12,8 +12,10 @@ import {
   ExternalLink,
   FileSearch,
   Globe2,
+  ListChecks,
   Loader2,
   LogOut,
+  Play,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -27,6 +29,25 @@ type ToolAccess = {
   scraperEnabled: boolean;
   estimatorEnabled: boolean;
   aiEnabled: boolean;
+};
+
+type AutomationConfig = {
+  enabled: boolean;
+  mode: "DETERMINISTIC" | "BOTH";
+  dailyRunLimit: number;
+  maxTasksPerRun: number;
+  runsToday: number;
+  aiEnabled: boolean;
+  providerConfigured: boolean;
+};
+
+type AutomationTask = {
+  _id: string;
+  kind: "SCRAPE" | "ESTIMATE";
+  status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+  error?: string;
+  createdAt?: string | number;
+  result?: unknown;
 };
 
 type ScrapeResult = {
@@ -82,16 +103,24 @@ export default function Toolkit() {
   const getToolAccess = useAction(api.mongodb.getToolAccess);
   const setToolAccess = useAction(api.mongodb.setToolAccess);
   const getAiToolManifest = useAction(api.mongodb.getAiToolManifest);
+  const getAutomationConfig = useAction(api.mongodb.getAutomationConfig);
+  const setAutomationConfig = useAction(api.mongodb.setAutomationConfig);
+  const enqueueAutomationTask = useAction(api.mongodb.enqueueAutomationTask);
+  const listAutomationTasks = useAction(api.mongodb.listAutomationTasks);
+  const runAutomationNow = useAction(api.mongodb.runAutomationNow);
   const scrapeSource = useAction(api.mongodb.scrapeSource);
   const estimateDeal = useAction(api.mongodb.estimateDeal);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
+  const [automation, setAutomation] = useState<AutomationConfig>({ enabled: false, mode: "BOTH", dailyRunLimit: 24, maxTasksPerRun: 5, runsToday: 0, aiEnabled: false, providerConfigured: false });
+  const [tasks, setTasks] = useState<AutomationTask[]>([]);
   const [manifest, setManifest] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState(false);
   const [estimating, setEstimating] = useState(false);
   const [scrapeResult, setScrapeResult] = useState<ScrapeResult | null>(null);
   const [estimateResult, setEstimateResult] = useState<EstimateResult | null>(null);
+  const [queueUrl, setQueueUrl] = useState("");
   const [scrapeForm, setScrapeForm] = useState({ url: "", sourceType: "SHERIFF_SALE" as (typeof sourceTypes)[number][0] });
   const [estimateForm, setEstimateForm] = useState({
     squareFeet: "1500",
@@ -110,9 +139,16 @@ export default function Toolkit() {
   const loadAccess = async () => {
     setLoading(true);
     try {
-      const result = (await getToolAccess()) as ToolAccess;
-      setAccess(result);
-      setManifest(await getAiToolManifest());
+      const [accessResult, manifestResult, automationResult, taskResult] = await Promise.all([
+        getToolAccess(),
+        getAiToolManifest(),
+        getAutomationConfig(),
+        listAutomationTasks({}),
+      ]);
+      setAccess(accessResult as ToolAccess);
+      setManifest(manifestResult);
+      setAutomation(automationResult as AutomationConfig);
+      setTasks(taskResult as AutomationTask[]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load tool access.");
     } finally {
@@ -123,11 +159,13 @@ export default function Toolkit() {
   useEffect(() => {
     if (!isOwner) return;
     let cancelled = false;
-    Promise.all([getToolAccess(), getAiToolManifest()])
-      .then(([accessResult, manifestResult]) => {
+    Promise.all([getToolAccess(), getAiToolManifest(), getAutomationConfig(), listAutomationTasks({})])
+      .then(([accessResult, manifestResult, automationResult, taskResult]) => {
         if (cancelled) return;
         setAccess(accessResult as ToolAccess);
         setManifest(manifestResult);
+        setAutomation(automationResult as AutomationConfig);
+        setTasks(taskResult as AutomationTask[]);
       })
       .catch((error) => {
         if (!cancelled) toast.error(error instanceof Error ? error.message : "Could not load tool access.");
@@ -138,7 +176,7 @@ export default function Toolkit() {
     return () => {
       cancelled = true;
     };
-  }, [getAiToolManifest, getToolAccess, isOwner]);
+  }, [getAiToolManifest, getAutomationConfig, getToolAccess, isOwner, listAutomationTasks]);
 
   const updateTool = async (tool: "SCRAPER" | "ESTIMATOR", enabled: boolean) => {
     try {
@@ -162,6 +200,44 @@ export default function Toolkit() {
       toast.success(enabled ? "AI tool access enabled." : "AI tool access disabled.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update AI access.");
+    }
+  };
+
+  const saveAutomation = async () => {
+    try {
+      const result = await setAutomationConfig({
+        enabled: automation.enabled,
+        mode: automation.mode,
+        dailyRunLimit: automation.dailyRunLimit,
+        maxTasksPerRun: automation.maxTasksPerRun,
+      });
+      setAutomation((current) => ({ ...current, ...result }));
+      toast.success(automation.enabled ? "Managed automation enabled." : "Managed automation paused.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save automation settings.");
+    }
+  };
+
+  const queueScrape = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    try {
+      await enqueueAutomationTask({ task: { kind: "SCRAPE", url: queueUrl, sourceType: scrapeForm.sourceType } });
+      setQueueUrl("");
+      setTasks((await listAutomationTasks({ status: "PENDING" })) as AutomationTask[]);
+      toast.success("Source added to the managed automation queue.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not queue this source.");
+    }
+  };
+
+  const runCycle = async () => {
+    try {
+      const result = await runAutomationNow();
+      setTasks((await listAutomationTasks({})) as AutomationTask[]);
+      setAutomation((await getAutomationConfig()) as AutomationConfig);
+      toast.success(`Automation cycle finished: ${JSON.stringify(result)}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not run the automation cycle.");
     }
   };
 
@@ -246,6 +322,24 @@ export default function Toolkit() {
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">Scraper</p><Globe2 className="size-4 text-sky-600" /></div><div className="mt-3 flex items-center justify-between"><p className="text-lg font-semibold text-slate-900">{access.scraperEnabled ? "Enabled" : "Disabled"}</p><button type="button" role="switch" aria-checked={access.scraperEnabled} onClick={() => void updateTool("SCRAPER", !access.scraperEnabled)} className={`relative h-6 w-11 rounded-full transition-colors ${access.scraperEnabled ? "bg-sky-700" : "bg-slate-300"}`}><span className={`absolute top-1 size-4 rounded-full bg-white transition-transform ${access.scraperEnabled ? "translate-x-6" : "translate-x-1"}`} /></button></div><p className="mt-1 text-xs text-slate-500">Public evidence URLs only</p></div>
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">Estimator</p><Calculator className="size-4 text-teal-600" /></div><div className="mt-3 flex items-center justify-between"><p className="text-lg font-semibold text-slate-900">{access.estimatorEnabled ? "Enabled" : "Disabled"}</p><button type="button" role="switch" aria-checked={access.estimatorEnabled} onClick={() => void updateTool("ESTIMATOR", !access.estimatorEnabled)} className={`relative h-6 w-11 rounded-full transition-colors ${access.estimatorEnabled ? "bg-teal-700" : "bg-slate-300"}`}><span className={`absolute top-1 size-4 rounded-full bg-white transition-transform ${access.estimatorEnabled ? "translate-x-6" : "translate-x-1"}`} /></button></div><p className="mt-1 text-xs text-slate-500">Explicit inputs, no invented comps</p></div>
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">AI access</p><Bot className="size-4 text-violet-600" /></div><div className="mt-3 flex items-center justify-between"><p className="text-lg font-semibold text-slate-900">{access.aiEnabled ? "Granted" : "Owner only"}</p><button type="button" role="switch" aria-checked={access.aiEnabled} onClick={() => void updateAiAccess(!access.aiEnabled)} className={`relative h-6 w-11 rounded-full transition-colors ${access.aiEnabled ? "bg-violet-700" : "bg-slate-300"}`}><span className={`absolute top-1 size-4 rounded-full bg-white transition-transform ${access.aiEnabled ? "translate-x-6" : "translate-x-1"}`} /></button></div><p className="mt-1 text-xs text-slate-500">Manifest is ready for an authenticated AI connector</p></div>
+        </section>
+
+        <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-100/80 text-amber-700"><ListChecks className="size-5" /></div><div><p className="eyebrow">Managed automation</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Queue work for both modes</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Convex runs the schedule, MongoDB stores the queue and results, and the temporary AI reviewer only adds bounded review suggestions. The hourly cycle stays paused until you enable it.</p></div></div>
+            <Badge className={automation.enabled ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-slate-100/80 text-slate-600"}>{automation.enabled ? "Running when queued" : "Paused"}</Badge>
+          </div>
+          <div className="mt-5 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="grid gap-3 rounded-2xl border border-white/80 bg-white/45 p-4 sm:grid-cols-2">
+              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Run mode</span><select value={automation.mode} onChange={(event) => setAutomation((current) => ({ ...current, mode: event.target.value as AutomationConfig["mode"] }))} className="h-10 rounded-xl border border-white/85 bg-white/70 px-3 text-sm text-slate-700 outline-none"><option value="BOTH">Deterministic + temporary AI</option><option value="DETERMINISTIC">Deterministic only</option></select></label>
+              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Daily cycle limit</span><Input min="1" max="1000" type="number" value={automation.dailyRunLimit} onChange={(event) => setAutomation((current) => ({ ...current, dailyRunLimit: Number(event.target.value) }))} className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
+              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Tasks per cycle</span><Input min="1" max="20" type="number" value={automation.maxTasksPerRun} onChange={(event) => setAutomation((current) => ({ ...current, maxTasksPerRun: Number(event.target.value) }))} className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
+              <div className="flex items-end gap-2"><Button type="button" onClick={() => void saveAutomation()} className="h-10 flex-1 rounded-xl bg-amber-700 text-xs hover:bg-amber-800">{automation.enabled ? "Save & keep enabled" : "Save settings"}</Button><Button type="button" variant="outline" onClick={() => setAutomation((current) => ({ ...current, enabled: !current.enabled }))} className="h-10 rounded-xl border-white/85 bg-white/65 text-xs">{automation.enabled ? "Pause" : "Enable"}</Button></div>
+            </div>
+            <div className="rounded-2xl border border-white/80 bg-white/45 p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">Temporary AI reviewer</p><p className="mt-1 text-xs text-slate-500">{automation.providerConfigured ? "Provider key is configured." : "Add SAMBANOVA_API_KEY in Environment vars to activate AI review."}</p></div><Badge className={automation.providerConfigured && access.aiEnabled ? "border-0 bg-violet-100/80 text-violet-800" : "border-0 bg-slate-100/80 text-slate-500"}>{automation.providerConfigured && access.aiEnabled ? "Available" : "Waiting"}</Badge></div><p className="mt-4 text-[0.68rem] leading-5 text-slate-500">AI output is saved as a review suggestion in staging. It cannot approve leads, create fabricated PII, or bypass owner review.</p></div>
+          </div>
+          <form onSubmit={queueScrape} className="mt-3 flex flex-col gap-2 sm:flex-row"><Input required type="url" value={queueUrl} onChange={(event) => setQueueUrl(event.target.value)} placeholder="Queue an official public source URL for the next cycle" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /><Button type="submit" disabled={!automation.enabled} className="h-10 gap-2 rounded-xl bg-sky-700 text-xs hover:bg-sky-800"><ListChecks className="size-4" /> Queue source</Button><Button type="button" disabled={!automation.enabled} onClick={() => void runCycle()} variant="outline" className="h-10 gap-2 rounded-xl border-white/85 bg-white/65 text-xs"><Play className="size-4" /> Run now</Button></form>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><p className="text-[0.68rem] text-slate-500">Today: {automation.runsToday} / {automation.dailyRunLimit} cycles · {tasks.filter((task) => task.status === "PENDING").length} pending tasks</p><div className="flex flex-wrap gap-2">{tasks.slice(0, 5).map((task) => <Badge key={task._id} variant="outline" className="border-white/90 bg-white/55 text-[0.65rem] text-slate-600">{task.kind} · {task.status}</Badge>)}</div></div>
         </section>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">

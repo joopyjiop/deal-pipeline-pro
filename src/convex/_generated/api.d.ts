@@ -10,6 +10,7 @@
 
 import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
+import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as leads from "../leads.js";
 import type * as mongodb from "../mongodb.js";
@@ -25,6 +26,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   "auth/emailOtp": typeof auth_emailOtp;
+  crons: typeof crons;
   http: typeof http;
   leads: typeof leads;
   mongodb: typeof mongodb;

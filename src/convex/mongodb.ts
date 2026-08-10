@@ -2,7 +2,8 @@
 
 import { Document, MongoClient, ObjectId } from "mongodb";
 import { v } from "convex/values";
-import { action } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { action, internalAction } from "./_generated/server";
 
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
 const LEADS = "leads";
@@ -11,20 +12,45 @@ const BUYERS = "buyers";
 const MATCHES = "property_matches";
 const IMPORT_STAGING = "import_staging";
 const TOOL_ACCESS = "tool_access";
+const AUTOMATION_TASKS = "automation_tasks";
+
+type AutomationMode = "DETERMINISTIC" | "BOTH";
 
 type ToolAccessDocument = {
   _id: string;
   scraperEnabled?: boolean;
   estimatorEnabled?: boolean;
   aiEnabled?: boolean;
+  automationEnabled?: boolean;
+  automationMode?: AutomationMode;
+  dailyRunLimit?: number;
+  maxTasksPerRun?: number;
+  runsToday?: number;
+  usageDay?: string;
   createdAt?: number;
   updatedAt?: number;
 };
 
 const toolNameValidator = v.union(v.literal("SCRAPER"), v.literal("ESTIMATOR"));
 const repairTierValidator = v.union(v.literal("BASE"), v.literal("MEDIUM"), v.literal("GUT"));
+const automationModeValidator = v.union(v.literal("DETERMINISTIC"), v.literal("BOTH"));
+const automationTaskKindValidator = v.union(v.literal("SCRAPE"), v.literal("ESTIMATE"));
+const automationTaskStatusValidator = v.union(v.literal("PENDING"), v.literal("RUNNING"), v.literal("COMPLETED"), v.literal("FAILED"));
 const estimateCompValidator = v.object({ salePrice: v.number() });
-
+const estimateInputValidator = v.object({
+  leadId: v.optional(v.string()),
+  squareFeet: v.number(),
+  yearBuilt: v.optional(v.number()),
+  repairTier: repairTierValidator,
+  soldComps: v.array(estimateCompValidator),
+  compSourceUrl: v.optional(v.string()),
+  compSourceDate: v.optional(v.string()),
+  targetPct: v.number(),
+  wholesaleFee: v.number(),
+  closingCosts: v.number(),
+  holdingCosts: v.number(),
+  acquisitionPrice: v.optional(v.number()),
+});
 let clientPromise: Promise<MongoClient> | null = null;
 
 const sourceTypeValidator = v.union(
@@ -38,6 +64,13 @@ const sourceTypeValidator = v.union(
   v.literal("MANUAL"),
   v.literal("SEED"),
 );
+
+const automationTaskValidator = v.object({
+  kind: automationTaskKindValidator,
+  url: v.optional(v.string()),
+  sourceType: v.optional(sourceTypeValidator),
+  estimate: v.optional(estimateInputValidator),
+});
 
 const verificationStatusValidator = v.union(
   v.literal("UNVERIFIED"),
@@ -391,6 +424,65 @@ function calculateRepairEstimate(squareFeet: number, tier: "BASE" | "MEDIUM" | "
   return { items, subtotal, contingency, total: subtotal + contingency, ratePerSquareFoot: tierRate * ageAdjustment };
 }
 
+type EstimateInput = {
+  leadId?: string;
+  squareFeet: number;
+  yearBuilt?: number;
+  repairTier: "BASE" | "MEDIUM" | "GUT";
+  soldComps: Array<{ salePrice: number }>;
+  compSourceUrl?: string;
+  compSourceDate?: string;
+  targetPct: number;
+  wholesaleFee: number;
+  closingCosts: number;
+  holdingCosts: number;
+  acquisitionPrice?: number;
+};
+
+function calculateDealEstimate(args: EstimateInput) {
+  if (args.squareFeet <= 0 || args.targetPct <= 0 || args.targetPct > 100) {
+    throw new Error("Square feet and target percentage must be positive; target must be 100 or less");
+  }
+  if ([args.wholesaleFee, args.closingCosts, args.holdingCosts, args.acquisitionPrice].some((value) => value !== undefined && value < 0)) {
+    throw new Error("Deal costs and price cannot be negative");
+  }
+  if (args.soldComps.length > 0 && (!args.compSourceUrl?.trim() || !args.compSourceDate?.trim())) {
+    throw new Error("Sold comps require a source URL and source date");
+  }
+  const compValues = args.soldComps.map((comp) => comp.salePrice).filter((value) => value > 0);
+  const compMedian = median(compValues);
+  const repairs = calculateRepairEstimate(args.squareFeet, args.repairTier, args.yearBuilt);
+  const arv = compMedian === undefined ? undefined : {
+    conservative: Math.round(compMedian * 0.9),
+    median: Math.round(compMedian),
+    aggressive: Math.round(compMedian * 1.1),
+  };
+  const mao = arv === undefined ? undefined : {
+    conservative: Math.round(arv.conservative * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
+    median: Math.round(arv.median * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
+    aggressive: Math.round(arv.aggressive * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
+  };
+  const estimatedProfit = mao && args.acquisitionPrice !== undefined ? mao.median - args.acquisitionPrice : undefined;
+  return {
+    estimateStatus: arv ? "READY" as const : "NEEDS_APPRAISAL" as const,
+    compCount: compValues.length,
+    compMedian,
+    arv,
+    repairs,
+    mao,
+    estimatedProfit,
+    inputs: {
+      targetPct: args.targetPct,
+      wholesaleFee: args.wholesaleFee,
+      closingCosts: args.closingCosts,
+      holdingCosts: args.holdingCosts,
+      repairTier: args.repairTier,
+      compSourceUrl: args.compSourceUrl,
+      compSourceDate: args.compSourceDate,
+    },
+  };
+}
+
 function validateBuyer(buyer: {
   budgetMin: number;
   budgetMax: number;
@@ -530,9 +622,11 @@ export const setToolAccess = action({
     const field = args.tool === "SCRAPER" ? "scraperEnabled" : "estimatorEnabled";
     const update: Record<string, unknown> = { [field]: args.enabled, updatedAt: Date.now() };
     if (args.aiEnabled !== undefined) update.aiEnabled = args.aiEnabled;
+    const setOnInsert: Record<string, unknown> = { scraperEnabled: true, estimatorEnabled: true, aiEnabled: false, createdAt: Date.now() };
+    for (const key of Object.keys(update)) delete setOnInsert[key];
     await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).updateOne(
       { _id: "admin_tools" },
-      { $set: update, $setOnInsert: { scraperEnabled: true, estimatorEnabled: true, aiEnabled: false, createdAt: Date.now() } },
+      { $set: update, $setOnInsert: setOnInsert },
       { upsert: true },
     );
     return { tool: args.tool, enabled: args.enabled, aiEnabled: args.aiEnabled };
@@ -570,6 +664,31 @@ export const getAiToolManifest = action({
   },
 });
 
+type ScrapeInput = { url: string; sourceType: string };
+
+async function fetchAndStageSource(database: Awaited<ReturnType<typeof getDatabase>>, args: ScrapeInput) {
+  const parsedUrl = assertPublicHttpUrl(args.url.trim());
+  const response = await fetch(parsedUrl, { headers: { "user-agent": "Groundwork-source-review/1.0" }, signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new Error(`Source returned HTTP ${response.status}`);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/") && !contentType.includes("json") && !contentType.includes("xml")) {
+    throw new Error("This scraper currently supports text, HTML, XML, and JSON sources");
+  }
+  const body = (await response.text()).slice(0, 1_000_000);
+  const title = decodeHtml(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() ?? parsedUrl.hostname);
+  const excerpt = htmlToText(body).slice(0, 2000);
+  const links = [...body.matchAll(/href=["'](https?:\/\/[^"']+)["']/gi)].map((match) => match[1]).filter(Boolean).slice(0, 20);
+  const fetchedAt = new Date().toISOString();
+  const staged = await database.collection(IMPORT_STAGING).insertOne({
+    sourceType: args.sourceType,
+    rawJson: { url: parsedUrl.toString(), title, excerpt, links, contentType, fetchedAt },
+    status: "NEW",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  return { stagedId: String(staged.insertedId), url: parsedUrl.toString(), title, excerpt, links, contentType, fetchedAt, piiCreated: false };
+}
+
 export const scrapeSource = action({
   args: {
     url: v.string(),
@@ -577,73 +696,189 @@ export const scrapeSource = action({
   },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
-    const access = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    const database = await getDatabase();
+    const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
     if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
-    const parsedUrl = assertPublicHttpUrl(args.url.trim());
-    const response = await fetch(parsedUrl, { headers: { "user-agent": "Groundwork-source-review/1.0" }, signal: AbortSignal.timeout(15000) });
-    if (!response.ok) throw new Error(`Source returned HTTP ${response.status}`);
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/") && !contentType.includes("json") && !contentType.includes("xml")) {
-      throw new Error("This scraper currently supports text, HTML, XML, and JSON sources");
-    }
-    const body = (await response.text()).slice(0, 1_000_000);
-    const title = decodeHtml(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() ?? parsedUrl.hostname);
-    const excerpt = htmlToText(body).slice(0, 2000);
-    const links = [...body.matchAll(/href=["'](https?:\/\/[^"']+)["']/gi)].map((match) => match[1]).filter(Boolean).slice(0, 20);
-    const fetchedAt = new Date().toISOString();
-    const staged = await (await getDatabase()).collection(IMPORT_STAGING).insertOne({
-      sourceType: args.sourceType,
-      rawJson: { url: parsedUrl.toString(), title, excerpt, links, contentType, fetchedAt },
-      status: "NEW",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    return { stagedId: String(staged.insertedId), url: parsedUrl.toString(), title, excerpt, links, contentType, fetchedAt, piiCreated: false };
+    return fetchAndStageSource(database, args);
   },
 });
 
-export const estimateDeal = action({
-  args: {
-    leadId: v.optional(v.string()),
-    squareFeet: v.number(),
-    yearBuilt: v.optional(v.number()),
-    repairTier: repairTierValidator,
-    soldComps: v.array(estimateCompValidator),
-    compSourceUrl: v.optional(v.string()),
-    compSourceDate: v.optional(v.string()),
-    targetPct: v.number(),
-    wholesaleFee: v.number(),
-    closingCosts: v.number(),
-    holdingCosts: v.number(),
-    acquisitionPrice: v.optional(v.number()),
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function automationSettings(document: ToolAccessDocument | null) {
+  const usageDay = document?.usageDay === todayKey() ? document : null;
+  return {
+    enabled: document?.automationEnabled === true,
+    mode: document?.automationMode ?? "BOTH" as AutomationMode,
+    dailyRunLimit: Math.max(1, Math.min(1000, document?.dailyRunLimit ?? 24)),
+    maxTasksPerRun: Math.max(1, Math.min(20, document?.maxTasksPerRun ?? 5)),
+    runsToday: usageDay?.runsToday ?? 0,
+    aiEnabled: document?.aiEnabled === true,
+  };
+}
+
+async function reviewStagedSourceWithAi(source: { title: string; excerpt: string; url: string }) {
+  const apiKey = process.env.SAMBANOVA_API_KEY;
+  if (!apiKey) return { status: "SKIPPED_MISSING_KEY" as const };
+  const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: process.env.SAMBANOVA_MODEL ?? "Meta-Llama-3.3-70B-Instruct",
+      temperature: 0,
+      max_tokens: 1200,
+      response_format: { type: "json_object" },
+      messages: [{
+        role: "user",
+        content: `Review this public source excerpt for a real-estate owner. Return JSON only with keys: facts, distressSignals, candidateComps, warnings. Use only facts explicitly present in the excerpt. Never invent a person, address, phone, email, parcel, sale amount, comp, or distress fact. Every candidate comp must include its exact quoted evidence and the source URL. This is a review suggestion only, not an approved lead.\n\nSOURCE URL: ${source.url}\nTITLE: ${source.title}\nEXCERPT: ${source.excerpt.slice(0, 6000)}`,
+      }],
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!response.ok) return { status: "FAILED" as const, error: "Temporary AI review request failed" };
+  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+  const content = payload.choices?.[0]?.message?.content?.trim();
+  if (!content) return { status: "FAILED" as const, error: "Temporary AI review returned no content" };
+  try {
+    return { status: "COMPLETED" as const, review: JSON.parse(content) as Record<string, unknown> };
+  } catch {
+    return { status: "FAILED" as const, error: "Temporary AI review returned invalid JSON" };
+  }
+}
+
+async function runAutomationCycleImpl() {
+  const database = await getDatabase();
+  const accessDocument = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+  const settings = automationSettings(accessDocument);
+  if (!settings.enabled) return { status: "PAUSED" as const, processed: 0, remaining: 0, ai: "not-run" as const };
+  if (settings.runsToday >= settings.dailyRunLimit) return { status: "LIMIT_REACHED" as const, processed: 0, remaining: 0, ai: "not-run" as const };
+
+  const tasks = await database.collection(AUTOMATION_TASKS).find({ status: "PENDING" }).sort({ createdAt: 1 }).limit(settings.maxTasksPerRun).toArray();
+  let processed = 0;
+  let failed = 0;
+  let aiCompleted = 0;
+  for (const task of tasks) {
+    await database.collection(AUTOMATION_TASKS).updateOne({ _id: task._id }, { $set: { status: "RUNNING", startedAt: Date.now(), updatedAt: Date.now() } });
+    try {
+      let result: Record<string, unknown>;
+      if (task.kind === "SCRAPE") {
+        if (typeof task.url !== "string" || typeof task.sourceType !== "string") throw new Error("Scrape task is missing its URL or source type");
+        const staged = await fetchAndStageSource(database, { url: task.url, sourceType: task.sourceType });
+        let aiResult: Record<string, unknown> = { status: "NOT_REQUESTED" };
+        if (settings.mode === "BOTH") {
+          if (!settings.aiEnabled) aiResult = { status: "SKIPPED_AI_ACCESS_DISABLED" };
+          else {
+            const review = await reviewStagedSourceWithAi(staged);
+            aiResult = review;
+            if (review.status === "COMPLETED") aiCompleted += 1;
+            await database.collection(IMPORT_STAGING).updateOne({ _id: objectId(staged.stagedId) }, { $set: { aiReview: review, updatedAt: Date.now() } });
+          }
+        }
+        result = { kind: "SCRAPE", stagedId: staged.stagedId, sourceUrl: staged.url, ai: aiResult, piiCreated: false };
+      } else {
+        if (!task.estimate || typeof task.estimate !== "object") throw new Error("Estimate task is missing its explicit inputs");
+        result = { kind: "ESTIMATE", estimate: calculateDealEstimate(task.estimate as EstimateInput) };
+      }
+      await database.collection(AUTOMATION_TASKS).updateOne({ _id: task._id }, { $set: { status: "COMPLETED", result, completedAt: Date.now(), updatedAt: Date.now() } });
+      processed += 1;
+    } catch (error) {
+      failed += 1;
+      await database.collection(AUTOMATION_TASKS).updateOne({ _id: task._id }, { $set: { status: "FAILED", error: error instanceof Error ? error.message : "Automation task failed", completedAt: Date.now(), updatedAt: Date.now() } });
+    }
+  }
+  const nextRunsToday = settings.runsToday + 1;
+  await database.collection<ToolAccessDocument>(TOOL_ACCESS).updateOne(
+    { _id: "admin_tools" },
+    { $set: { runsToday: nextRunsToday, usageDay: todayKey(), updatedAt: Date.now() }, $setOnInsert: { automationMode: "BOTH", automationEnabled: false } },
+    { upsert: true },
+  );
+  const remaining = await database.collection(AUTOMATION_TASKS).countDocuments({ status: "PENDING" });
+  return { status: "COMPLETED" as const, processed, failed, remaining, ai: settings.mode === "BOTH" ? { completed: aiCompleted, configured: Boolean(process.env.SAMBANOVA_API_KEY) && settings.aiEnabled } : "not-requested" as const };
+}
+
+export const getAutomationConfig = action({
+  args: {},
+  handler: async (ctx) => {
+    await requireOwner(ctx);
+    const document = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    const settings = automationSettings(document);
+    return { ...settings, providerConfigured: Boolean(process.env.SAMBANOVA_API_KEY) };
   },
+});
+
+export const setAutomationConfig = action({
+  args: {
+    enabled: v.boolean(),
+    mode: automationModeValidator,
+    dailyRunLimit: v.number(),
+    maxTasksPerRun: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    if (args.dailyRunLimit < 1 || args.dailyRunLimit > 1000 || args.maxTasksPerRun < 1 || args.maxTasksPerRun > 20) {
+      throw new Error("Automation limits must be within the allowed range");
+    }
+    await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).updateOne(
+      { _id: "admin_tools" },
+      { $set: { automationEnabled: args.enabled, automationMode: args.mode, dailyRunLimit: args.dailyRunLimit, maxTasksPerRun: args.maxTasksPerRun, updatedAt: Date.now() }, $setOnInsert: { scraperEnabled: true, estimatorEnabled: true, aiEnabled: false, createdAt: Date.now() } },
+      { upsert: true },
+    );
+    return { ...args, providerConfigured: Boolean(process.env.SAMBANOVA_API_KEY) };
+  },
+});
+
+export const enqueueAutomationTask = action({
+  args: { task: automationTaskValidator },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    if (args.task.kind === "SCRAPE") {
+      if (!args.task.url?.trim() || !args.task.sourceType) throw new Error("Scrape tasks require a URL and source type");
+      assertPublicHttpUrl(args.task.url.trim());
+    }
+    if (args.task.kind === "ESTIMATE" && !args.task.estimate) throw new Error("Estimate tasks require explicit estimator inputs");
+    const now = Date.now();
+    const result = await (await getDatabase()).collection(AUTOMATION_TASKS).insertOne({ ...args.task, status: "PENDING", createdAt: now, updatedAt: now });
+    return { id: String(result.insertedId), status: "PENDING" as const };
+  },
+});
+
+export const listAutomationTasks = action({
+  args: { status: v.optional(automationTaskStatusValidator) },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const filter = args.status ? { status: args.status } : {};
+    const documents = await (await getDatabase()).collection(AUTOMATION_TASKS).find(filter).sort({ createdAt: -1 }).limit(100).toArray();
+    return documents.map(serialize);
+  },
+});
+
+export const runAutomationNow = action({
+  args: {},
+  handler: async (ctx): Promise<unknown> => {
+    await requireOwner(ctx);
+    return ctx.runAction(internal.mongodb.runAutomationCycle, {});
+  },
+});
+
+export const runAutomationCycle = internalAction({
+  args: {},
+  handler: async () => runAutomationCycleImpl(),
+});
+
+export const estimateDeal = action({
+  args: estimateInputValidator,
   handler: async (ctx, args) => {
     await requireOwner(ctx);
     const access = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
     if (access?.estimatorEnabled === false) throw new Error("The estimator tool is disabled in Tool access settings");
-    if (args.squareFeet <= 0 || args.targetPct <= 0 || args.targetPct > 100) throw new Error("Square feet and target percentage must be positive; target must be 100 or less");
-    if ([args.wholesaleFee, args.closingCosts, args.holdingCosts, args.acquisitionPrice].some((value) => value !== undefined && value < 0)) throw new Error("Deal costs and price cannot be negative");
-    if (args.soldComps.length > 0 && (!args.compSourceUrl?.trim() || !args.compSourceDate?.trim())) throw new Error("Sold comps require a source URL and source date");
-    const compValues = args.soldComps.map((comp) => comp.salePrice).filter((value) => value > 0);
-    const compMedian = median(compValues);
-    const repairs = calculateRepairEstimate(args.squareFeet, args.repairTier, args.yearBuilt);
-    const arv = compMedian === undefined ? undefined : {
-      conservative: Math.round(compMedian * 0.9),
-      median: Math.round(compMedian),
-      aggressive: Math.round(compMedian * 1.1),
-    };
-    const mao = arv === undefined ? undefined : {
-      conservative: Math.round(arv.conservative * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
-      median: Math.round(arv.median * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
-      aggressive: Math.round(arv.aggressive * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
-    };
-    const estimatedProfit = mao && args.acquisitionPrice !== undefined ? mao.median - args.acquisitionPrice : undefined;
-    const result = { estimateStatus: arv ? "READY" as const : "NEEDS_APPRAISAL" as const, compCount: compValues.length, compMedian, arv, repairs, mao, estimatedProfit, inputs: { targetPct: args.targetPct, wholesaleFee: args.wholesaleFee, closingCosts: args.closingCosts, holdingCosts: args.holdingCosts, repairTier: args.repairTier, compSourceUrl: args.compSourceUrl, compSourceDate: args.compSourceDate } };
+    const result = calculateDealEstimate(args);
     if (args.leadId) {
       const database = await getDatabase();
       const lead = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
       if (!lead) throw new Error("Lead not found");
-      await database.collection(LEADS).updateOne({ _id: lead._id }, { $set: withoutUndefined({ arv: arv?.median, repairs: repairs.total, mao: mao?.median, acquisitionPrice: args.acquisitionPrice, estimatedProfit, underwriting: result, updatedAt: Date.now() }) });
+      await database.collection(LEADS).updateOne({ _id: lead._id }, { $set: withoutUndefined({ arv: result.arv?.median, repairs: result.repairs.total, mao: result.mao?.median, acquisitionPrice: args.acquisitionPrice, estimatedProfit: result.estimatedProfit, underwriting: result, updatedAt: Date.now() }) });
     }
     return result;
   },

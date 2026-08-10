@@ -917,6 +917,54 @@ export const scrapeSource = action({
   },
 });
 
+// These internal wrappers are reachable only through the authenticated MCP HTTP route.
+// They intentionally do not expose MongoDB or any approval/write action to the external agent.
+export const mcpScrapeSource = internalAction({
+  args: {
+    url: v.string(),
+    sourceType: sourceTypeValidator,
+  },
+  handler: async (_, args) => {
+    if (args.sourceType === "SEED" || args.sourceType === "MANUAL") {
+      throw new Error("MCP source staging requires a public, attributable source type");
+    }
+    const database = await getDatabase();
+    const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
+    return fetchAndStageSource(database, args);
+  },
+});
+
+export const mcpEstimateDeal = internalAction({
+  args: estimateInputValidator,
+  handler: async (_, args) => {
+    const access = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.estimatorEnabled === false) throw new Error("The estimator tool is disabled in Tool access settings");
+    return calculateDealEstimate(args);
+  },
+});
+
+export const mcpRunConsultantCourt = internalAction({
+  args: { stagedId: v.string() },
+  handler: async (_, args) => {
+    const database = await getDatabase();
+    const stagingId = objectId(args.stagedId);
+    const staging = await database.collection(IMPORT_STAGING).findOne({ _id: stagingId });
+    if (!staging) throw new Error("Staged source not found");
+    const raw = staging.rawJson && typeof staging.rawJson === "object" ? staging.rawJson as Record<string, unknown> : {};
+    const verdict = await runAiConsultantCourt({
+      url: typeof raw.url === "string" ? raw.url : "",
+      title: typeof raw.title === "string" ? raw.title : "Sourced deal",
+      excerpt: typeof raw.excerpt === "string" ? raw.excerpt : "",
+    });
+    await database.collection(IMPORT_STAGING).updateOne({ _id: stagingId }, { $set: { aiCourtVerdict: verdict, updatedAt: Date.now() } });
+    if (staging.candidateLeadId) {
+      await database.collection(LEADS).updateOne({ _id: staging.candidateLeadId }, { $set: { aiCourtVerdict: verdict, updatedAt: Date.now() } });
+    }
+    return verdict;
+  },
+});
+
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }

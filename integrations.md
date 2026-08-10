@@ -185,3 +185,24 @@ To activate the court, add this server-only Convex variable:
 - `SAMBANOVA_MODEL` — optional; defaults to `Meta-Llama-3.3-70B-Instruct`.
 
 The court makes four model calls per reviewed source, in parallel for the three consultants and then one judge call. This does not consume n8n executions; it uses the configured AI provider instead. If the key is missing, the candidate stays unapproved and the Toolkit reports that the court is waiting for setup.
+
+## Odyssey MCP Tool Server
+
+The app now exposes a protected remote MCP endpoint for an external AI agent such as Odyssey:
+
+- Endpoint: `https://YOUR_CONVEX_DEPLOYMENT.convex.site/api/mcp`
+- Transport: Streamable HTTP
+- Authentication: `Authorization: Bearer <MCP_TOOL_SERVER_SECRET>`
+- Convex environment variable: `MCP_TOOL_SERVER_SECRET`
+
+Generate a new long random secret and add it in the Convex Environment vars panel. Do not reuse `MONGODB_URI`, `SAMBANOVA_API_KEY`, or the n8n secret, and do not put any of them in Odyssey.
+
+In Odyssey's **Settings → Integrations → MCP Tool Server** form, enter the endpoint above, choose Streamable HTTP if asked, and set the bearer/API-key secret to the exact value of `MCP_TOOL_SERVER_SECRET`. The server supports `initialize`, `tools/list`, and `tools/call`.
+
+The connected agent can call only:
+
+1. `scrape_source` — fetch a public, attributable URL and stage bounded evidence.
+2. `estimate_deal` — calculate ARV, repairs, MAO, and estimated spread from explicit inputs.
+3. `consultant_court` — run the evidence, underwriting, risk/compliance, and judge review for a staged source.
+
+It cannot access MongoDB directly, approve or reject leads, export data, dial anyone, run n8n, or bypass owner review. Candidate approval remains a human owner action in `/operations`. If the MCP secret is missing or wrong, the endpoint returns `401` and does not run a tool.

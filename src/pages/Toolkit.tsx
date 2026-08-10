@@ -39,6 +39,7 @@ type AutomationConfig = {
   runsToday: number;
   aiEnabled: boolean;
   providerConfigured: boolean;
+  n8nSecretConfigured: boolean;
 };
 
 type AutomationTask = {
@@ -116,7 +117,7 @@ export default function Toolkit() {
   const estimateDeal = useAction(api.mongodb.estimateDeal);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
-  const [automation, setAutomation] = useState<AutomationConfig>({ enabled: false, mode: "BOTH", dailyRunLimit: 24, maxTasksPerRun: 5, runsToday: 0, aiEnabled: false, providerConfigured: false });
+  const [automation, setAutomation] = useState<AutomationConfig>({ enabled: false, mode: "BOTH", dailyRunLimit: 24, maxTasksPerRun: 5, runsToday: 0, aiEnabled: false, providerConfigured: false, n8nSecretConfigured: false });
   const [tasks, setTasks] = useState<AutomationTask[]>([]);
   const [manifest, setManifest] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
@@ -351,6 +352,7 @@ export default function Toolkit() {
           </div>
           <form onSubmit={queueScrape} className="mt-3 flex flex-col gap-2 sm:flex-row"><Input required type="url" value={queueUrl} onChange={(event) => setQueueUrl(event.target.value)} placeholder="Queue an official public source URL for the next cycle" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /><Button type="submit" disabled={!automation.enabled} className="h-10 gap-2 rounded-xl bg-sky-700 text-xs hover:bg-sky-800"><ListChecks className="size-4" /> Queue source</Button><Button type="button" disabled={!automation.enabled} onClick={() => void runCycle()} variant="outline" className="h-10 gap-2 rounded-xl border-white/85 bg-white/65 text-xs"><Play className="size-4" /> Run now</Button></form>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><p className="text-[0.68rem] text-slate-500">Today: {automation.runsToday} / {automation.dailyRunLimit} cycles · {tasks.filter((task) => task.status === "PENDING").length} pending tasks</p><div className="flex flex-wrap gap-2">{tasks.slice(0, 5).map((task) => <Badge key={task._id} variant="outline" className="border-white/90 bg-white/55 text-[0.65rem] text-slate-600">{task.kind} · {task.status}</Badge>)}</div></div>
+          <div className="mt-4 rounded-2xl border border-sky-100/80 bg-sky-50/45 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">n8n scheduler handoff</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">n8n can schedule source URLs and retry this queue endpoint. Convex still validates the URL, fetches bounded evidence, writes Mongo staging, and keeps every candidate in owner review.</p></div><Badge className={automation.n8nSecretConfigured ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-amber-100/80 text-amber-800"}>{automation.n8nSecretConfigured ? "Connected" : "Needs secret"}</Badge></div><div className="mt-3 grid gap-2 text-[0.68rem] leading-5 text-slate-500 sm:grid-cols-3"><p><strong className="text-slate-700">Endpoint</strong><br />your Convex site URL + <code>/api/n8n/source</code></p><p><strong className="text-slate-700">Header</strong><br /><code>x-convex-n8n-secret</code></p><p><strong className="text-slate-700">Body</strong><br /><code>{"{ url, sourceType, idempotencyKey? }"}</code></p></div><p className="mt-3 text-[0.68rem] text-slate-500">Add <code>CONVEX_N8N_WEBHOOK_SECRET</code> in the Convex Environment vars panel, then store the same value as an n8n secret. Do not put it in browser code.</p></div>
         </section>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">

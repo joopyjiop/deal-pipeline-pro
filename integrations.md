@@ -140,3 +140,30 @@ if (!hasIntegration) {
   console.error("VLY integration key not found");
 }
 ```
+
+## n8n source-ingestion handoff
+
+n8n is used as the scheduler and retry layer; Convex remains the security boundary and MongoDB remains the source of truth. n8n does not receive or store `MONGODB_URI`, cannot approve leads, and cannot write directly to MongoDB.
+
+### Convex environment variable
+
+Add this server-only variable in the Convex Environment vars panel:
+
+- `CONVEX_N8N_WEBHOOK_SECRET` — generate a long random secret and keep it private.
+
+The existing `MONGODB_URI` remains server-only and is not needed in n8n.
+
+### n8n workflow
+
+1. Add a **Schedule Trigger** node and choose the polling interval.
+2. Provide a list of public source URLs and source types, for example `AUCTION_COM`, `PROBATE`, `OFF_MARKET`, `SHERIFF_SALE`, or `TAX_SALE`.
+3. Add an **HTTP Request** node configured as:
+   - Method: `POST`
+   - URL: `https://YOUR_CONVEX_DEPLOYMENT.convex.site/api/n8n/source`
+   - Header: `x-convex-n8n-secret` with the same value as `CONVEX_N8N_WEBHOOK_SECRET`
+   - Header: `content-type: application/json`
+   - JSON body: `{ "url": "{{$json.url}}", "sourceType": "{{$json.sourceType}}", "idempotencyKey": "{{$json.sourceType}}:{{$json.url}}" }`
+4. Publish the workflow. A successful response is `202` with a queued task ID.
+5. Leave the existing Convex automation cycle enabled in `/toolkit`; it fetches, stages, qualifies, and records the result.
+
+The endpoint accepts only the supported source types and public URLs, deduplicates retries, and never promotes a candidate past `SOURCED`. Review and approval still happen in `/operations`. The UI refreshes on demand because MongoDB changes are not reactive Convex subscriptions.

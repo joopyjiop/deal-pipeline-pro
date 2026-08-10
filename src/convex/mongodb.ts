@@ -986,7 +986,55 @@ export const getAutomationConfig = action({
     await requireOwner(ctx);
     const document = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
     const settings = automationSettings(document);
-    return { ...settings, providerConfigured: Boolean(process.env.SAMBANOVA_API_KEY) };
+    return {
+      ...settings,
+      providerConfigured: Boolean(process.env.SAMBANOVA_API_KEY),
+      n8nSecretConfigured: Boolean(process.env.CONVEX_N8N_WEBHOOK_SECRET),
+    };
+  },
+});
+
+async function enqueueSourceTask(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  url: string,
+  sourceType: string,
+  idempotencyKey?: string,
+) {
+  if (!url.trim() || !sourceType || sourceType === "SEED" || sourceType === "MANUAL") {
+    throw new Error("n8n source tasks require a non-seed public source type and URL");
+  }
+  const parsedUrl = assertPublicHttpUrl(url.trim());
+  assertAuctionComSourceUrl(parsedUrl, sourceType);
+  const normalizedUrl = parsedUrl.toString();
+  const duplicate = await database.collection(AUTOMATION_TASKS).findOne(
+    idempotencyKey
+      ? { kind: "SCRAPE", idempotencyKey }
+      : { kind: "SCRAPE", url: normalizedUrl, sourceType, status: { $in: ["PENDING", "RUNNING"] } },
+  );
+  if (duplicate) {
+    return { id: String(duplicate._id), status: "PENDING" as const, deduplicated: true };
+  }
+  const now = Date.now();
+  const result = await database.collection(AUTOMATION_TASKS).insertOne({
+    kind: "SCRAPE",
+    url: normalizedUrl,
+    sourceType,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+    status: "PENDING",
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id: String(result.insertedId), status: "PENDING" as const, deduplicated: false };
+}
+
+export const enqueueN8nSource = internalAction({
+  args: {
+    url: v.string(),
+    sourceType: sourceTypeValidator,
+    idempotencyKey: v.optional(v.string()),
+  },
+  handler: async (_, args) => {
+    return enqueueSourceTask(await getDatabase(), args.url, args.sourceType, args.idempotencyKey?.trim() || undefined);
   },
 });
 
@@ -1007,7 +1055,11 @@ export const setAutomationConfig = action({
       { $set: { automationEnabled: args.enabled, automationMode: args.mode, dailyRunLimit: args.dailyRunLimit, maxTasksPerRun: args.maxTasksPerRun, updatedAt: Date.now() }, $setOnInsert: { scraperEnabled: true, estimatorEnabled: true, aiEnabled: false, createdAt: Date.now() } },
       { upsert: true },
     );
-    return { ...args, providerConfigured: Boolean(process.env.SAMBANOVA_API_KEY) };
+    return {
+      ...args,
+      providerConfigured: Boolean(process.env.SAMBANOVA_API_KEY),
+      n8nSecretConfigured: Boolean(process.env.CONVEX_N8N_WEBHOOK_SECRET),
+    };
   },
 });
 
@@ -1017,10 +1069,9 @@ export const enqueueAutomationTask = action({
     await requireOwner(ctx);
     if (args.task.kind === "SCRAPE") {
       if (!args.task.url?.trim() || !args.task.sourceType) throw new Error("Scrape tasks require a URL and source type");
-      const parsedUrl = assertPublicHttpUrl(args.task.url.trim());
-      assertAuctionComSourceUrl(parsedUrl, args.task.sourceType);
+      return enqueueSourceTask(await getDatabase(), args.task.url, args.task.sourceType);
     }
-    if (args.task.kind === "ESTIMATE" && !args.task.estimate) throw new Error("Estimate tasks require explicit estimator inputs");
+    if (!args.task.estimate) throw new Error("Estimate tasks require explicit estimator inputs");
     const now = Date.now();
     const result = await (await getDatabase()).collection(AUTOMATION_TASKS).insertOne({ ...args.task, status: "PENDING", createdAt: now, updatedAt: now });
     return { id: String(result.insertedId), status: "PENDING" as const };

@@ -56,6 +56,7 @@ let clientPromise: Promise<MongoClient> | null = null;
 const sourceTypeValidator = v.union(
   v.literal("SHERIFF_SALE"),
   v.literal("TAX_SALE"),
+  v.literal("AUCTION_COM"),
   v.literal("ASSESSOR"),
   v.literal("RECORDER"),
   v.literal("PROPSTREAM"),
@@ -376,6 +377,14 @@ function assertPublicHttpUrl(value: string) {
   return parsed;
 }
 
+function assertAuctionComSourceUrl(parsed: URL, sourceType: string) {
+  if (sourceType !== "AUCTION_COM") return;
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname !== "auction.com" && !hostname.endsWith(".auction.com")) {
+    throw new Error("Auction.com sources must use a public auction.com URL");
+  }
+}
+
 function decodeHtml(value: string) {
   return value
     .replace(/&nbsp;/gi, " ")
@@ -668,20 +677,27 @@ type ScrapeInput = { url: string; sourceType: string };
 
 async function fetchAndStageSource(database: Awaited<ReturnType<typeof getDatabase>>, args: ScrapeInput) {
   const parsedUrl = assertPublicHttpUrl(args.url.trim());
-  const response = await fetch(parsedUrl, { headers: { "user-agent": "Groundwork-source-review/1.0" }, signal: AbortSignal.timeout(15000) });
-  if (!response.ok) throw new Error(`Source returned HTTP ${response.status}`);
+  assertAuctionComSourceUrl(parsedUrl, args.sourceType);
+  const response = await fetch(parsedUrl, { headers: { "user-agent": "Groundwork-source-review/1.0 (+public-source-review)" }, signal: AbortSignal.timeout(15000) });
+  if (!response.ok) {
+    if (response.status === 403 || response.status === 429) {
+      throw new Error(`Source declined automated access (HTTP ${response.status}); no login, CAPTCHA, or rate-limit bypass is attempted`);
+    }
+    throw new Error(`Source returned HTTP ${response.status}`);
+  }
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/") && !contentType.includes("json") && !contentType.includes("xml")) {
     throw new Error("This scraper currently supports text, HTML, XML, and JSON sources");
   }
   const body = (await response.text()).slice(0, 1_000_000);
   const title = decodeHtml(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() ?? parsedUrl.hostname);
-  const excerpt = htmlToText(body).slice(0, 2000);
+  const evidenceText = htmlToText(body).slice(0, 8000);
+  const excerpt = evidenceText.slice(0, 2000);
   const links = [...body.matchAll(/href=["'](https?:\/\/[^"']+)["']/gi)].map((match) => match[1]).filter(Boolean).slice(0, 20);
   const fetchedAt = new Date().toISOString();
   const staged = await database.collection(IMPORT_STAGING).insertOne({
     sourceType: args.sourceType,
-    rawJson: { url: parsedUrl.toString(), title, excerpt, links, contentType, fetchedAt },
+    rawJson: { url: parsedUrl.toString(), title, excerpt: evidenceText, links, contentType, fetchedAt },
     status: "NEW",
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -721,25 +737,29 @@ function extractSourcedCandidate(staged: Document): SourcedCandidate | { reason:
   const raw = staged.rawJson && typeof staged.rawJson === "object" ? staged.rawJson as Record<string, unknown> : {};
   const sourceUrl = typeof raw.url === "string" ? raw.url : "";
   const excerpt = typeof raw.excerpt === "string" ? raw.excerpt : "";
-  const text = excerpt.replace(/\\s+/g, " ").trim();
-  const addressMatch = text.match(/\\b\\d{1,6}\\s+[A-Za-z0-9.'#-]+(?:\\s+[A-Za-z0-9.'#-]+){0,8}\\s+(?:ST|STREET|AVE|AVENUE|RD|ROAD|DR|DRIVE|LN|LANE|BLVD|BOULEVARD|CT|COURT|PL|PLACE|WAY|PKWY|PARKWAY)\\b(?:\\s+(?:APT|UNIT|#)\\s*[A-Za-z0-9-]+)?/i);
-  const locationMatch = text.match(/([A-Za-z][A-Za-z .'-]{1,40}),\\s*([A-Z]{2})\\s+(\\d{5}(?:-\\d{4})?)/i);
-  const countyMatch = text.match(/\\b([A-Za-z][A-Za-z .'-]{1,40})\\s+County\\b/i);
-  const referenceMatch = text.match(/\\b(?:case|parcel|sale|docket|reference|ref)\\s*(?:number|no\\.?|#|id)?\\s*[:#-]?\\s*([A-Z0-9][A-Z0-9./-]{2,})/i);
-  const dateMatch = text.match(/\\b(20\\d{2}[-/]\\d{1,2}[-/]\\d{1,2}|\\d{1,2}[-/]\\d{1,2}[-/]20\\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+\\d{1,2},?\\s+20\\d{2})\\b/i);
+  const text = excerpt.replace(/\s+/g, " ").trim();
+  const addressMatch = text.match(/\b\d{1,6}\s+[A-Za-z0-9.'#-]+(?:\s+[A-Za-z0-9.'#-]+){0,8}\s+(?:ST|STREET|AVE|AVENUE|RD|ROAD|DR|DRIVE|LN|LANE|BLVD|BOULEVARD|CT|COURT|PL|PLACE|WAY|PKWY|PARKWAY)\b(?:\s+(?:APT|UNIT|#)\s*[A-Za-z0-9-]+)?/i);
+  const locationMatch = text.match(/([A-Za-z][A-Za-z .'-]{1,40}),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/i);
+  const countyMatch = text.match(/\b([A-Za-z][A-Za-z .'-]{1,40})\s+County\b/i);
+  const referenceMatch = text.match(/\b(?:case|parcel|sale|docket|reference|ref)\s*(?:number|no\.?|#|id)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9./-]{2,})/i);
+  const auctionListingId = sourceType === "AUCTION_COM" ? sourceUrl.match(/(?:-|\/)(\d{5,})(?:[/?#]|$)/i)?.[1] : undefined;
+  const sourceReference = referenceMatch?.[1] ?? auctionListingId;
+  const dateMatch = text.match(/\b(20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]20\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+20\d{2})\b/i);
   const sourceDate = dateMatch ? normalizeSourceDate(dateMatch[1]) : undefined;
   if (!sourceUrl || !sourceType) return { reason: "The staged record is missing its source URL or source type" };
   if (!addressMatch) return { reason: "No explicit property address was found in the source excerpt" };
   if (!locationMatch) return { reason: "No explicit city, state, and ZIP were found in the source excerpt" };
   if (!countyMatch) return { reason: "No explicit county was found in the source excerpt" };
-  if (!referenceMatch) return { reason: "No explicit case, parcel, sale, docket, or reference number was found" };
+  if (!sourceReference) return { reason: "No explicit case, parcel, sale, docket, reference number, or Auction.com listing ID was found" };
   if (!sourceDate) return { reason: "No explicit sale or record date was found in the source excerpt" };
 
   const signal = sourceType === "TAX_SALE"
     ? { type: "TAX_DELINQUENT", weight: 25 }
     : sourceType === "SHERIFF_SALE"
       ? { type: "PRE_FORECLOSURE", weight: 30 }
-      : { type: "PUBLIC_RECORD_DISTRESS", weight: 15 };
+      : sourceType === "AUCTION_COM"
+        ? { type: "AUCTION_LISTING", weight: 15 }
+        : { type: "PUBLIC_RECORD_DISTRESS", weight: 15 };
   return {
     propertyAddress: addressMatch[0].trim(),
     city: locationMatch[1].trim(),
@@ -748,7 +768,7 @@ function extractSourcedCandidate(staged: Document): SourcedCandidate | { reason:
     county: countyMatch[1].trim(),
     sourceType,
     sourceUrl,
-    sourceRef: referenceMatch[1],
+    sourceRef: sourceReference,
     sourceDate,
     distressScore: signal.weight,
     distressSignals: [{
@@ -991,7 +1011,8 @@ export const enqueueAutomationTask = action({
     await requireOwner(ctx);
     if (args.task.kind === "SCRAPE") {
       if (!args.task.url?.trim() || !args.task.sourceType) throw new Error("Scrape tasks require a URL and source type");
-      assertPublicHttpUrl(args.task.url.trim());
+      const parsedUrl = assertPublicHttpUrl(args.task.url.trim());
+      assertAuctionComSourceUrl(parsedUrl, args.task.sourceType);
     }
     if (args.task.kind === "ESTIMATE" && !args.task.estimate) throw new Error("Estimate tasks require explicit estimator inputs");
     const now = Date.now();

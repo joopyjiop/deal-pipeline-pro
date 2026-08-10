@@ -74,6 +74,7 @@ type EstimateResult = {
 const sourceTypes = [
   ["SHERIFF_SALE", "Sheriff sale"],
   ["TAX_SALE", "Tax sale"],
+  ["AUCTION_COM", "Auction.com public listing"],
   ["ASSESSOR", "Assessor"],
   ["RECORDER", "Recorder"],
   ["MANUAL", "Manual source"],
@@ -334,7 +335,7 @@ export default function Toolkit() {
 
         <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-100/80 text-amber-700"><ListChecks className="size-5" /></div><div><p className="eyebrow">Managed automation</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Queue work for both modes</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Convex runs the schedule, MongoDB stores the queue and results, and the temporary AI reviewer only adds bounded review suggestions. The hourly cycle stays paused until you enable it.</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-100/80 text-amber-700"><ListChecks className="size-5" /></div><div><p className="eyebrow">Managed automation</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Queue work for both modes</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Convex runs the schedule, MongoDB stores the queue and results, and the temporary AI reviewer only adds bounded review suggestions. Auction.com public listing pages are supported; login, CAPTCHA, and blocked requests are never bypassed. The hourly cycle stays paused until you enable it.</p></div></div>
             <Badge className={automation.enabled ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-slate-100/80 text-slate-600"}>{automation.enabled ? "Running when queued" : "Paused"}</Badge>
           </div>
           <div className="mt-5 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
@@ -352,7 +353,7 @@ export default function Toolkit() {
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
           <section className="glass-panel rounded-[1.75rem] p-5 sm:p-6">
-            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700"><FileSearch className="size-5" /></div><div><p className="eyebrow">Source scraper</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Fetch evidence for review</h2><p className="mt-1 text-xs leading-5 text-slate-500">Fetches a bounded preview and stages it in MongoDB. It never turns page text into a lead or invents PII.</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700"><FileSearch className="size-5" /></div><div><p className="eyebrow">Source scraper</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Fetch evidence for review</h2><p className="mt-1 text-xs leading-5 text-slate-500">Fetches a bounded preview from an allowed public page and stages it in MongoDB. Auction.com detail URLs work when the page exposes the address, location, county, date, and listing ID. It never turns page text into a lead or invents PII.</p></div></div>
             <form onSubmit={handleScrape} className="mt-5 grid gap-3">
               <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Public source URL</span><Input required type="url" value={scrapeForm.url} onChange={(event) => setScrapeForm((current) => ({ ...current, url: event.target.value }))} placeholder="https://county.gov/official-sale-list" className="h-11 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
               <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Source type</span><select value={scrapeForm.sourceType} onChange={(event) => setScrapeForm((current) => ({ ...current, sourceType: event.target.value as (typeof sourceTypes)[number][0] }))} className="h-11 rounded-xl border border-white/85 bg-white/70 px-3 text-sm text-slate-700 outline-none">{sourceTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>

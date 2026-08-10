@@ -155,15 +155,15 @@ The existing `MONGODB_URI` remains server-only and is not needed in n8n.
 
 ### n8n workflow
 
-1. Add a **Schedule Trigger** node and choose the polling interval.
+1. Create one workflow with a **Schedule Trigger**. Start with once daily (or twice daily) rather than a separate workflow for each source; this keeps the free-trial execution count low.
 2. Provide a list of public source URLs and source types, for example `AUCTION_COM`, `PROBATE`, `OFF_MARKET`, `SHERIFF_SALE`, or `TAX_SALE`.
-3. Add an **HTTP Request** node configured as:
+3. Add one **HTTP Request** node configured as:
    - Method: `POST`
    - URL: `https://YOUR_CONVEX_DEPLOYMENT.convex.site/api/n8n/source`
    - Header: `x-convex-n8n-secret` with the same value as `CONVEX_N8N_WEBHOOK_SECRET`
    - Header: `content-type: application/json`
    - JSON body: `{ "url": "{{$json.url}}", "sourceType": "{{$json.sourceType}}", "idempotencyKey": "{{$json.sourceType}}:{{$json.url}}" }`
-4. Publish the workflow. A successful response is `202` with a queued task ID.
-5. Leave the existing Convex automation cycle enabled in `/toolkit`; it fetches, stages, qualifies, and records the result.
+4. Run one manual test, then publish the workflow. A successful response is `202` with a queued task ID. Reusing the same `idempotencyKey` is safe and does not create duplicate tasks.
+5. Leave the existing Convex automation cycle enabled in `/toolkit`; it fetches, stages, qualifies, and records the result. Set `Tasks per cycle` to a small value such as 3–5 so one run cannot create a large burst of source requests.
 
 The endpoint accepts only the supported source types and public URLs, deduplicates retries, and never promotes a candidate past `SOURCED`. Review and approval still happen in `/operations`. The UI refreshes on demand because MongoDB changes are not reactive Convex subscriptions.

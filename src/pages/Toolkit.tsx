@@ -42,6 +42,12 @@ type AutomationConfig = {
   n8nSecretConfigured: boolean;
 };
 
+type MongoHealth = {
+  configured: boolean;
+  connected: boolean;
+  status: string;
+};
+
 type AutomationTask = {
   _id: string;
   kind: "SCRAPE" | "ESTIMATE";
@@ -105,6 +111,7 @@ export default function Toolkit() {
       (user.role === "admin" || user.email?.trim().toLowerCase() === "jacobvierra8@gmail.com"),
   );
   const getToolAccess = useAction(api.mongodb.getToolAccess);
+  const healthCheck = useAction(api.mongodb.healthCheck);
   const setToolAccess = useAction(api.mongodb.setToolAccess);
   const getAiToolManifest = useAction(api.mongodb.getAiToolManifest);
   const getAutomationConfig = useAction(api.mongodb.getAutomationConfig);
@@ -118,6 +125,7 @@ export default function Toolkit() {
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
   const [automation, setAutomation] = useState<AutomationConfig>({ enabled: false, mode: "BOTH", dailyRunLimit: 24, maxTasksPerRun: 5, runsToday: 0, aiEnabled: false, providerConfigured: false, n8nSecretConfigured: false });
+  const [mongoHealth, setMongoHealth] = useState<MongoHealth>({ configured: false, connected: false, status: "Not checked" });
   const [tasks, setTasks] = useState<AutomationTask[]>([]);
   const [manifest, setManifest] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
@@ -144,16 +152,18 @@ export default function Toolkit() {
   const loadAccess = async () => {
     setLoading(true);
     try {
-      const [accessResult, manifestResult, automationResult, taskResult] = await Promise.all([
+      const [accessResult, manifestResult, automationResult, taskResult, mongoResult] = await Promise.all([
         getToolAccess(),
         getAiToolManifest(),
         getAutomationConfig(),
         listAutomationTasks({}),
+        healthCheck(),
       ]);
       setAccess(accessResult as ToolAccess);
       setManifest(manifestResult);
       setAutomation(automationResult as AutomationConfig);
       setTasks(taskResult as AutomationTask[]);
+      setMongoHealth(mongoResult as MongoHealth);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load tool access.");
     } finally {
@@ -164,13 +174,14 @@ export default function Toolkit() {
   useEffect(() => {
     if (!isOwner) return;
     let cancelled = false;
-    Promise.all([getToolAccess(), getAiToolManifest(), getAutomationConfig(), listAutomationTasks({})])
-      .then(([accessResult, manifestResult, automationResult, taskResult]) => {
+    Promise.all([getToolAccess(), getAiToolManifest(), getAutomationConfig(), listAutomationTasks({}), healthCheck()])
+      .then(([accessResult, manifestResult, automationResult, taskResult, mongoResult]) => {
         if (cancelled) return;
         setAccess(accessResult as ToolAccess);
         setManifest(manifestResult);
         setAutomation(automationResult as AutomationConfig);
         setTasks(taskResult as AutomationTask[]);
+        setMongoHealth(mongoResult as MongoHealth);
       })
       .catch((error) => {
         if (!cancelled) toast.error(error instanceof Error ? error.message : "Could not load tool access.");
@@ -181,7 +192,7 @@ export default function Toolkit() {
     return () => {
       cancelled = true;
     };
-  }, [getAiToolManifest, getAutomationConfig, getToolAccess, isOwner, listAutomationTasks]);
+  }, [getAiToolManifest, getAutomationConfig, getToolAccess, healthCheck, isOwner, listAutomationTasks]);
 
   const updateTool = async (tool: "SCRAPER" | "ESTIMATOR", enabled: boolean) => {
     try {
@@ -336,6 +347,12 @@ export default function Toolkit() {
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">AI access</p><Bot className="size-4 text-violet-600" /></div><div className="mt-3 flex items-center justify-between"><p className="text-lg font-semibold text-slate-900">{access.aiEnabled ? "Granted" : "Owner only"}</p><button type="button" role="switch" aria-checked={access.aiEnabled} onClick={() => void updateAiAccess(!access.aiEnabled)} className={`relative h-6 w-11 rounded-full transition-colors ${access.aiEnabled ? "bg-violet-700" : "bg-slate-300"}`}><span className={`absolute top-1 size-4 rounded-full bg-white transition-transform ${access.aiEnabled ? "translate-x-6" : "translate-x-1"}`} /></button></div><p className="mt-1 text-xs text-slate-500">Manifest is ready for an authenticated AI connector</p></div>
         </section>
 
+        <section className="mt-5 grid gap-3 md:grid-cols-3">
+          <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">MongoDB Atlas</p><ShieldCheck className="size-4 text-teal-600" /></div><p className="mt-3 text-lg font-semibold text-slate-900">{mongoHealth.connected ? "Connected" : mongoHealth.configured ? "Connection failed" : "Not configured"}</p><p className="mt-1 text-xs text-slate-500">{mongoHealth.connected ? "Source of truth is reachable" : mongoHealth.status}</p></div>
+          <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">n8n handoff</p><ListChecks className="size-4 text-amber-600" /></div><p className="mt-3 text-lg font-semibold text-slate-900">{automation.n8nSecretConfigured ? "Ready" : "Needs secret"}</p><p className="mt-1 text-xs text-slate-500">{automation.n8nSecretConfigured ? "Authenticated queue is available" : "Add the Convex shared secret"}</p></div>
+          <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">AI reviewer</p><Bot className="size-4 text-violet-600" /></div><p className="mt-3 text-lg font-semibold text-slate-900">{automation.providerConfigured && access.aiEnabled ? "Ready" : "Optional"}</p><p className="mt-1 text-xs text-slate-500">{automation.providerConfigured && access.aiEnabled ? "Temporary review suggestions enabled" : "Deterministic sourcing works without it"}</p></div>
+        </section>
+
         <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-100/80 text-amber-700"><ListChecks className="size-5" /></div><div><p className="eyebrow">Managed automation</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Queue work for both modes</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Convex runs the schedule, MongoDB stores the queue and results, and the temporary AI reviewer only adds bounded review suggestions. Auction.com, probate/court records, and owner-provided off-market evidence are supported; login, CAPTCHA, and blocked requests are never bypassed. The hourly cycle stays paused until you enable it.</p></div></div>
@@ -352,7 +369,7 @@ export default function Toolkit() {
           </div>
           <form onSubmit={queueScrape} className="mt-3 flex flex-col gap-2 sm:flex-row"><Input required type="url" value={queueUrl} onChange={(event) => setQueueUrl(event.target.value)} placeholder="Queue an official public source URL for the next cycle" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /><Button type="submit" disabled={!automation.enabled} className="h-10 gap-2 rounded-xl bg-sky-700 text-xs hover:bg-sky-800"><ListChecks className="size-4" /> Queue source</Button><Button type="button" disabled={!automation.enabled} onClick={() => void runCycle()} variant="outline" className="h-10 gap-2 rounded-xl border-white/85 bg-white/65 text-xs"><Play className="size-4" /> Run now</Button></form>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><p className="text-[0.68rem] text-slate-500">Today: {automation.runsToday} / {automation.dailyRunLimit} cycles · {tasks.filter((task) => task.status === "PENDING").length} pending tasks</p><div className="flex flex-wrap gap-2">{tasks.slice(0, 5).map((task) => <Badge key={task._id} variant="outline" className="border-white/90 bg-white/55 text-[0.65rem] text-slate-600">{task.kind} · {task.status}</Badge>)}</div></div>
-          <div className="mt-4 rounded-2xl border border-sky-100/80 bg-sky-50/45 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">n8n scheduler handoff</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">n8n can schedule source URLs and retry this queue endpoint. Convex still validates the URL, fetches bounded evidence, writes Mongo staging, and keeps every candidate in owner review.</p></div><Badge className={automation.n8nSecretConfigured ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-amber-100/80 text-amber-800"}>{automation.n8nSecretConfigured ? "Connected" : "Needs secret"}</Badge></div><div className="mt-3 grid gap-2 text-[0.68rem] leading-5 text-slate-500 sm:grid-cols-3"><p><strong className="text-slate-700">Endpoint</strong><br />your Convex site URL + <code>/api/n8n/source</code></p><p><strong className="text-slate-700">Header</strong><br /><code>x-convex-n8n-secret</code></p><p><strong className="text-slate-700">Body</strong><br /><code>{"{ url, sourceType, idempotencyKey? }"}</code></p></div><p className="mt-3 text-[0.68rem] text-slate-500">Add <code>CONVEX_N8N_WEBHOOK_SECRET</code> in the Convex Environment vars panel, then store the same value as an n8n secret. Do not put it in browser code.</p></div>
+          <div className="mt-4 rounded-2xl border border-sky-100/80 bg-sky-50/45 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">n8n scheduler handoff</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">n8n can schedule source URLs and retry this queue endpoint. Use one workflow with a daily or twice-daily schedule to conserve trial executions; Convex still validates the URL, fetches bounded evidence, writes Mongo staging, and keeps every candidate in owner review.</p></div><Badge className={automation.n8nSecretConfigured ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-amber-100/80 text-amber-800"}>{automation.n8nSecretConfigured ? "Connected" : "Needs secret"}</Badge></div><div className="mt-3 grid gap-2 text-[0.68rem] leading-5 text-slate-500 sm:grid-cols-3"><p><strong className="text-slate-700">Endpoint</strong><br />your Convex site URL + <code>/api/n8n/source</code></p><p><strong className="text-slate-700">Header</strong><br /><code>x-convex-n8n-secret</code></p><p><strong className="text-slate-700">Body</strong><br /><code>{"{ url, sourceType, idempotencyKey? }"}</code></p></div><p className="mt-3 text-[0.68rem] text-slate-500">Add <code>CONVEX_N8N_WEBHOOK_SECRET</code> in the Convex Environment vars panel, then store the same value as an n8n secret. Do not put it in browser code.</p></div>
         </section>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">

@@ -155,6 +155,7 @@ const buyerValidator = v.object({
   targetAreas: v.array(v.string()),
   exitType: exitTypeValidator,
   proofOfFundsStatus: proofOfFundsStatusValidator,
+  pofEvidenceRef: v.optional(v.string()),
   purchaseHistory: v.any(),
   listSource: v.string(),
   intakeStatus: v.union(
@@ -174,6 +175,7 @@ const buyerPatchValidator = v.object({
   targetAreas: v.optional(v.array(v.string())),
   exitType: v.optional(exitTypeValidator),
   proofOfFundsStatus: v.optional(proofOfFundsStatusValidator),
+  pofEvidenceRef: v.optional(v.string()),
   purchaseHistory: v.optional(v.any()),
   listSource: v.optional(v.string()),
   intakeStatus: v.optional(
@@ -292,6 +294,42 @@ function objectId(id: string) {
     throw new Error("Invalid MongoDB document id");
   }
   return new ObjectId(id);
+}
+
+function validateBuyer(buyer: {
+  budgetMin: number;
+  budgetMax: number;
+  proofOfFundsStatus: string;
+  pofEvidenceRef?: string;
+}) {
+  if (buyer.budgetMin < 0 || buyer.budgetMax < buyer.budgetMin) {
+    throw new Error("Buyer budget range is invalid");
+  }
+  if (buyer.proofOfFundsStatus === "VERIFIED" && !buyer.pofEvidenceRef?.trim()) {
+    throw new Error("Verified proof of funds requires an evidence reference");
+  }
+}
+
+async function validateMatch(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  match: { leadId: string; buyerId: string; matchScore: number; confidence: string },
+) {
+  if (match.matchScore < 0 || match.matchScore > 100) {
+    throw new Error("Match score must be between 0 and 100");
+  }
+  const [lead, buyer] = await Promise.all([
+    database.collection(LEADS).findOne({ _id: objectId(match.leadId) }),
+    database.collection(BUYERS).findOne({ _id: objectId(match.buyerId) }),
+  ]);
+  if (!lead || lead.fabricated === true || lead.pipelineStatus !== "APPROVED" || lead.verificationStatus !== "VERIFIED") {
+    throw new Error("Matches require a verified, approved, non-fabricated lead");
+  }
+  if (!buyer || buyer.intakeStatus !== "APPROVED") {
+    throw new Error("Matches require an approved buyer");
+  }
+  if (match.confidence === "HIGH" && buyer.proofOfFundsStatus !== "VERIFIED") {
+    throw new Error("High-confidence matches require verified proof of funds");
+  }
 }
 
 function validateApprovedLead(lead: {
@@ -499,6 +537,7 @@ export const insertBuyer = action({
   args: { buyer: buyerValidator },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
+    validateBuyer(args.buyer);
     const now = Date.now();
     const result = await (await getDatabase()).collection(BUYERS).insertOne({ ...args.buyer, createdAt: now, updatedAt: now });
     return { id: String(result.insertedId) };
@@ -541,8 +580,19 @@ export const updateBuyer = action({
   args: { id: v.string(), patch: buyerPatchValidator },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
-    const result = await (await getDatabase()).collection(BUYERS).updateOne({ _id: objectId(args.id) }, { $set: { ...withoutUndefined(args.patch), updatedAt: Date.now() } });
-    if (result.matchedCount !== 1) throw new Error("Buyer not found");
+    const database = await getDatabase();
+    const existing = await database.collection(BUYERS).findOne({ _id: objectId(args.id) });
+    if (!existing) throw new Error("Buyer not found");
+    validateBuyer({ ...existing, ...withoutUndefined(args.patch) } as {
+      budgetMin: number;
+      budgetMax: number;
+      proofOfFundsStatus: string;
+      pofEvidenceRef?: string;
+    });
+    await database.collection(BUYERS).updateOne(
+      { _id: existing._id },
+      { $set: { ...withoutUndefined(args.patch), updatedAt: Date.now() } },
+    );
     return { id: args.id };
   },
 });
@@ -563,8 +613,12 @@ export const insertMatch = action({
   args: { match: matchValidator },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
+    const database = await getDatabase();
+    await validateMatch(database, args.match);
+    const duplicate = await database.collection(MATCHES).findOne({ leadId: args.match.leadId, buyerId: args.match.buyerId });
+    if (duplicate) throw new Error("This lead and buyer are already matched");
     const now = Date.now();
-    const result = await (await getDatabase()).collection(MATCHES).insertOne({ ...args.match, createdAt: now, updatedAt: now });
+    const result = await database.collection(MATCHES).insertOne({ ...args.match, createdAt: now, updatedAt: now });
     return { id: String(result.insertedId) };
   },
 });
@@ -573,7 +627,19 @@ export const updateMatch = action({
   args: { id: v.string(), patch: matchPatchValidator },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
-    const result = await (await getDatabase()).collection(MATCHES).updateOne({ _id: objectId(args.id) }, { $set: { ...withoutUndefined(args.patch), updatedAt: Date.now() } });
+    const database = await getDatabase();
+    const existing = await database.collection(MATCHES).findOne({ _id: objectId(args.id) });
+    if (!existing) throw new Error("Match not found");
+    await validateMatch(database, {
+      leadId: String(existing.leadId),
+      buyerId: String(existing.buyerId),
+      matchScore: typeof args.patch.matchScore === "number" ? args.patch.matchScore : Number(existing.matchScore),
+      confidence: args.patch.confidence ?? String(existing.confidence),
+    });
+    const result = await database.collection(MATCHES).updateOne(
+      { _id: existing._id },
+      { $set: { ...withoutUndefined(args.patch), updatedAt: Date.now() } },
+    );
     if (result.matchedCount !== 1) throw new Error("Match not found");
     return { id: args.id };
   },

@@ -77,11 +77,8 @@ export default defineConfig({
       '@convex-dev/auth/react',
     ],
   },
-  // Performance hints
+  // The managed preview handles updates without a client-side HMR socket.
   server: {
-    // Keep HMR on, but disable full-screen error overlay
-    hmr: {
-      overlay: false,
-    },
+    hmr: false,
   },
 });

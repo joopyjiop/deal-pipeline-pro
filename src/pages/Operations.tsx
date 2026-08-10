@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   Check,
   CircleAlert,
+  Gavel,
   Handshake,
   Landmark,
   Loader2,
@@ -50,8 +51,20 @@ type Lead = {
   estimatedProfit?: number;
 };
 
+type CourtVerdict = {
+  status: "COMPLETED" | "FAILED" | "SKIPPED_MISSING_KEY";
+  verdict?: "PROCEED" | "HOLD" | "PASS";
+  confidence?: "LOW" | "MEDIUM" | "HIGH";
+  score?: number;
+  summary?: string;
+  risks?: string[];
+  missingEvidence?: string[];
+  consultants?: Array<{ role: string; stance: string; confidence: string }>;
+};
+
 type Candidate = {
   _id: string;
+  stagingId?: string;
   propertyAddress: string;
   city: string;
   state: string;
@@ -63,6 +76,7 @@ type Candidate = {
   sourceDate: string;
   distressScore: number;
   distressSignals: Array<{ type: string; evidence: string; verified: boolean }>;
+  aiCourtVerdict?: CourtVerdict;
 };
 
 type Match = {
@@ -115,6 +129,7 @@ export default function Operations() {
   const listMatches = useAction(api.mongodb.listMatches);
   const approveLead = useAction(api.mongodb.approveLead);
   const rejectLead = useAction(api.mongodb.rejectLead);
+  const runConsultantCourt = useAction(api.mongodb.runConsultantCourt);
   const insertMatch = useAction(api.mongodb.insertMatch);
   const updateMatch = useAction(api.mongodb.updateMatch);
   const [buyers, setBuyers] = useState<Buyer[]>([]);
@@ -193,6 +208,26 @@ export default function Operations() {
       refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update this buyer.");
+    }
+  };
+
+  const handleCourtReview = async (candidate: Candidate) => {
+    if (!candidate.stagingId) {
+      toast.error("This candidate has no staged source record to review.");
+      return;
+    }
+    try {
+      const verdict = await runConsultantCourt({ stagedId: candidate.stagingId }) as CourtVerdict;
+      if (verdict.status === "COMPLETED") {
+        toast.success(`Consultant court verdict: ${pretty(verdict.verdict ?? "HOLD")}.`);
+      } else if (verdict.status === "SKIPPED_MISSING_KEY") {
+        toast.warning("Add SAMBANOVA_API_KEY to run the consultant court.");
+      } else {
+        toast.error("The consultant court could not complete this review.");
+      }
+      refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not run the consultant court.");
     }
   };
 
@@ -280,10 +315,10 @@ export default function Operations() {
 
         <section className="glass-panel mt-5 overflow-hidden rounded-[1.75rem]">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/70 px-4 py-4 sm:px-5">
-            <div><p className="eyebrow">Automatic sourcing</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Review sourced candidates</h2><p className="mt-1 text-xs text-slate-500">The machine extracts only explicit fields from official pages. Approval is still owner-controlled.</p></div>
+            <div><p className="eyebrow">Automatic sourcing</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Review sourced candidates</h2><p className="mt-1 text-xs text-slate-500">The machine extracts only explicit fields from official pages. Three AI consultants and a judge can recommend a verdict, but approval is still owner-controlled.</p></div>
             <Badge className="border-0 bg-amber-100/80 text-amber-800">{candidates.length} awaiting review</Badge>
           </div>
-          {candidates.length === 0 ? <div className="flex min-h-32 items-center justify-center px-6 text-center"><p className="text-sm text-slate-500">No candidates yet. Queue an official sheriff, tax, probate, Auction.com, or off-market evidence source in the Toolkit, then run the cycle.</p></div> : <div className="divide-y divide-white/70">{candidates.map((candidate) => <article key={candidate._id} className="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-center sm:p-5"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{candidate.propertyAddress}</p><p className="mt-1 text-xs text-slate-500">{candidate.city}, {candidate.state} {candidate.zip} · {candidate.county} County</p><div className="mt-2 flex flex-wrap gap-1.5"><Badge variant="outline" className="border-white/90 bg-white/55 text-[0.65rem] text-slate-600">{pretty(candidate.sourceType)}</Badge><Badge variant="outline" className="border-amber-200/80 bg-amber-50/60 text-[0.65rem] text-amber-800">Score {candidate.distressScore}</Badge><span className="text-[0.68rem] text-slate-400">Ref {candidate.sourceRef} · {candidate.sourceDate}</span></div></div><a href={candidate.sourceUrl} target="_blank" rel="noreferrer" className="truncate text-xs font-semibold text-sky-700 hover:text-sky-900">Open official source</a><div className="flex gap-2 sm:justify-end"><Button type="button" onClick={() => void handleCandidateDecision(candidate, "APPROVE")} className="h-9 flex-1 rounded-xl bg-teal-700 text-xs hover:bg-teal-800 sm:flex-none">Approve</Button><Button type="button" variant="outline" onClick={() => void handleCandidateDecision(candidate, "REJECT")} className="h-9 rounded-xl border-rose-200/80 bg-rose-50/45 px-3 text-xs text-rose-700">Reject</Button></div></article>)}</div>}
+          {candidates.length === 0 ? <div className="flex min-h-32 items-center justify-center px-6 text-center"><p className="text-sm text-slate-500">No candidates yet. Queue an official sheriff, tax, probate, Auction.com, or off-market evidence source in the Toolkit, then run the cycle.</p></div> : <div className="divide-y divide-white/70">{candidates.map((candidate) => <article key={candidate._id} className="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-center sm:p-5"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{candidate.propertyAddress}</p><p className="mt-1 text-xs text-slate-500">{candidate.city}, {candidate.state} {candidate.zip} · {candidate.county} County</p><div className="mt-2 flex flex-wrap gap-1.5"><Badge variant="outline" className="border-white/90 bg-white/55 text-[0.65rem] text-slate-600">{pretty(candidate.sourceType)}</Badge><Badge variant="outline" className="border-amber-200/80 bg-amber-50/60 text-[0.65rem] text-amber-800">Score {candidate.distressScore}</Badge><span className="text-[0.68rem] text-slate-400">Ref {candidate.sourceRef} · {candidate.sourceDate}</span></div>{candidate.aiCourtVerdict && <div className="mt-3 rounded-xl border border-violet-100/80 bg-violet-50/45 p-3"><div className="flex flex-wrap items-center gap-2"><Gavel className="size-3.5 text-violet-700" /><span className="text-[0.68rem] font-semibold uppercase tracking-wide text-violet-800">AI court · {pretty(candidate.aiCourtVerdict.verdict ?? candidate.aiCourtVerdict.status)}</span>{candidate.aiCourtVerdict.score !== undefined && <Badge variant="outline" className="border-violet-200/80 bg-white/60 text-[0.62rem] text-violet-800">{candidate.aiCourtVerdict.score}/100</Badge>}</div><p className="mt-1 text-xs leading-5 text-slate-600">{candidate.aiCourtVerdict.summary ?? "No court summary returned."}</p><p className="mt-2 text-[0.65rem] text-slate-500">{candidate.aiCourtVerdict.consultants?.length ?? 0} consultants + judge · recommendation only · owner approval required</p></div>}</div><a href={candidate.sourceUrl} target="_blank" rel="noreferrer" className="truncate text-xs font-semibold text-sky-700 hover:text-sky-900">Open official source</a><div className="flex flex-wrap gap-2 sm:justify-end">{candidate.stagingId && <Button type="button" variant="outline" onClick={() => void handleCourtReview(candidate)} className="h-9 gap-1.5 rounded-xl border-violet-200/80 bg-violet-50/45 px-3 text-xs text-violet-800"><Gavel className="size-3.5" /> Run court</Button>}<Button type="button" disabled={candidate.aiCourtVerdict?.status !== "COMPLETED"} onClick={() => void handleCandidateDecision(candidate, "APPROVE")} className="h-9 flex-1 rounded-xl bg-teal-700 text-xs hover:bg-teal-800 sm:flex-none">Approve</Button><Button type="button" variant="outline" onClick={() => void handleCandidateDecision(candidate, "REJECT")} className="h-9 rounded-xl border-rose-200/80 bg-rose-50/45 px-3 text-xs text-rose-700">Reject</Button></div></article>)}</div>}
         </section>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

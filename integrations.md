@@ -167,3 +167,21 @@ The existing `MONGODB_URI` remains server-only and is not needed in n8n.
 5. Leave the existing Convex automation cycle enabled in `/toolkit`; it fetches, stages, qualifies, and records the result. Set `Tasks per cycle` to a small value such as 3–5 so one run cannot create a large burst of source requests.
 
 The endpoint accepts only the supported source types and public URLs, deduplicates retries, and never promotes a candidate past `SOURCED`. Review and approval still happen in `/operations`. The UI refreshes on demand because MongoDB changes are not reactive Convex subscriptions.
+
+## AI consultant court
+
+When AI access is enabled and the automation mode is `BOTH`, every queued source is reviewed by four stages inside the Convex action:
+
+1. Evidence auditor — checks whether the source contains explicit, usable facts.
+2. Underwriting analyst — checks whether ARV, repairs, offer, and spread evidence is sufficient without inventing numbers.
+3. Risk/compliance consultant — flags source-quality, verification, privacy, duplicate, and compliance concerns.
+4. Judge — reconciles the three reports into `PROCEED`, `HOLD`, or `PASS`, with confidence, score, risks, and missing evidence.
+
+The court accepts only exact quotes found in the staged source excerpt and the matching source URL. Its verdict is saved as `aiCourtVerdict` in MongoDB staging and on the candidate lead. A candidate cannot be approved until a completed court verdict exists, but the verdict never approves a deal automatically. The owner remains the final decision-maker.
+
+To activate the court, add this server-only Convex variable:
+
+- `SAMBANOVA_API_KEY` — required for the consultant and judge calls.
+- `SAMBANOVA_MODEL` — optional; defaults to `Meta-Llama-3.3-70B-Instruct`.
+
+The court makes four model calls per reviewed source, in parallel for the three consultants and then one judge call. This does not consume n8n executions; it uses the configured AI provider instead. If the key is missing, the candidate stays unapproved and the Toolkit reports that the court is waiting for setup.

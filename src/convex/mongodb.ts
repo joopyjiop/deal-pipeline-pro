@@ -670,6 +670,13 @@ export const getAiToolManifest = action({
           permission: "owner",
           input: { squareFeet: "number", soldComps: "number[]", repairTier: "BASE | MEDIUM | GUT", targetPct: "number" },
         },
+        {
+          name: "consultant_court",
+          enabled: aiEnabled && scraperEnabled,
+          description: "Run an evidence-only court with evidence, underwriting, and risk consultants plus a judge. Returns a recommendation; owner approval remains required.",
+          permission: "owner",
+          input: { stagedId: "string" },
+        },
       ],
     };
   },
@@ -811,6 +818,7 @@ async function qualifyStagedSourceImpl(database: Awaited<ReturnType<typeof getDa
   const now = Date.now();
   const lead = {
     ...candidate,
+    ...(staging.aiCourtVerdict ? { aiCourtVerdict: staging.aiCourtVerdict } : {}),
     verificationStatus: "UNVERIFIED",
     pipelineStatus: "SOURCED",
     absenteeOwner: false,
@@ -834,6 +842,28 @@ export const qualifyStagedSource = action({
   },
 });
 
+export const runConsultantCourt = action({
+  args: { stagedId: v.string() },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const stagingId = objectId(args.stagedId);
+    const staging = await database.collection(IMPORT_STAGING).findOne({ _id: stagingId });
+    if (!staging) throw new Error("Staged source not found");
+    const raw = staging.rawJson && typeof staging.rawJson === "object" ? staging.rawJson as Record<string, unknown> : {};
+    const verdict = await runAiConsultantCourt({
+      url: typeof raw.url === "string" ? raw.url : "",
+      title: typeof raw.title === "string" ? raw.title : "Sourced deal",
+      excerpt: typeof raw.excerpt === "string" ? raw.excerpt : "",
+    });
+    await database.collection(IMPORT_STAGING).updateOne({ _id: stagingId }, { $set: { aiCourtVerdict: verdict, updatedAt: Date.now() } });
+    if (staging.candidateLeadId) {
+      await database.collection(LEADS).updateOne({ _id: staging.candidateLeadId }, { $set: { aiCourtVerdict: verdict, updatedAt: Date.now() } });
+    }
+    return verdict;
+  },
+});
+
 export const approveLead = action({
   args: { id: v.string(), ownerConfirmation: v.literal("OWNER_REVIEWED_SOURCE") },
   handler: async (ctx, args) => {
@@ -842,6 +872,9 @@ export const approveLead = action({
     const existing = await database.collection(LEADS).findOne({ _id: objectId(args.id), fabricated: { $ne: true } });
     if (!existing) throw new Error("Lead candidate not found");
     if (existing.pipelineStatus !== "SOURCED" && existing.pipelineStatus !== "CRITIQUED") throw new Error("Only sourced candidates can be approved");
+    if (!existing.aiCourtVerdict || existing.aiCourtVerdict.status !== "COMPLETED") {
+      throw new Error("Run the AI consultant court before approving this candidate");
+    }
     const signals = Array.isArray(existing.distressSignals) ? existing.distressSignals.map((signal) => ({ ...signal, verified: true })) : [];
     const next = { ...existing, distressSignals: signals, verificationStatus: "VERIFIED", pipelineStatus: "APPROVED" } as unknown as {
       sourceType: string;
@@ -900,33 +933,153 @@ function automationSettings(document: ToolAccessDocument | null) {
   };
 }
 
-async function reviewStagedSourceWithAi(source: { title: string; excerpt: string; url: string }) {
-  const apiKey = process.env.SAMBANOVA_API_KEY;
-  if (!apiKey) return { status: "SKIPPED_MISSING_KEY" as const };
+type CourtRole = "EVIDENCE_AUDITOR" | "UNDERWRITING_ANALYST" | "RISK_COMPLIANCE";
+type CourtStance = "SUPPORT" | "CAUTION" | "OPPOSE";
+type CourtConfidence = "LOW" | "MEDIUM" | "HIGH";
+type CourtVerdictValue = "PROCEED" | "HOLD" | "PASS";
+
+type CourtEvidence = {
+  claim: string;
+  quote: string;
+  sourceUrl: string;
+  sourceDate?: string;
+};
+
+type CourtConsultant = {
+  role: CourtRole;
+  stance: CourtStance;
+  confidence: CourtConfidence;
+  summary: string;
+  findings: CourtEvidence[];
+  missingEvidence: string[];
+  risks: string[];
+};
+
+type CourtVerdict = {
+  status: "COMPLETED" | "FAILED" | "SKIPPED_MISSING_KEY";
+  verdict?: CourtVerdictValue;
+  confidence?: CourtConfidence;
+  score?: number;
+  summary?: string;
+  decisiveEvidence?: CourtEvidence[];
+  risks?: string[];
+  missingEvidence?: string[];
+  consultants?: CourtConsultant[];
+  judgeNotes?: string;
+  model?: string;
+  reviewedAt: string;
+  error?: string;
+};
+
+function courtString(value: unknown, fallback: string, maxLength: number) {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, maxLength) : fallback;
+}
+
+function courtList(value: unknown, maxItems = 8) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim().slice(0, 300)).slice(0, maxItems)
+    : [];
+}
+
+function courtEvidence(value: unknown, source: { url: string; excerpt: string }) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const quote = typeof record.quote === "string" ? record.quote.trim().slice(0, 600) : "";
+    const sourceUrl = typeof record.sourceUrl === "string" ? record.sourceUrl.trim() : "";
+    if (!quote || sourceUrl !== source.url || !source.excerpt.includes(quote)) return [];
+    return [{
+      claim: courtString(record.claim, "Sourced statement", 300),
+      quote,
+      sourceUrl,
+      ...(typeof record.sourceDate === "string" && record.sourceDate.trim() ? { sourceDate: record.sourceDate.trim().slice(0, 40) } : {}),
+    }];
+  }).slice(0, 8);
+}
+
+function courtStance(value: unknown): CourtStance {
+  return value === "SUPPORT" || value === "OPPOSE" ? value : "CAUTION";
+}
+
+function courtConfidence(value: unknown): CourtConfidence {
+  return value === "HIGH" || value === "MEDIUM" ? value : "LOW";
+}
+
+async function callCourtModel(prompt: string, maxTokens: number) {
   const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
     method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+    headers: { authorization: `Bearer ${process.env.SAMBANOVA_API_KEY}`, "content-type": "application/json" },
     body: JSON.stringify({
       model: process.env.SAMBANOVA_MODEL ?? "Meta-Llama-3.3-70B-Instruct",
       temperature: 0,
-      max_tokens: 1200,
+      max_tokens: maxTokens,
       response_format: { type: "json_object" },
-      messages: [{
-        role: "user",
-        content: `Review this public source excerpt for a real-estate owner. Return JSON only with keys: facts, distressSignals, candidateComps, warnings. Use only facts explicitly present in the excerpt. Never invent a person, address, phone, email, parcel, sale amount, comp, or distress fact. Every candidate comp must include its exact quoted evidence and the source URL. This is a review suggestion only, not an approved lead.\n\nSOURCE URL: ${source.url}\nTITLE: ${source.title}\nEXCERPT: ${source.excerpt.slice(0, 6000)}`,
-      }],
+      messages: [{ role: "user", content: prompt }],
     }),
     signal: AbortSignal.timeout(30000),
   });
-  if (!response.ok) return { status: "FAILED" as const, error: "Temporary AI review request failed" };
+  if (!response.ok) return { ok: false as const, error: "AI consultant request failed" };
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   const content = payload.choices?.[0]?.message?.content?.trim();
-  if (!content) return { status: "FAILED" as const, error: "Temporary AI review returned no content" };
+  if (!content) return { ok: false as const, error: "AI consultant returned no content" };
   try {
-    return { status: "COMPLETED" as const, review: JSON.parse(content) as Record<string, unknown> };
+    return { ok: true as const, value: JSON.parse(content) as Record<string, unknown> };
   } catch {
-    return { status: "FAILED" as const, error: "Temporary AI review returned invalid JSON" };
+    return { ok: false as const, error: "AI consultant returned invalid JSON" };
   }
+}
+
+async function runAiConsultantCourt(source: { title: string; excerpt: string; url: string }): Promise<CourtVerdict> {
+  const reviewedAt = new Date().toISOString();
+  if (!process.env.SAMBANOVA_API_KEY) return { status: "SKIPPED_MISSING_KEY", reviewedAt };
+  const sourcePacket = `SOURCE URL: ${source.url}\nTITLE: ${source.title}\nSOURCE EXCERPT (the only evidence allowed): ${source.excerpt.slice(0, 7000)}`;
+  const assignments: Array<{ role: CourtRole; task: string }> = [
+    { role: "EVIDENCE_AUDITOR", task: "Audit whether the source contains enough explicit, reliable facts for a real deal review. Separate sourced facts from assumptions." },
+    { role: "UNDERWRITING_ANALYST", task: "Assess the underwriting data sufficiency, likely deal economics, and missing ARV/repair/offer evidence. Never calculate or invent values that are not in the source." },
+    { role: "RISK_COMPLIANCE", task: "Look for verification, privacy, source-quality, solicitation, duplicate, and compliance risks. Do not give legal advice and do not invent risks as facts." },
+  ];
+  const consultantResults: Array<{ role: CourtRole; consultant?: CourtConsultant; error?: string }> = await Promise.all(assignments.map(async ({ role, task }) => {
+    const result = await callCourtModel(`You are the ${role} on an evidence-only real-estate deal review court. ${task}\n\nReturn JSON only with exactly these keys: stance (SUPPORT|CAUTION|OPPOSE), confidence (LOW|MEDIUM|HIGH), summary, findings, missingEvidence, risks. findings must be an array of objects with claim, quote, sourceUrl, and optional sourceDate. A quote is valid only when copied exactly from the supplied source excerpt and sourceUrl equals the supplied URL. Never invent names, addresses, phones, emails, parcels, prices, comps, ownership, motivation, or distress. This is a recommendation for the owner, not approval.\n\n${sourcePacket}`, 1000);
+    if (!result.ok) return { role, error: result.error };
+    const value = result.value;
+    const findings = courtEvidence(value.findings, source);
+    return {
+      role,
+      consultant: {
+        role,
+        stance: courtStance(value.stance),
+        confidence: courtConfidence(value.confidence),
+        summary: courtString(value.summary, "No consultant summary returned.", 600),
+        findings,
+        missingEvidence: courtList(value.missingEvidence),
+        risks: courtList(value.risks),
+      } satisfies CourtConsultant,
+    };
+  }));
+  const failed = consultantResults.find((result) => !result.consultant);
+  if (failed && !failed.consultant) return { status: "FAILED", reviewedAt, error: failed.error ?? "AI consultant failed" };
+  const consultants: CourtConsultant[] = consultantResults.flatMap((result) => result.consultant ? [result.consultant] : []);
+  const judgeInput = JSON.stringify(consultants);
+  const judge = await callCourtModel(`You are the presiding judge of an evidence-only real-estate deal review court. Reconcile three consultant reports. Return JSON only with exactly these keys: verdict (PROCEED|HOLD|PASS), confidence (LOW|MEDIUM|HIGH), score (0-100), summary, decisiveEvidence, risks, missingEvidence, judgeNotes. PROCEED means evidence supports continued owner review, HOLD means more verification is required, and PASS means the evidence is too weak or risks outweigh the opportunity. Use only exact quotes from the source excerpt for decisiveEvidence. Do not approve the lead, mark facts verified, invent PII, invent prices/comps, or give legal advice. If the consultants disagree or there is no valid exact evidence, choose HOLD.\n\n${sourcePacket}\n\nCONSULTANT REPORTS: ${judgeInput}`, 1200);
+  if (!judge.ok) return { status: "FAILED", reviewedAt, error: judge.error, consultants };
+  const judgeValue = judge.value;
+  const decisiveEvidence = courtEvidence(judgeValue.decisiveEvidence, source);
+  const verdict = judgeValue.verdict === "PROCEED" || judgeValue.verdict === "PASS" ? judgeValue.verdict : "HOLD";
+  return {
+    status: "COMPLETED",
+    verdict: decisiveEvidence.length === 0 ? "HOLD" : verdict,
+    confidence: courtConfidence(judgeValue.confidence),
+    score: typeof judgeValue.score === "number" ? Math.max(0, Math.min(100, Math.round(judgeValue.score))) : undefined,
+    summary: courtString(judgeValue.summary, "The court returned no summary.", 800),
+    decisiveEvidence,
+    risks: courtList(judgeValue.risks),
+    missingEvidence: courtList(judgeValue.missingEvidence),
+    consultants,
+    judgeNotes: courtString(judgeValue.judgeNotes, "Owner review remains required.", 600),
+    model: process.env.SAMBANOVA_MODEL ?? "Meta-Llama-3.3-70B-Instruct",
+    reviewedAt,
+  };
 }
 
 async function runAutomationCycleImpl() {
@@ -951,14 +1104,14 @@ async function runAutomationCycleImpl() {
         if (settings.mode === "BOTH") {
           if (!settings.aiEnabled) aiResult = { status: "SKIPPED_AI_ACCESS_DISABLED" };
           else {
-            const review = await reviewStagedSourceWithAi(staged);
-            aiResult = review;
-            if (review.status === "COMPLETED") aiCompleted += 1;
-            await database.collection(IMPORT_STAGING).updateOne({ _id: objectId(staged.stagedId) }, { $set: { aiReview: review, updatedAt: Date.now() } });
+            const court = await runAiConsultantCourt(staged);
+            aiResult = court;
+            if (court.status === "COMPLETED") aiCompleted += 1;
+            await database.collection(IMPORT_STAGING).updateOne({ _id: objectId(staged.stagedId) }, { $set: { aiCourtVerdict: court, updatedAt: Date.now() } });
           }
         }
         const qualification = await qualifyStagedSourceImpl(database, staged.stagedId);
-        result = { kind: "SCRAPE", stagedId: staged.stagedId, sourceUrl: staged.url, ai: aiResult, qualification, piiCreated: false };
+        result = { kind: "SCRAPE", stagedId: staged.stagedId, sourceUrl: staged.url, aiCourtVerdict: aiResult, qualification, piiCreated: false };
       } else {
         if (!task.estimate || typeof task.estimate !== "object") throw new Error("Estimate task is missing its explicit inputs");
         result = { kind: "ESTIMATE", estimate: calculateDealEstimate(task.estimate as EstimateInput) };
@@ -977,7 +1130,7 @@ async function runAutomationCycleImpl() {
     { upsert: true },
   );
   const remaining = await database.collection(AUTOMATION_TASKS).countDocuments({ status: "PENDING" });
-  return { status: "COMPLETED" as const, processed, failed, remaining, ai: settings.mode === "BOTH" ? { completed: aiCompleted, configured: Boolean(process.env.SAMBANOVA_API_KEY) && settings.aiEnabled } : "not-requested" as const };
+  return { status: "COMPLETED" as const, processed, failed, remaining, ai: settings.mode === "BOTH" ? { completed: aiCompleted, configured: Boolean(process.env.SAMBANOVA_API_KEY && settings.aiEnabled) } : "not-requested" as const };
 }
 
 export const getAutomationConfig = action({

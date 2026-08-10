@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
-import { useMutation, useQuery } from "convex/react";
+import { useAction } from "convex/react";
 import {
   ArrowUpRight,
   BarChart3,
@@ -27,7 +27,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 
@@ -61,6 +61,45 @@ type LeadFormState = {
   repairs: string;
   mao: string;
   notes: string;
+};
+
+type MongoLead = {
+  _id: string;
+  propertyAddress: string;
+  city: string;
+  state: string;
+  zip: string;
+  county: string;
+  parcelId?: string;
+  ownerMailingAddress?: string;
+  sourceType: string;
+  sourceUrl: string;
+  sourceRef: string;
+  sourceDate: string;
+  distressScore: number;
+  distressSignals: Array<{
+    type: string;
+    weight: number;
+    evidence: string;
+    verified: boolean;
+    sourceUrl: string;
+    sourceDate: string;
+  }>;
+  verificationStatus: string;
+  pipelineStatus: string;
+  absenteeOwner: boolean;
+  needsSkipTrace: boolean;
+  listedPhone: boolean;
+  arv?: number;
+  repairs?: number;
+  mao?: number;
+  notes?: string;
+  lastVerifiedAt?: number | string;
+};
+
+type MongoWorkspace = {
+  meta: { dataOrigin: "verified"; live: false };
+  leads: MongoLead[];
 };
 
 const emptyForm: LeadFormState = {
@@ -110,19 +149,43 @@ export default function Dashboard() {
   const [showFilters, setShowFilters] = useState(false);
   const [form, setForm] = useState<LeadFormState>(emptyForm);
 
-  const workspace = useQuery(api.leads.approved, {
-    search: search.trim() || undefined,
-    minScore: Number(minScore) || undefined,
-    sourceType: sourceType === "ALL" ? undefined : sourceType,
-  });
-  const createLead = useMutation(api.leads.create);
-  const removeLead = useMutation(api.leads.remove);
+  const listLeads = useAction(api.mongodb.listLeads);
+  const insertLead = useAction(api.mongodb.insertLead);
+  const removeLead = useAction(api.mongodb.removeLead);
+  const [workspace, setWorkspace] = useState<MongoWorkspace>();
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const isOwner = Boolean(
+    user &&
+      (user.role === "admin" || user.email?.trim().toLowerCase() === "jacobvierra8@gmail.com"),
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    listLeads({
+      search: search.trim() || undefined,
+      pipelineStatus: "APPROVED",
+      verificationStatus: "VERIFIED",
+      minDistressScore: Number(minScore) || undefined,
+      sourceType: sourceType === "ALL" ? undefined : sourceType,
+    })
+      .then((result) => {
+        if (!cancelled) setWorkspace(result as MongoWorkspace);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setWorkspace({ meta: { dataOrigin: "verified", live: false }, leads: [] });
+          toast.error(error instanceof Error ? error.message : "Could not load MongoDB leads.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [listLeads, refreshVersion, search, minScore, sourceType]);
 
   const leads = workspace?.leads ?? [];
   const selectedLead = leads.find((lead) => lead._id === selectedLeadId);
   const averageScore = leads.length ? Math.round(leads.reduce((total, lead) => total + lead.distressScore, 0) / leads.length) : 0;
   const sourceCount = new Set(leads.map((lead) => lead.sourceType)).size;
-  const isOwner = workspace?.meta.ownerAccess ?? false;
 
   const updateForm = (field: keyof LeadFormState, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -140,8 +203,9 @@ export default function Dashboard() {
       return;
     }
     try {
-      await createLead({
-        propertyAddress: form.propertyAddress.trim(),
+      await insertLead({
+        lead: {
+          propertyAddress: form.propertyAddress.trim(),
         city: form.city.trim(),
         state: form.state.trim().toUpperCase(),
         zip: form.zip.trim(),
@@ -169,11 +233,13 @@ export default function Dashboard() {
         arv: form.arv ? Number(form.arv) : undefined,
         repairs: form.repairs ? Number(form.repairs) : undefined,
         mao: form.mao ? Number(form.mao) : undefined,
-        notes: form.notes.trim() || undefined,
+          notes: form.notes.trim() || undefined,
+        },
       });
       setForm(emptyForm);
       setShowAddLead(false);
-      toast.success("Verified lead added to the workspace.");
+      setRefreshVersion((version) => version + 1);
+      toast.success("Verified lead added to MongoDB.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not add this lead.");
     }
@@ -185,7 +251,8 @@ export default function Dashboard() {
     try {
       await removeLead({ id: selectedLead._id });
       setSelectedLeadId(null);
-      toast.success("Lead removed from the workspace.");
+      setRefreshVersion((version) => version + 1);
+      toast.success("Lead removed from MongoDB.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not delete this lead.");
     }
@@ -228,7 +295,11 @@ export default function Dashboard() {
         </section>
       </div>
 
-      {selectedLead && <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/10 p-3 backdrop-blur-[2px]" onClick={(event) => { if (event.target === event.currentTarget) setSelectedLeadId(null); }}><aside className="glass-panel-strong h-full w-full max-w-md overflow-y-auto rounded-[1.75rem] p-5 sm:p-6"><div className="flex items-center justify-between"><div><p className="eyebrow">Lead dossier</p><h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Verified record</h2></div><button type="button" onClick={() => setSelectedLeadId(null)} className="flex size-9 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500 hover:text-slate-800" aria-label="Close lead details"><X className="size-4" /></button></div><div className="mt-6 overflow-hidden rounded-[1.5rem] border border-white/85 bg-white/55"><div className="bg-gradient-to-br from-sky-50/90 via-white/35 to-teal-50/70 p-5"><div className="flex items-start justify-between gap-4"><div className="flex items-start gap-3"><div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-white/90 bg-white/80 text-sky-700 shadow-sm"><MapPin className="size-5" /></div><div><p className="text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-sky-700/75">Property profile</p><p className="mt-1.5 text-lg font-semibold leading-6 tracking-tight text-slate-900">{selectedLead.propertyAddress}</p><p className="mt-1 text-sm text-slate-500">{selectedLead.city}, {selectedLead.state} {selectedLead.zip}</p><p className="mt-1 text-xs font-medium text-slate-400">{selectedLead.county} County</p></div></div><Badge className="shrink-0 border-0 bg-teal-100/85 text-[0.65rem] text-teal-800"><Check className="mr-1 size-3" />Verified</Badge></div><div className="mt-5 flex flex-wrap items-center gap-2 text-[0.68rem] font-medium text-slate-500"><span className="rounded-full border border-white/90 bg-white/65 px-2.5 py-1">{sourceLabel(selectedLead.sourceType)}</span><span className="rounded-full border border-white/90 bg-white/65 px-2.5 py-1">{selectedLead.pipelineStatus}</span>{selectedLead.parcelId && <span className="rounded-full border border-white/90 bg-white/65 px-2.5 py-1">Parcel {selectedLead.parcelId}</span>}</div></div><div className="grid grid-cols-2 divide-x divide-white/75 border-t border-white/75 bg-white/35"><div className="p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-slate-400">Last verified</p><p className="mt-1 text-xs font-semibold text-slate-700">{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(selectedLead.lastVerifiedAt)}</p></div><div className="p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-slate-400">Record status</p><p className="mt-1 text-xs font-semibold text-teal-700">Source-backed</p></div></div></div><div className="mt-4 grid grid-cols-3 gap-2"><div className="glass-inset rounded-2xl p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-slate-500">Distress</p><p className={`mt-2 inline-flex rounded-lg px-2 py-1 text-base font-bold ${scoreTone(selectedLead.distressScore)}`}>{selectedLead.distressScore}<span className="ml-1 text-[0.62rem] font-medium">/100</span></p><p className="mt-1 text-[0.65rem] text-slate-500">Evidence score</p></div><div className="glass-inset rounded-2xl p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-slate-500">ARV</p><p className="mt-3 text-sm font-semibold text-slate-800">{money(selectedLead.arv)}</p><p className="mt-1 text-[0.65rem] text-slate-500">Estimated value</p></div><div className="glass-inset rounded-2xl p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-slate-500">MAO</p><p className="mt-3 text-sm font-semibold text-slate-800">{money(selectedLead.mao)}</p><p className="mt-1 text-[0.65rem] text-slate-500">Offer ceiling</p></div></div><div className="mt-6"><div><div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-800">Profile snapshot</h3><span className="text-[0.65rem] font-medium text-slate-400">Verified facts</span></div><div className="mt-3 grid grid-cols-2 gap-2"><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Owner mailing</p><p className="mt-1 text-xs font-medium leading-5 text-slate-700">{selectedLead.ownerMailingAddress || "Not recorded"}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Absentee owner</p><p className="mt-1 text-xs font-semibold text-slate-700">{selectedLead.absenteeOwner ? "Yes" : "No"}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Phone status</p><p className="mt-1 text-xs font-semibold text-slate-700">{selectedLead.listedPhone ? "Listed" : "Not listed"}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Skip trace</p><p className="mt-1 text-xs font-semibold text-slate-700">{selectedLead.needsSkipTrace ? "Needed" : "Not needed"}</p></div></div></div><div className="mt-6"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-800">Evidence chain</h3><Badge variant="outline" className="border-white/90 bg-white/55 text-xs text-slate-600">{sourceLabel(selectedLead.sourceType)}</Badge></div><div className="mt-3 rounded-2xl border border-white/80 bg-white/45 p-4"><div className="grid gap-3 text-xs"><div><p className="font-semibold text-slate-500">Source reference</p><p className="mt-1 font-medium text-slate-800">{selectedLead.sourceRef}</p></div><div><p className="font-semibold text-slate-500">Source date</p><p className="mt-1 font-medium text-slate-800">{selectedLead.sourceDate}</p></div><a href={selectedLead.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 font-semibold text-sky-700 hover:text-sky-900">Open source record <ArrowUpRight className="size-3.5" /></a></div></div></div><div className="mt-6"><h3 className="text-sm font-semibold text-slate-800">Verified signals</h3><div className="mt-3 space-y-2">{selectedLead.distressSignals.map((signal) => <div key={`${signal.type}-${signal.sourceDate}`} className="rounded-2xl border border-teal-100/80 bg-teal-50/45 p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-teal-900">{signal.type.replace(/_/g, " ")}</p><span className="text-xs font-bold text-teal-700">+{signal.weight}</span></div><p className="mt-1 text-xs leading-5 text-slate-600">{signal.evidence}</p></div>)}</div></div><div className="mt-6 grid grid-cols-3 gap-2"><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-500">ARV</p><p className="mt-1 text-xs font-semibold text-slate-800">{money(selectedLead.arv)}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-500">Repairs</p><p className="mt-1 text-xs font-semibold text-slate-800">{money(selectedLead.repairs)}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-500">MAO</p><p className="mt-1 text-xs font-semibold text-slate-800">{money(selectedLead.mao)}</p></div></div>{selectedLead.notes && <div className="mt-5 rounded-2xl border border-white/80 bg-white/45 p-4"><p className="text-xs font-semibold text-slate-500">Owner notes</p><p className="mt-1 text-sm leading-6 text-slate-700">{selectedLead.notes}</p></div>}<div className="mt-7 border-t border-white/70 pt-5"><Button type="button" variant="outline" onClick={handleDelete} disabled={!isOwner} className="w-full gap-2 rounded-xl border-red-200/80 bg-red-50/45 text-red-700 hover:bg-red-50"><Trash2 className="size-4" /> Delete record</Button><p className="mt-2 text-center text-[0.68rem] text-slate-400">Delete is permanently owner-authorized.</p></div></div></aside></div>}
+      {selectedLead && <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/10 p-3 backdrop-blur-[2px]" onClick={(event) => { if (event.target === event.currentTarget) setSelectedLeadId(null); }}><aside className="glass-panel-strong h-full w-full max-w-md overflow-y-auto rounded-[1.75rem] p-5 sm:p-6"><div className="flex items-center justify-between"><div><p className="eyebrow">Lead dossier</p><h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Verified record</h2></div><button type="button" onClick={() => setSelectedLeadId(null)} className="flex size-9 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500 hover:text-slate-800" aria-label="Close lead details"><X className="size-4" /></button></div><div className="mt-6 overflow-hidden rounded-[1.5rem] border border-white/85 bg-white/55"><div className="bg-gradient-to-br from-sky-50/90 via-white/35 to-teal-50/70 p-5"><div className="flex items-start justify-between gap-4"><div className="flex items-start gap-3"><div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-white/90 bg-white/80 text-sky-700 shadow-sm"><MapPin className="size-5" /></div><div><p className="text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-sky-700/75">Property profile</p><p className="mt-1.5 text-lg font-semibold leading-6 tracking-tight text-slate-900">{selectedLead.propertyAddress}</p><p className="mt-1 text-sm text-slate-500">{selectedLead.city}, {selectedLead.state} {selectedLead.zip}</p><p className="mt-1 text-xs font-medium text-slate-400">{selectedLead.county} County</p></div></div><Badge className="shrink-0 border-0 bg-teal-100/85 text-[0.65rem] text-teal-800"><Check className="mr-1 size-3" />Verified</Badge></div><div className="mt-5 flex flex-wrap items-center gap-2 text-[0.68rem] font-medium text-slate-500"><span className="rounded-full border border-white/90 bg-white/65 px-2.5 py-1">{sourceLabel(selectedLead.sourceType)}</span><span className="rounded-full border border-white/90 bg-white/65 px-2.5 py-1">{selectedLead.pipelineStatus}</span>{selectedLead.parcelId && <span className="rounded-full border border-white/90 bg-white/65 px-2.5 py-1">Parcel {selectedLead.parcelId}</span>}</div></div><div className="grid grid-cols-2 divide-x divide-white/75 border-t border-white/75 bg-white/35"><div className="p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-slate-400">Last verified</p><p className="mt-1 text-xs font-semibold text-slate-700">{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(
+                    typeof selectedLead.lastVerifiedAt === "string"
+                      ? new Date(selectedLead.lastVerifiedAt)
+                      : selectedLead.lastVerifiedAt,
+                  )}</p></div><div className="p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-slate-400">Record status</p><p className="mt-1 text-xs font-semibold text-teal-700">Source-backed</p></div></div></div><div className="mt-4 grid grid-cols-3 gap-2"><div className="glass-inset rounded-2xl p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-slate-500">Distress</p><p className={`mt-2 inline-flex rounded-lg px-2 py-1 text-base font-bold ${scoreTone(selectedLead.distressScore)}`}>{selectedLead.distressScore}<span className="ml-1 text-[0.62rem] font-medium">/100</span></p><p className="mt-1 text-[0.65rem] text-slate-500">Evidence score</p></div><div className="glass-inset rounded-2xl p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-slate-500">ARV</p><p className="mt-3 text-sm font-semibold text-slate-800">{money(selectedLead.arv)}</p><p className="mt-1 text-[0.65rem] text-slate-500">Estimated value</p></div><div className="glass-inset rounded-2xl p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-slate-500">MAO</p><p className="mt-3 text-sm font-semibold text-slate-800">{money(selectedLead.mao)}</p><p className="mt-1 text-[0.65rem] text-slate-500">Offer ceiling</p></div></div><div className="mt-6"><div><div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-800">Profile snapshot</h3><span className="text-[0.65rem] font-medium text-slate-400">Verified facts</span></div><div className="mt-3 grid grid-cols-2 gap-2"><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Owner mailing</p><p className="mt-1 text-xs font-medium leading-5 text-slate-700">{selectedLead.ownerMailingAddress || "Not recorded"}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Absentee owner</p><p className="mt-1 text-xs font-semibold text-slate-700">{selectedLead.absenteeOwner ? "Yes" : "No"}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Phone status</p><p className="mt-1 text-xs font-semibold text-slate-700">{selectedLead.listedPhone ? "Listed" : "Not listed"}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Skip trace</p><p className="mt-1 text-xs font-semibold text-slate-700">{selectedLead.needsSkipTrace ? "Needed" : "Not needed"}</p></div></div></div><div className="mt-6"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-800">Evidence chain</h3><Badge variant="outline" className="border-white/90 bg-white/55 text-xs text-slate-600">{sourceLabel(selectedLead.sourceType)}</Badge></div><div className="mt-3 rounded-2xl border border-white/80 bg-white/45 p-4"><div className="grid gap-3 text-xs"><div><p className="font-semibold text-slate-500">Source reference</p><p className="mt-1 font-medium text-slate-800">{selectedLead.sourceRef}</p></div><div><p className="font-semibold text-slate-500">Source date</p><p className="mt-1 font-medium text-slate-800">{selectedLead.sourceDate}</p></div><a href={selectedLead.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 font-semibold text-sky-700 hover:text-sky-900">Open source record <ArrowUpRight className="size-3.5" /></a></div></div></div><div className="mt-6"><h3 className="text-sm font-semibold text-slate-800">Verified signals</h3><div className="mt-3 space-y-2">{selectedLead.distressSignals.map((signal) => <div key={`${signal.type}-${signal.sourceDate}`} className="rounded-2xl border border-teal-100/80 bg-teal-50/45 p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-teal-900">{signal.type.replace(/_/g, " ")}</p><span className="text-xs font-bold text-teal-700">+{signal.weight}</span></div><p className="mt-1 text-xs leading-5 text-slate-600">{signal.evidence}</p></div>)}</div></div><div className="mt-6 grid grid-cols-3 gap-2"><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-500">ARV</p><p className="mt-1 text-xs font-semibold text-slate-800">{money(selectedLead.arv)}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-500">Repairs</p><p className="mt-1 text-xs font-semibold text-slate-800">{money(selectedLead.repairs)}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-500">MAO</p><p className="mt-1 text-xs font-semibold text-slate-800">{money(selectedLead.mao)}</p></div></div>{selectedLead.notes && <div className="mt-5 rounded-2xl border border-white/80 bg-white/45 p-4"><p className="text-xs font-semibold text-slate-500">Owner notes</p><p className="mt-1 text-sm leading-6 text-slate-700">{selectedLead.notes}</p></div>}<div className="mt-7 border-t border-white/70 pt-5"><Button type="button" variant="outline" onClick={handleDelete} disabled={!isOwner} className="w-full gap-2 rounded-xl border-red-200/80 bg-red-50/45 text-red-700 hover:bg-red-50"><Trash2 className="size-4" /> Delete record</Button><p className="mt-2 text-center text-[0.68rem] text-slate-400">Delete is permanently owner-authorized.</p></div></div></aside></div>}
 
       {showAddLead && <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/15 p-3 backdrop-blur-sm sm:items-center" onClick={(event) => { if (event.target === event.currentTarget) setShowAddLead(false); }}><div className="glass-panel-strong max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-[1.75rem] p-5 sm:p-7"><div className="flex items-start justify-between gap-5"><div><p className="eyebrow">Owner input</p><h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Add a verified lead</h2><p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">No generated names, phones, or addresses. This form only accepts a record you can tie back to a real source.</p></div><button type="button" onClick={() => setShowAddLead(false)} className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500" aria-label="Close add lead form"><X className="size-4" /></button></div><form onSubmit={handleCreateLead} className="mt-7 grid gap-5"><div><p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Property</p><div className="grid gap-3 sm:grid-cols-2"><Input required value={form.propertyAddress} onChange={(event) => updateForm("propertyAddress", event.target.value)} placeholder="Property address" className="sm:col-span-2 rounded-xl border-white/85 bg-white/65" /><Input required value={form.city} onChange={(event) => updateForm("city", event.target.value)} placeholder="City" className="rounded-xl border-white/85 bg-white/65" /><Input required value={form.state} onChange={(event) => updateForm("state", event.target.value)} placeholder="State" maxLength={2} className="rounded-xl border-white/85 bg-white/65" /><Input required value={form.zip} onChange={(event) => updateForm("zip", event.target.value)} placeholder="ZIP" className="rounded-xl border-white/85 bg-white/65" /><Input required value={form.county} onChange={(event) => updateForm("county", event.target.value)} placeholder="County" className="rounded-xl border-white/85 bg-white/65" /><Input value={form.parcelId} onChange={(event) => updateForm("parcelId", event.target.value)} placeholder="Parcel ID (optional)" className="rounded-xl border-white/85 bg-white/65" /><Input value={form.ownerMailingAddress} onChange={(event) => updateForm("ownerMailingAddress", event.target.value)} placeholder="Owner mailing address (optional)" className="sm:col-span-2 rounded-xl border-white/85 bg-white/65" /></div></div><div><p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Source & evidence</p><div className="grid gap-3 sm:grid-cols-2"><label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Source type</span><select required value={form.sourceType} onChange={(event) => updateForm("sourceType", event.target.value)} className="h-10 rounded-xl border border-white/85 bg-white/70 px-3 text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-sky-500/30">{SOURCE_TYPES.map((source) => <option key={source.value} value={source.value}>{source.label}</option>)}</select></label><label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Source date</span><input required type="date" value={form.sourceDate} onChange={(event) => updateForm("sourceDate", event.target.value)} className="h-10 rounded-xl border border-white/85 bg-white/70 px-3 text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-sky-500/30" /></label><Input required value={form.sourceUrl} onChange={(event) => updateForm("sourceUrl", event.target.value)} placeholder="Source URL" type="url" className="rounded-xl border-white/85 bg-white/65" /><Input required value={form.sourceRef} onChange={(event) => updateForm("sourceRef", event.target.value)} placeholder="Source reference / case #" className="rounded-xl border-white/85 bg-white/65" /><Input required value={form.signalType} onChange={(event) => updateForm("signalType", event.target.value)} placeholder="Signal type e.g. PRE_FORECLOSURE" className="rounded-xl border-white/85 bg-white/65" /><Input required value={form.signalWeight} onChange={(event) => updateForm("signalWeight", event.target.value)} placeholder="Signal weight" type="number" min="0" className="rounded-xl border-white/85 bg-white/65" /><textarea required value={form.signalEvidence} onChange={(event) => updateForm("signalEvidence", event.target.value)} placeholder="What does the source prove?" className="min-h-20 rounded-xl border border-white/85 bg-white/65 px-3 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500/30 sm:col-span-2" /><label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Distress score</span><input required type="number" min="0" max="100" value={form.distressScore} onChange={(event) => updateForm("distressScore", event.target.value)} className="h-10 rounded-xl border border-white/85 bg-white/70 px-3 text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-sky-500/30" /></label></div></div><div><p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Optional underwriting</p><div className="grid gap-3 sm:grid-cols-3"><Input value={form.arv} onChange={(event) => updateForm("arv", event.target.value)} placeholder="ARV" type="number" className="rounded-xl border-white/85 bg-white/65" /><Input value={form.repairs} onChange={(event) => updateForm("repairs", event.target.value)} placeholder="Repairs" type="number" className="rounded-xl border-white/85 bg-white/65" /><Input value={form.mao} onChange={(event) => updateForm("mao", event.target.value)} placeholder="MAO" type="number" className="rounded-xl border-white/85 bg-white/65" /><textarea value={form.notes} onChange={(event) => updateForm("notes", event.target.value)} placeholder="Owner notes (optional)" className="min-h-20 rounded-xl border border-white/85 bg-white/65 px-3 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500/30 sm:col-span-3" /></div></div><div className="flex flex-col-reverse gap-2 border-t border-white/70 pt-5 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" onClick={() => setShowAddLead(false)} className="rounded-xl text-slate-600">Cancel</Button><Button type="submit" className="gap-2 rounded-xl bg-sky-700 px-5 hover:bg-sky-800"><Plus className="size-4" /> Save verified lead</Button></div></form></div></div>}
     </main>

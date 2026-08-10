@@ -14,6 +14,7 @@ import "./types/global.d.ts";
 import Landing from "./pages/Landing";
 import AuthPage from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
+import BuyerIntake from "./pages/BuyerIntake";
 import NotFound from "./pages/NotFound";
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
@@ -65,6 +66,7 @@ createRoot(document.getElementById("root")!).render(
                 </RequireAuth>
               }
             />
+            <Route path="/buyers" element={<BuyerIntake />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

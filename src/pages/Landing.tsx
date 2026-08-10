@@ -44,9 +44,10 @@ export default function Landing() {
           <div className="hidden items-center gap-7 text-sm font-medium text-slate-600 md:flex">
             <a href="#principles" className="transition-colors hover:text-sky-700">Why it works</a>
             <a href="#workflow" className="transition-colors hover:text-sky-700">Workflow</a>
+            <Link to="/buyers" className="transition-colors hover:text-sky-700">I’m a buyer</Link>
             <Link to="/auth" className="rounded-full border border-white/90 bg-white/55 px-4 py-2 text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-white/85">Sign in</Link>
           </div>
-          <Link to="/auth" className="rounded-full border border-sky-500/25 bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_22px_rgb(14_116_144_/_0.2)] transition-all hover:-translate-y-0.5 hover:bg-sky-700 md:hidden">Open workspace</Link>
+          <div className="flex items-center gap-2 md:hidden"><Link to="/buyers" className="rounded-full border border-white/90 bg-white/60 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">I’m a buyer</Link><Link to="/auth" className="rounded-full border border-sky-500/25 bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_22px_rgb(14_116_144_/_0.2)] transition-all hover:-translate-y-0.5 hover:bg-sky-700">Open workspace</Link></div>
         </nav>
 
         <section className="relative grid items-center gap-12 pb-20 pt-20 lg:grid-cols-[1.03fr_0.97fr] lg:gap-16 lg:pb-28 lg:pt-28">

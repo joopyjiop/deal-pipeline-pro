@@ -9,6 +9,7 @@ import {
   Bot,
   Calculator,
   Check,
+  Copy,
   ExternalLink,
   FileSearch,
   Globe2,
@@ -103,6 +104,10 @@ function pretty(value: string) {
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+const mcpEndpoint = `${((import.meta.env.VITE_CONVEX_URL as string | undefined) ?? "https://savory-terrier-340.convex.site")
+  .replace(/\/$/, "")
+  .replace(/\.convex\.cloud$/, ".convex.site")}/api/mcp`;
+
 export default function Toolkit() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
@@ -133,6 +138,7 @@ export default function Toolkit() {
   const [estimating, setEstimating] = useState(false);
   const [scrapeResult, setScrapeResult] = useState<ScrapeResult | null>(null);
   const [estimateResult, setEstimateResult] = useState<EstimateResult | null>(null);
+  const [copiedMcpField, setCopiedMcpField] = useState<string | null>(null);
   const [queueUrl, setQueueUrl] = useState("");
   const [scrapeForm, setScrapeForm] = useState({ url: "", sourceType: "SHERIFF_SALE" as (typeof sourceTypes)[number][0] });
   const [estimateForm, setEstimateForm] = useState({
@@ -308,6 +314,16 @@ export default function Toolkit() {
     }
   };
 
+  const copyMcpValue = async (field: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedMcpField(field);
+      window.setTimeout(() => setCopiedMcpField(null), 1600);
+    } catch {
+      toast.error("Could not copy this value. Copy it manually instead.");
+    }
+  };
+
   const handleSignOut = async () => {
     await signOut();
     navigate("/");
@@ -399,6 +415,23 @@ export default function Toolkit() {
             {estimateResult && <div className="mt-5 rounded-2xl border border-teal-100 bg-teal-50/55 p-4"><div className="flex items-center justify-between gap-3"><div><Badge className={estimateResult.estimateStatus === "READY" ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-amber-100/80 text-amber-800"}>{pretty(estimateResult.estimateStatus)}</Badge><p className="mt-2 text-xs text-slate-500">{estimateResult.compCount} sourced comp{estimateResult.compCount === 1 ? "" : "s"} · repairs {money(estimateResult.repairs.total)}</p></div><p className="text-right text-xl font-semibold text-teal-800">{money(estimateResult.estimatedProfit)}<span className="block text-[0.65rem] font-medium text-slate-500">estimated gross spread</span></p></div>{estimateResult.arv && estimateResult.mao && <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs"><div className="glass-inset rounded-xl p-3"><p className="text-slate-400">Conservative ARV</p><p className="mt-1 font-semibold text-slate-700">{money(estimateResult.arv.conservative)}</p><p className="mt-2 text-slate-400">MAO {money(estimateResult.mao.conservative)}</p></div><div className="glass-inset rounded-xl border-teal-200/70 bg-white/55 p-3"><p className="text-slate-400">Median ARV</p><p className="mt-1 font-semibold text-slate-800">{money(estimateResult.arv.median)}</p><p className="mt-2 text-slate-400">MAO {money(estimateResult.mao.median)}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-slate-400">Aggressive ARV</p><p className="mt-1 font-semibold text-slate-700">{money(estimateResult.arv.aggressive)}</p><p className="mt-2 text-slate-400">MAO {money(estimateResult.mao.aggressive)}</p></div></div>}</div>}
           </section>
         </div>
+
+        <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-violet-100/80 text-violet-700"><Bot className="size-5" /></div><div><p className="eyebrow">External AI connection</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Deal Pipeline MCP server</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Use these details in Odyssey or another MCP-compatible agent. This website uses a remote HTTP server, so do not use the filesystem stdio example or expose MongoDB credentials.</p></div></div>
+            <Badge className="border-0 bg-teal-100/80 text-teal-800">Owner setup</Badge>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="rounded-2xl border border-white/80 bg-white/50 p-4"><p className="text-[0.68rem] font-semibold uppercase tracking-wide text-slate-400">Server name</p><div className="mt-2 flex items-center justify-between gap-2"><code className="text-sm font-semibold text-slate-800">Deal Pipeline MCP</code><button type="button" onClick={() => void copyMcpValue("name", "Deal Pipeline MCP")} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white hover:text-violet-700" aria-label="Copy server name">{copiedMcpField === "name" ? <Check className="size-3.5 text-teal-600" /> : <Copy className="size-3.5" />}</button></div></div>
+            <div className="rounded-2xl border border-white/80 bg-white/50 p-4"><p className="text-[0.68rem] font-semibold uppercase tracking-wide text-slate-400">Transport</p><div className="mt-2 flex items-center justify-between gap-2"><code className="text-sm font-semibold text-slate-800">Streamable HTTP</code><button type="button" onClick={() => void copyMcpValue("transport", "Streamable HTTP")} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white hover:text-violet-700" aria-label="Copy transport">{copiedMcpField === "transport" ? <Check className="size-3.5 text-teal-600" /> : <Copy className="size-3.5" />}</button></div></div>
+            <div className="rounded-2xl border border-white/80 bg-white/50 p-4 sm:col-span-2 lg:col-span-1"><p className="text-[0.68rem] font-semibold uppercase tracking-wide text-slate-400">Remote endpoint</p><div className="mt-2 flex items-center justify-between gap-2"><code className="min-w-0 truncate text-xs font-semibold text-sky-700">{mcpEndpoint}</code><button type="button" onClick={() => void copyMcpValue("endpoint", mcpEndpoint)} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white hover:text-violet-700" aria-label="Copy MCP endpoint">{copiedMcpField === "endpoint" ? <Check className="size-3.5 text-teal-600" /> : <Copy className="size-3.5" />}</button></div></div>
+          </div>
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <div className="rounded-2xl border border-sky-100/80 bg-sky-50/45 p-4"><p className="text-[0.68rem] font-semibold uppercase tracking-wide text-slate-500">Authorization header</p><div className="mt-2 flex items-center justify-between gap-2"><code className="min-w-0 truncate text-xs text-slate-700">Bearer &lt;MCP_TOOL_SERVER_SECRET&gt;</code><button type="button" onClick={() => void copyMcpValue("authorization", "Bearer <MCP_TOOL_SERVER_SECRET>")} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white hover:text-violet-700" aria-label="Copy authorization template">{copiedMcpField === "authorization" ? <Check className="size-3.5 text-teal-600" /> : <Copy className="size-3.5" />}</button></div><p className="mt-2 text-[0.68rem] leading-5 text-slate-500">Create the actual secret in Convex Environment Variables under <code>MCP_TOOL_SERVER_SECRET</code>. The value is intentionally never shown in this website.</p></div>
+            <div className="rounded-2xl border border-amber-100/80 bg-amber-50/45 p-4"><p className="text-[0.68rem] font-semibold uppercase tracking-wide text-amber-800">stdio fields from the integration form</p><div className="mt-2 grid gap-1 text-xs leading-5 text-slate-600"><p><strong>Command:</strong> Not applicable for this remote server</p><p><strong>Args:</strong> Not applicable</p><p><strong>Env:</strong> Do not put the secret in browser or agent environment fields; use the Authorization header above.</p></div><p className="mt-2 text-[0.68rem] leading-5 text-amber-800">The <code>@modelcontextprotocol/server-filesystem</code> example is a different local tool and must not be used for this deal pipeline.</p></div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/45 p-4"><p className="text-xs leading-5 text-slate-500">Available tools: <code>scrape_source</code>, <code>estimate_deal</code>, and <code>consultant_court</code>. The connected agent cannot approve leads, access MongoDB directly, export private data, or bypass owner review.</p><button type="button" onClick={() => void copyMcpValue("config", JSON.stringify({ name: "Deal Pipeline MCP", transport: "Streamable HTTP", url: mcpEndpoint, headers: { Authorization: "Bearer <MCP_TOOL_SERVER_SECRET>" } }, null, 2))} className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-white/90 bg-white/70 px-3 text-xs font-semibold text-slate-700 transition-colors hover:text-violet-700"><Copy className="size-3.5" />{copiedMcpField === "config" ? "Copied config" : "Copy config"}</button></div>
+        </section>
 
         <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6"><div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-violet-100/80 text-violet-700"><Bot className="size-5" /></div><div className="min-w-0 flex-1"><p className="eyebrow">AI connector handoff</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Controlled tool manifest</h2><p className="mt-1 text-xs leading-5 text-slate-500">The court uses bounded source evidence only. It does not expose Mongo credentials, approve leads, or bypass owner checks.</p></div><Badge className="border-0 bg-violet-100/80 text-violet-800">{loading ? "Loading" : access.aiEnabled ? "Enabled" : "Owner only"}</Badge></div><pre className="mt-4 max-h-72 overflow-auto rounded-2xl border border-white/80 bg-white/55 p-4 text-[0.7rem] leading-5 text-slate-600">{manifest ? JSON.stringify(manifest, null, 2) : "Manifest unavailable until tool access loads."}</pre><div className="mt-4 flex items-start gap-2 text-xs text-slate-500"><Check className="mt-0.5 size-3.5 shrink-0 text-teal-600" /><p>The court requires exact evidence quotes from the staged source, flags missing information, and keeps the owner as final decision-maker. The estimator only calculates from explicit numbers and reports when appraisal data is missing.</p></div></section>
         <p className="pb-5 pt-5 text-center text-xs text-slate-500">MongoDB is the source of truth for staged sources and saved underwriting. These actions are owner-only and refresh on demand.</p>

@@ -63,10 +63,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       setIsLoading(false);
     } catch (error) {
       console.error("Email sign-in error:", error);
-      setError(
+      const message =
         error instanceof Error
           ? error.message
-          : "Failed to send verification code. Please try again.",
+          : "Failed to send verification code. Please try again.";
+      setError(
+        /Missing environment variable/i.test(message)
+          ? `${message} — add it to the environment variables of the Convex deployment your app connects to, then try again.`
+          : message,
       );
       setIsLoading(false);
     }
@@ -86,7 +90,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     } catch (error) {
       console.error("OTP verification error:", error);
 
-      setError("The verification code you entered is incorrect.");
+      const message = error instanceof Error ? error.message : "";
+      setError(
+        message && !/Could not verify code/i.test(message)
+          ? message
+          : "The verification code you entered is incorrect or has expired. Request a new code and try again.",
+      );
       setIsLoading(false);
 
       setOtp("");

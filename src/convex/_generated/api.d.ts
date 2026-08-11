@@ -11,6 +11,7 @@
 import type * as admin from "../admin.js";
 import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
+import type * as camofox from "../camofox.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as leads from "../leads.js";
@@ -29,6 +30,7 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   auth: typeof auth;
   "auth/emailOtp": typeof auth_emailOtp;
+  camofox: typeof camofox;
   crons: typeof crons;
   http: typeof http;
   leads: typeof leads;

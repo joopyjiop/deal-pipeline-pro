@@ -2,6 +2,7 @@
 
 import { Document, MongoClient, ObjectId } from "mongodb";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 
 const LEADS = "leads";
@@ -16,6 +17,7 @@ const resourceValidator = v.union(
   v.literal("matches"),
   v.literal("hot-deals"),
   v.literal("import-staging"),
+  v.literal("users"),
 );
 const operationValidator = v.union(
   v.literal("LIST"),
@@ -25,7 +27,7 @@ const operationValidator = v.union(
   v.literal("DELETE"),
 );
 
-type Resource = "leads" | "buyers" | "matches" | "hot-deals" | "import-staging";
+type Resource = "leads" | "buyers" | "matches" | "hot-deals" | "import-staging" | "users";
 let clientPromise: Promise<MongoClient> | null = null;
 
 function getMongoClient() {
@@ -203,7 +205,16 @@ export const adminCrud = internalAction({
     payload: v.any(),
     filters: v.any(),
   },
-  handler: async (_, args) => {
+  handler: async (ctx, args): Promise<unknown> => {
+    // The Convex users table lives in Convex, not MongoDB. Listing it uses an
+    // internal query; the other resources use MongoDB. Read-only here —
+    // role/email edits are intentionally not exposed through this API.
+    if (args.resource === "users") {
+      if (args.operation !== "LIST") throw new Error("Users are read-only through this API");
+      const rows = await ctx.runQuery(internal.users.listUsers, {});
+      return { resource: "users", count: rows.length, data: rows.map(serialize) };
+    }
+
     const database = await getDatabase();
     const documents = database.collection(collectionName(args.resource));
 

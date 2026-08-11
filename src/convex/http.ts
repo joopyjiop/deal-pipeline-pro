@@ -108,7 +108,7 @@ const queueN8nSource = httpAction(async (ctx, request) => {
   }
 });
 
-const adminResourceNames = new Set(["leads", "buyers", "matches", "hot-deals", "import-staging"]);
+const adminResourceNames = new Set(["leads", "buyers", "matches", "hot-deals", "import-staging", "users"]);
 const adminNumberFilters = new Set(["limit", "minDistressScore", "maxDistressScore", "minMatchScore"]);
 
 function adminAuthorized(request: Request) {
@@ -138,7 +138,7 @@ const adminApi = httpAction(async (ctx, request) => {
     }
   });
   if (parts.length < 1 || parts.length > 2 || !adminResourceNames.has(parts[0])) return json({ error: "Unknown admin resource" }, 404);
-  const resource = parts[0] as "leads" | "buyers" | "matches" | "hot-deals" | "import-staging";
+  const resource = parts[0] as "leads" | "buyers" | "matches" | "hot-deals" | "import-staging" | "users";
   const id = parts[1];
   const method = request.method;
   const operation = method === "GET" ? (id ? "GET" : "LIST") : method === "POST" ? "CREATE" : method === "PATCH" || method === "PUT" ? "UPDATE" : method === "DELETE" ? "DELETE" : undefined;

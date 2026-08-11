@@ -21,6 +21,17 @@ export const currentUser = query({
 });
 
 /**
+ * List users-table documents (for the admin API). Never returns auth secrets;
+ * only the fields the schema stores.
+ */
+export const listUsers = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("users").order("desc").take(200);
+  },
+});
+
+/**
  * Resolve a users-table document by auth subject (the subject is the users
  * row `_id`). Used by owner checks in actions, where `ctx.db` is unavailable,
  * so the backend and frontend share one source of truth for owner status.

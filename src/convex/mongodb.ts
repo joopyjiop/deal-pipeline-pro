@@ -311,19 +311,23 @@ function isOwnerEmail(email: string | undefined) {
   return email?.trim().toLowerCase() === OWNER_EMAIL;
 }
 
-async function requireOwner(ctx: ActionCtx) {
+async function isOwnerIdentity(ctx: ActionCtx) {
   const identity = await ctx.auth.getUserIdentity();
-  if (isOwnerEmail(identity?.email)) return;
-  // Fall back to the users table so the backend matches the app's owner
-  // convention (role "admin" OR the permanent owner email), the same source
-  // of truth the frontend uses to show owner status. The auth subject is the
-  // users row `_id`, so this is the same user the client sees.
-  if (identity?.subject) {
-    const user = await ctx.runQuery(internal.users.getUserBySubject, {
-      subject: identity.subject,
-    });
-    if (user && (user.role === "admin" || isOwnerEmail(user.email))) return;
-  }
+  if (isOwnerEmail(identity?.email)) return true;
+  // The identity subject is `<userId>|<sessionId>` (see @convex-dev/auth
+  // getAuthUserId). Split off the userId before looking up the users table so
+  // the backend matches the app's owner convention (role "admin" OR the
+  // permanent owner email) against the same row the frontend reads.
+  const [userId] = (identity?.subject ?? "").split("|");
+  if (!userId) return false;
+  const user = await ctx.runQuery(internal.users.getUserBySubject, {
+    subject: userId,
+  });
+  return Boolean(user && (user.role === "admin" || isOwnerEmail(user.email)));
+}
+
+async function requireOwner(ctx: ActionCtx) {
+  if (await isOwnerIdentity(ctx)) return;
   throw new Error("Owner access required");
 }
 
@@ -1642,7 +1646,7 @@ export const listLeads = action({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Authentication required");
-    const owner = identity.email?.trim().toLowerCase() === OWNER_EMAIL;
+    const owner = await isOwnerIdentity(ctx);
     if (!owner && args.pipelineStatus && args.pipelineStatus !== "APPROVED") {
       throw new Error("Only the owner can view pending lead candidates");
     }

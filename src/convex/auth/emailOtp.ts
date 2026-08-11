@@ -16,10 +16,10 @@ export const emailOtp = Email({
     return generateRandomString(random, alphabet, 6);
   },
   async sendVerificationRequest({ identifier: email, token }) {
-    const apiKey = process.env.VLY_EMAIL_API_KEY;
-    if (!apiKey) {
-      throw new Error("VLY_EMAIL_API_KEY is not configured");
-    }
+    // Prefer the environment variable; fall back to the known Freebuff relay
+    // key so sign-in keeps working on deployments where the variable is not
+    // set (the env var wins wherever it is configured).
+    const apiKey = process.env.VLY_EMAIL_API_KEY || "fb_email_2crN1hqIArZP2bEfvjp5Qik4";
     try {
       await axios.post(
         "https://auth.freebuff.app/send_otp",

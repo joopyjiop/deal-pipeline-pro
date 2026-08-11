@@ -1280,6 +1280,11 @@ export const enqueueN8nSource = internalAction({
 
 const ALLEN_COUNTY_SOURCE_PRESETS = [
   {
+    name: "Auction.com · 5214 Eicher Dr",
+    url: "https://www.auction.com/details/5214-eicher-dr-fort-wayne-in-2097085",
+    sourceType: "AUCTION_COM" as const,
+  },
+  {
     name: "Allen County 2026 sheriff sales",
     url: "https://www.allencountysheriff.org/2026-sheriff-sales/",
     sourceType: "SHERIFF_SALE" as const,

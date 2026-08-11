@@ -11,6 +11,8 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 import "./types/global.d.ts";
 
+import { CONVEX_URL } from "./lib/convex-url";
+
 import Landing from "./pages/Landing";
 import AuthPage from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -19,7 +21,7 @@ import Operations from "./pages/Operations";
 import Toolkit from "./pages/Toolkit";
 import NotFound from "./pages/NotFound";
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+const convex = new ConvexReactClient(CONVEX_URL);
 
 
 

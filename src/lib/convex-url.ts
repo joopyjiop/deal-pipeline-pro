@@ -1,11 +1,10 @@
 /**
  * The Convex deployment the browser talks to.
  *
- * The Freebuff platform injects `VITE_CONVEX_URL` at build time, and it has
- * been pointing at the managed/retired deployment (`savory-terrier-340`),
- * whose env vars cannot be edited. The app now runs against the owner's own
- * deployment (`keen-aardvark-333`), so that injected value is intentionally
- * not used here.
+ * The Freebuff platform injects `VITE_CONVEX_URL` at build time pointing at
+ * its managed dev deployment, whose env vars cannot be edited. The app runs
+ * against the owner's own deployment (`keen-aardvark-333`), so that injected
+ * value is intentionally not used here.
  *
  * `VITE_CONVEX_URL_OVERRIDE` is a self-hosting escape hatch: when the
  * frontend is built outside Freebuff (e.g. Vercel/Netlify/GitHub Pages) and

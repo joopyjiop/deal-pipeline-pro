@@ -234,7 +234,6 @@ export const camofoxAct = action({
   handler: async (ctx, args) => {
     await requireOwner(ctx);
     const tabId = encodeURIComponent(args.tabId);
-    const userId = encodeURIComponent(CAMOFOX_USER);
 
     if (args.action === "click") {
       if (!args.ref && !args.selector) throw new Error("click requires ref or selector");

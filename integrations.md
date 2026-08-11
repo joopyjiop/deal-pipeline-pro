@@ -166,6 +166,8 @@ The existing `MONGODB_URI` remains server-only and is not needed in n8n.
 4. Run one manual test, then publish the workflow. A successful response is `202` with a queued task ID. Reusing the same `idempotencyKey` is safe and does not create duplicate tasks.
 5. Leave the existing Convex automation cycle enabled in `/toolkit`; it fetches, stages, qualifies, and records the result. Set `Tasks per cycle` to a small value such as 3–5 so one run cannot create a large burst of source requests.
 
+The owner can also use **Queue Allen County** in `/toolkit` to seed the official 2026 Allen County sheriff-sale page and tax-sale page into the same queue. The preset uses stable idempotency keys, so repeated clicks do not create duplicate pending tasks. These are source-page seeds, not approvals: pages with no explicit address, location, date, and case/parcel/sale reference are rejected rather than converted into leads.
+
 The endpoint accepts only the supported source types and public URLs, deduplicates retries, and never promotes a candidate past `SOURCED`. Review and approval still happen in `/operations`. The UI refreshes on demand because MongoDB changes are not reactive Convex subscriptions.
 
 ## AI consultant court

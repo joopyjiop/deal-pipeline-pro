@@ -1278,6 +1278,34 @@ export const enqueueN8nSource = internalAction({
   },
 });
 
+const ALLEN_COUNTY_SOURCE_PRESETS = [
+  {
+    name: "Allen County 2026 sheriff sales",
+    url: "https://www.allencountysheriff.org/2026-sheriff-sales/",
+    sourceType: "SHERIFF_SALE" as const,
+  },
+  {
+    name: "Allen County 2026 tax sale",
+    url: "https://www.allencounty.in.gov/270/Tax-Sale",
+    sourceType: "TAX_SALE" as const,
+  },
+] as const;
+
+export const queueAllenCountySources = action({
+  args: {},
+  handler: async (ctx) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const queued = await Promise.all(
+      ALLEN_COUNTY_SOURCE_PRESETS.map(async (source) => ({
+        ...source,
+        ...(await enqueueSourceTask(database, source.url, source.sourceType, `allen-county:${source.sourceType}:2026`)),
+      })),
+    );
+    return { queued, ownerApprovalRequired: true };
+  },
+});
+
 export const setAutomationConfig = action({
   args: {
     enabled: v.boolean(),

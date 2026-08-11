@@ -147,7 +147,13 @@ const adminApi = httpAction(async (ctx, request) => {
   const url = new URL(request.url);
   const filters: Record<string, unknown> = {};
   for (const [key, value] of url.searchParams.entries()) {
-    filters[key] = adminNumberFilters.has(key) ? Number(value) : value;
+    if (adminNumberFilters.has(key)) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return json({ error: `Filter ${key} must be a finite number` }, 400, { "cache-control": "no-store" });
+      filters[key] = numeric;
+    } else {
+      filters[key] = value;
+    }
   }
 
   let payload: unknown = {};
@@ -204,7 +210,7 @@ const mcpGet = httpAction(async (_, request) => {
     return json({ error: "Streamable HTTP GET requires Accept: text/event-stream" }, 406, mcpHeaders);
   }
 
-  return mcpEventStream(": mcp stream ready\\n\\n");
+  return mcpEventStream(": mcp stream ready\n\n");
 });
 
 function mcpJsonRpcResult(id: JsonRpcId, value: unknown) {

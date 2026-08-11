@@ -186,6 +186,67 @@ function mcpTools() {
       },
     },
     {
+      name: "queue_source",
+      description: "Send a public source URL into the same managed automation queue used by the website and n8n. It creates only a pending source task; it never approves a lead.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "Public http(s) source URL" },
+          sourceType: { type: "string", enum: [...mcpSourceTypes] },
+          idempotencyKey: { type: "string", description: "Optional stable key to make retries safe" },
+        },
+        required: ["url", "sourceType"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "list_pipeline",
+      description: "Read non-fabricated sourced and approved leads from the website pipeline, including evidence links, distress score, verification, underwriting, and estimated profit.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          pipelineStatus: { type: "string", enum: ["SOURCED", "CRITIQUED", "VERIFIED", "APPROVED", "REJECTED"] },
+          minDistressScore: { type: "number", minimum: 0, maximum: 100 },
+          limit: { type: "number", minimum: 1, maximum: 50 },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "list_staged_sources",
+      description: "Read bounded source evidence and consultant-court results from the website staging queue so the agent can continue a review without direct MongoDB access.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["NEW", "DUPLICATE", "REJECTED"] },
+          limit: { type: "number", minimum: 1, maximum: 50 },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "list_buyer_buy_boxes",
+      description: "Read approved, verified buyer buy-box constraints for matching. Contact names, emails, and phone numbers are never returned.",
+      inputSchema: {
+        type: "object",
+        properties: { limit: { type: "number", minimum: 1, maximum: 50 } },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "list_match_board",
+      description: "Read the website's match board with scores, confidence, status, and buy-box summaries; no buyer contact information is returned.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["CANDIDATE", "APPROVED", "REJECTED", "CONTACTED", "CLOSED"] },
+          confidence: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] },
+          limit: { type: "number", minimum: 1, maximum: 50 },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
       name: "estimate_deal",
       description: "Calculate ARV scenarios, repair estimate, MAO scenarios, and estimated gross spread from explicit inputs. Missing comps produce NEEDS_APPRAISAL.",
       inputSchema: {
@@ -243,6 +304,65 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
     return ctx.runAction(internal.mongodb.mcpScrapeSource, {
       url: rawArguments.url,
       sourceType: rawArguments.sourceType,
+    });
+  }
+
+  if (name === "queue_source") {
+    if (typeof rawArguments.url !== "string" || !isMcpSourceType(rawArguments.sourceType)) {
+      throw new Error("queue_source requires a public url and supported sourceType");
+    }
+    const idempotencyKey = optionalString(rawArguments.idempotencyKey);
+    if (idempotencyKey === "__invalid__") throw new Error("idempotencyKey must be a string when provided");
+    return ctx.runAction(internal.mongodb.mcpQueueSource, {
+      url: rawArguments.url,
+      sourceType: rawArguments.sourceType,
+      idempotencyKey,
+    });
+  }
+
+  if (name === "list_pipeline") {
+    const pipelineStatus = optionalString(rawArguments.pipelineStatus);
+    const minDistressScore = optionalNumber(rawArguments.minDistressScore);
+    const limit = optionalNumber(rawArguments.limit);
+    if (pipelineStatus === "__invalid__" || Number.isNaN(minDistressScore) || Number.isNaN(limit)) {
+      throw new Error("list_pipeline filters must use the documented types");
+    }
+    return ctx.runAction(internal.mongodb.mcpListPipeline, {
+      pipelineStatus: pipelineStatus as "SOURCED" | "CRITIQUED" | "VERIFIED" | "APPROVED" | "REJECTED" | undefined,
+      minDistressScore,
+      limit,
+    });
+  }
+
+  if (name === "list_staged_sources") {
+    const status = optionalString(rawArguments.status);
+    const limit = optionalNumber(rawArguments.limit);
+    if (status === "__invalid__" || Number.isNaN(limit)) {
+      throw new Error("list_staged_sources filters must use the documented types");
+    }
+    return ctx.runAction(internal.mongodb.mcpListStagedSources, {
+      status: status as "NEW" | "DUPLICATE" | "REJECTED" | undefined,
+      limit,
+    });
+  }
+
+  if (name === "list_buyer_buy_boxes") {
+    const limit = optionalNumber(rawArguments.limit);
+    if (Number.isNaN(limit)) throw new Error("limit must be a number when provided");
+    return ctx.runAction(internal.mongodb.mcpListBuyBoxes, { limit });
+  }
+
+  if (name === "list_match_board") {
+    const status = optionalString(rawArguments.status);
+    const confidence = optionalString(rawArguments.confidence);
+    const limit = optionalNumber(rawArguments.limit);
+    if (status === "__invalid__" || confidence === "__invalid__" || Number.isNaN(limit)) {
+      throw new Error("list_match_board filters must use the documented types");
+    }
+    return ctx.runAction(internal.mongodb.mcpListMatchBoard, {
+      status: status as "CANDIDATE" | "APPROVED" | "REJECTED" | "CONTACTED" | "CLOSED" | undefined,
+      confidence: confidence as "LOW" | "MEDIUM" | "HIGH" | undefined,
+      limit,
     });
   }
 
@@ -335,6 +455,7 @@ const mcpToolServer = httpAction(async (ctx, request) => {
     const params = body.params as McpToolCallParams;
     if (typeof params.name !== "string") return mcpError(requestId, -32602, "tools/call requires a tool name");
     try {
+      await ctx.runAction(internal.mongodb.mcpAssertAiAccess, {});
       const value = await callMcpTool(ctx, params.name, params.arguments ?? {});
       return mcpToolResult(requestId, value);
     } catch (error) {

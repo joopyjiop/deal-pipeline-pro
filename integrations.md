@@ -186,23 +186,28 @@ To activate the court, add this server-only Convex variable:
 
 The court makes four model calls per reviewed source, in parallel for the three consultants and then one judge call. This does not consume n8n executions; it uses the configured AI provider instead. If the key is missing, the candidate stays unapproved and the Toolkit reports that the court is waiting for setup.
 
-## Odyssey MCP Tool Server
+## Odysseus MCP Tool Server
 
-The app now exposes a protected remote MCP endpoint for an external AI agent such as Odyssey:
+The app now exposes a protected remote MCP endpoint for an external AI agent such as Odysseus:
 
 - Endpoint: `https://YOUR_CONVEX_DEPLOYMENT.convex.site/api/mcp`
 - Transport: Streamable HTTP
 - Authentication: `Authorization: Bearer <MCP_TOOL_SERVER_SECRET>`
 - Convex environment variable: `MCP_TOOL_SERVER_SECRET`
 
-Generate a new long random secret and add it in the Convex Environment vars panel. Do not reuse `MONGODB_URI`, `SAMBANOVA_API_KEY`, or the n8n secret, and do not put any of them in Odyssey.
+Generate a new long random secret and add it in the Convex Environment vars panel. Do not reuse `MONGODB_URI`, `SAMBANOVA_API_KEY`, or the n8n secret, and do not put any of them in Odysseus.
 
-In Odyssey's **Settings → Integrations → MCP Tool Server** form, enter the endpoint above, choose Streamable HTTP if asked, and set the bearer/API-key secret to the exact value of `MCP_TOOL_SERVER_SECRET`. The server supports `initialize`, `tools/list`, and `tools/call`.
+In Odysseus's **Settings → Integrations → MCP Tool Server** form, enter the endpoint above, choose Streamable HTTP if asked, and set the bearer/API-key secret to the exact value of `MCP_TOOL_SERVER_SECRET`. The server supports `initialize`, `tools/list`, and `tools/call`.
 
-The connected agent can call only:
+The connected agent can call:
 
-1. `scrape_source` — fetch a public, attributable URL and stage bounded evidence.
-2. `estimate_deal` — calculate ARV, repairs, MAO, and estimated spread from explicit inputs.
-3. `consultant_court` — run the evidence, underwriting, risk/compliance, and judge review for a staged source.
+1. `queue_source` — send a public source URL into the same pending queue used by the website and n8n.
+2. `scrape_source` — fetch a public, attributable URL and stage bounded evidence.
+3. `list_pipeline` — read non-fabricated sourced and approved leads with evidence and underwriting fields.
+4. `list_staged_sources` — read bounded staged evidence and court results.
+5. `list_buyer_buy_boxes` — read approved buy-box constraints without buyer contact details.
+6. `list_match_board` — read match scores, confidence, status, and summaries without buyer contact details.
+7. `estimate_deal` — calculate ARV, repairs, MAO, and estimated spread from explicit inputs.
+8. `consultant_court` — run the evidence, underwriting, risk/compliance, and judge review for a staged source.
 
-It cannot access MongoDB directly, approve or reject leads, export data, dial anyone, run n8n, or bypass owner review. Candidate approval remains a human owner action in `/operations`. If the MCP secret is missing or wrong, the endpoint returns `401` and does not run a tool.
+It cannot access MongoDB directly, submit or approve buyers, approve or reject leads, export data, dial anyone, run n8n, or bypass owner review. Queueing only creates pending source work; the owner still approves every lead. Candidate approval remains a human owner action in `/operations`. If the MCP secret is missing or wrong, the endpoint returns `401` and does not run a tool.

@@ -657,6 +657,41 @@ export const getAiToolManifest = action({
       aiAccessEnabled: aiEnabled,
       tools: [
         {
+          name: "queue_source",
+          enabled: aiEnabled && scraperEnabled,
+          description: "Send a public source URL into the same pending automation queue used by the website and n8n; never approves a lead.",
+          permission: "owner-service",
+          input: { url: "string (public http or https)", sourceType: "source type", idempotencyKey: "optional string" },
+        },
+        {
+          name: "list_pipeline",
+          enabled: aiEnabled,
+          description: "Read non-fabricated sourced and approved leads with source evidence and underwriting fields.",
+          permission: "owner-service",
+          input: { pipelineStatus: "optional pipeline status", minDistressScore: "optional number", limit: "optional number" },
+        },
+        {
+          name: "list_staged_sources",
+          enabled: aiEnabled && scraperEnabled,
+          description: "Read bounded staged evidence and consultant-court results from the website queue.",
+          permission: "owner-service",
+          input: { status: "optional staging status", limit: "optional number" },
+        },
+        {
+          name: "list_buyer_buy_boxes",
+          enabled: aiEnabled,
+          description: "Read approved verified buy-box constraints without returning buyer contact information.",
+          permission: "owner-service",
+          input: { limit: "optional number" },
+        },
+        {
+          name: "list_match_board",
+          enabled: aiEnabled,
+          description: "Read match scores, confidence, status, and summaries without buyer contact information.",
+          permission: "owner-service",
+          input: { status: "optional match status", confidence: "optional confidence", limit: "optional number" },
+        },
+        {
           name: "scrape_source",
           enabled: aiEnabled && scraperEnabled,
           description: "Fetch a public source URL, return a bounded evidence preview, and stage probate, auction, or off-market evidence for owner review. Never creates or invents PII.",
@@ -929,6 +964,7 @@ export const mcpScrapeSource = internalAction({
       throw new Error("MCP source staging requires a public, attributable source type");
     }
     const database = await getDatabase();
+    await requireMcpAiAccess(database);
     const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
     if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
     return fetchAndStageSource(database, args);
@@ -938,7 +974,9 @@ export const mcpScrapeSource = internalAction({
 export const mcpEstimateDeal = internalAction({
   args: estimateInputValidator,
   handler: async (_, args) => {
-    const access = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
     if (access?.estimatorEnabled === false) throw new Error("The estimator tool is disabled in Tool access settings");
     return calculateDealEstimate(args);
   },
@@ -948,6 +986,7 @@ export const mcpRunConsultantCourt = internalAction({
   args: { stagedId: v.string() },
   handler: async (_, args) => {
     const database = await getDatabase();
+    await requireMcpAiAccess(database);
     const stagingId = objectId(args.stagedId);
     const staging = await database.collection(IMPORT_STAGING).findOne({ _id: stagingId });
     if (!staging) throw new Error("Staged source not found");
@@ -1294,6 +1333,167 @@ export const runAutomationNow = action({
   handler: async (ctx): Promise<unknown> => {
     await requireOwner(ctx);
     return ctx.runAction(internal.mongodb.runAutomationCycle, {});
+  },
+});
+
+// MCP-facing pipeline bridges. These are only callable through the authenticated
+// MCP HTTP route and deliberately expose no Mongo connection details or buyer PII.
+async function requireMcpAiAccess(database: Awaited<ReturnType<typeof getDatabase>>) {
+  const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+  if (access?.aiEnabled !== true) throw new Error("AI access is disabled in the owner Toolkit");
+}
+
+export const mcpAssertAiAccess = internalAction({
+  args: {},
+  handler: async () => {
+    await requireMcpAiAccess(await getDatabase());
+    return { enabled: true };
+  },
+});
+
+export const mcpQueueSource = internalAction({
+  args: {
+    url: v.string(),
+    sourceType: sourceTypeValidator,
+    idempotencyKey: v.optional(v.string()),
+  },
+  handler: async (_, args) => {
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    return enqueueSourceTask(database, args.url, args.sourceType, args.idempotencyKey?.trim() || undefined);
+  },
+});
+
+export const mcpListPipeline = internalAction({
+  args: {
+    pipelineStatus: v.optional(pipelineStatusValidator),
+    minDistressScore: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (_, args) => {
+    const limit = Math.max(1, Math.min(50, Math.floor(args.limit ?? 25)));
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    const filter: Document = {
+      fabricated: { $ne: true },
+      pipelineStatus: args.pipelineStatus ?? { $in: ["SOURCED", "CRITIQUED", "APPROVED"] },
+    };
+    if (args.minDistressScore !== undefined) filter.distressScore = { $gte: args.minDistressScore };
+    const documents = await database.collection(LEADS).find(filter).sort({ distressScore: -1, updatedAt: -1 }).limit(limit).toArray();
+    return {
+      dataOrigin: "verified_or_sourced" as const,
+      live: false,
+      leads: documents.map((document) => {
+        const lead = serialize(document);
+        return {
+          _id: lead._id,
+          propertyAddress: lead.propertyAddress,
+          city: lead.city,
+          state: lead.state,
+          zip: lead.zip,
+          county: lead.county,
+          sourceType: lead.sourceType,
+          sourceUrl: lead.sourceUrl,
+          sourceRef: lead.sourceRef,
+          sourceDate: lead.sourceDate,
+          distressScore: lead.distressScore,
+          distressSignals: lead.distressSignals,
+          verificationStatus: lead.verificationStatus,
+          pipelineStatus: lead.pipelineStatus,
+          arv: lead.arv,
+          repairs: lead.repairs,
+          mao: lead.mao,
+          estimatedProfit: calculateEstimatedProfit(lead),
+          updatedAt: lead.updatedAt,
+        };
+      }),
+    };
+  },
+});
+
+export const mcpListStagedSources = internalAction({
+  args: {
+    status: v.optional(v.union(v.literal("NEW"), v.literal("DUPLICATE"), v.literal("REJECTED"))),
+    limit: v.optional(v.number()),
+  },
+  handler: async (_, args) => {
+    const limit = Math.max(1, Math.min(50, Math.floor(args.limit ?? 25)));
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    const documents = await database.collection(IMPORT_STAGING)
+      .find(args.status ? { status: args.status } : {})
+      .sort({ updatedAt: -1 })
+      .limit(limit)
+      .toArray();
+    return documents.map((document) => {
+      const staging = serialize(document);
+      const raw = staging.rawJson && typeof staging.rawJson === "object" ? staging.rawJson as Record<string, unknown> : {};
+      return {
+        _id: staging._id,
+        sourceType: staging.sourceType,
+        status: staging.status,
+        sourceUrl: raw.url,
+        title: raw.title,
+        excerpt: typeof raw.excerpt === "string" ? raw.excerpt.slice(0, 4000) : undefined,
+        links: Array.isArray(raw.links) ? raw.links.slice(0, 20) : [],
+        fetchedAt: raw.fetchedAt,
+        candidateLeadId: staging.candidateLeadId,
+        aiCourtVerdict: staging.aiCourtVerdict,
+        rejectReason: staging.rejectReason,
+        updatedAt: staging.updatedAt,
+      };
+    });
+  },
+});
+
+export const mcpListBuyBoxes = internalAction({
+  args: { limit: v.optional(v.number()) },
+  handler: async (_, args) => {
+    const limit = Math.max(1, Math.min(50, Math.floor(args.limit ?? 25)));
+    const documents = await (await getDatabase()).collection(BUYERS)
+      .find({ intakeStatus: "APPROVED", verificationStatus: "VERIFIED" })
+      .sort({ updatedAt: -1 })
+      .limit(limit)
+      .toArray();
+    return documents.map((document) => ({
+      _id: String(document._id),
+      budgetMin: document.budgetMin,
+      budgetMax: document.budgetMax,
+      targetAreas: document.targetAreas,
+      exitType: document.exitType,
+      proofOfFundsStatus: document.proofOfFundsStatus,
+      updatedAt: document.updatedAt,
+    }));
+  },
+});
+
+export const mcpListMatchBoard = internalAction({
+  args: {
+    status: v.optional(matchStatusValidator),
+    confidence: v.optional(matchConfidenceValidator),
+    limit: v.optional(v.number()),
+  },
+  handler: async (_, args) => {
+    const limit = Math.max(1, Math.min(50, Math.floor(args.limit ?? 25)));
+    const filter: Document = {};
+    if (args.status) filter.status = args.status;
+    if (args.confidence) filter.confidence = args.confidence;
+    const documents = await (await getDatabase()).collection(MATCHES)
+      .find(filter)
+      .sort({ matchScore: -1, updatedAt: -1 })
+      .limit(limit)
+      .toArray();
+    return documents.map((document) => ({
+      _id: String(document._id),
+      leadId: String(document.leadId),
+      buyerId: String(document.buyerId),
+      matchScore: document.matchScore,
+      buyBoxSummary: document.buyBoxSummary,
+      confidence: document.confidence,
+      status: document.status,
+      rejectReason: document.rejectReason,
+      updatedAt: document.updatedAt,
+    }));
   },
 });
 

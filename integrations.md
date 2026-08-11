@@ -211,3 +211,26 @@ The connected agent can call:
 8. `consultant_court` — run the evidence, underwriting, risk/compliance, and judge review for a staged source.
 
 It cannot access MongoDB directly, submit or approve buyers, approve or reject leads, export data, dial anyone, run n8n, or bypass owner review. Queueing only creates pending source work; the owner still approves every lead. Candidate approval remains a human owner action in `/operations`. If the MCP secret is missing or wrong, the endpoint returns `401` and does not run a tool.
+
+## Admin API
+
+The server also exposes a MongoDB-backed CRUD API for external owner-controlled automation. Add a long random value as the server-only Convex environment variable `ADMIN_API_KEY`. Every request must send `Authorization: Bearer <ADMIN_API_KEY>`; missing, malformed, or incorrect credentials return `401`. The key is never read by the frontend.
+
+Base URL: `https://YOUR_CONVEX_DEPLOYMENT.convex.site/api/admin`
+
+Resources and operations:
+
+- `GET /leads` — list leads. Optional query filters: `status`, `verificationStatus`, `minDistressScore`, `maxDistressScore`, `limit`.
+- `GET /leads/{id}` — fetch one lead by MongoDB `_id`.
+- `POST /leads` — create a lead; body is the Lead shape (`propertyAddress`, `city`, `state`, `zip`, `county`, `sourceType`, `sourceUrl`, `sourceRef`, `sourceDate`, `distressScore`, `distressSignals`, `verificationStatus`, `pipelineStatus`, plus the remaining lead fields).
+- `PATCH /leads/{id}` — update any editable lead fields with a partial JSON body.
+- `DELETE /leads/{id}` — delete a lead.
+
+The same five operations are available for:
+
+- `/buyers` — Buyer shape; list filters: `status`, `proofOfFundsStatus`.
+- `/matches` — PropertyMatch shape; list filters: `status`, `confidence`, `minMatchScore`.
+- `/hot-deals` — HotDeal shape; list filters: `status`, `minDistressScore`. Non-fabricated hot deals must be verified with distress score at least 80.
+- `/import-staging` — ImportStaging shape; list filter: `status`.
+
+For create/update requests use `Content-Type: application/json`. `PUT` is accepted as an alias for `PATCH`. MongoDB IDs belong in the final URL path, not in the request body. Seed/fabricated lead and hot-deal records remain marked `fabricated: true` and cannot be silently reactivated.

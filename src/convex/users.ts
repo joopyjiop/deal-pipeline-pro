@@ -1,5 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { query, QueryCtx } from "./_generated/server";
+import { v } from "convex/values";
+import { internalQuery, query, QueryCtx } from "./_generated/server";
 
 /**
  * Get the current signed in user. Returns null if the user is not signed in.
@@ -16,6 +17,20 @@ export const currentUser = query({
     }
 
     return user;
+  },
+});
+
+/**
+ * Resolve a users-table document by auth subject (the subject is the users
+ * row `_id`). Used by owner checks in actions, where `ctx.db` is unavailable,
+ * so the backend and frontend share one source of truth for owner status.
+ */
+export const getUserBySubject = internalQuery({
+  args: { subject: v.string() },
+  handler: async (ctx, { subject }) => {
+    const id = ctx.db.normalizeId("users", subject);
+    if (id === null) return null;
+    return await ctx.db.get(id);
   },
 });
 

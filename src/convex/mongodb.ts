@@ -3,7 +3,7 @@
 import { Document, MongoClient, ObjectId } from "mongodb";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { action, internalAction } from "./_generated/server";
+import { action, ActionCtx, internalAction } from "./_generated/server";
 
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
 const LEADS = "leads";
@@ -307,14 +307,27 @@ async function getDatabase() {
   return client.db();
 }
 
-async function requireOwner(ctx: { auth: { getUserIdentity: () => Promise<{ email?: string } | null> } }) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (identity?.email?.trim().toLowerCase() !== OWNER_EMAIL) {
-    throw new Error("Owner access required");
-  }
+function isOwnerEmail(email: string | undefined) {
+  return email?.trim().toLowerCase() === OWNER_EMAIL;
 }
 
-async function requireSignedIn(ctx: { auth: { getUserIdentity: () => Promise<{ email?: string } | null> } }) {
+async function requireOwner(ctx: ActionCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (isOwnerEmail(identity?.email)) return;
+  // Fall back to the users table so the backend matches the app's owner
+  // convention (role "admin" OR the permanent owner email), the same source
+  // of truth the frontend uses to show owner status. The auth subject is the
+  // users row `_id`, so this is the same user the client sees.
+  if (identity?.subject) {
+    const user = await ctx.runQuery(internal.users.getUserBySubject, {
+      subject: identity.subject,
+    });
+    if (user && (user.role === "admin" || isOwnerEmail(user.email))) return;
+  }
+  throw new Error("Owner access required");
+}
+
+async function requireSignedIn(ctx: ActionCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
     throw new Error("Authentication required");

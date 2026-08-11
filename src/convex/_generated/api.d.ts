@@ -16,6 +16,7 @@ import type * as http from "../http.js";
 import type * as leads from "../leads.js";
 import type * as mongodb from "../mongodb.js";
 import type * as owner from "../owner.js";
+import type * as settings from "../settings.js";
 import type * as users from "../users.js";
 
 import type {
@@ -33,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   leads: typeof leads;
   mongodb: typeof mongodb;
   owner: typeof owner;
+  settings: typeof settings;
   users: typeof users;
 }>;
 

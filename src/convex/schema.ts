@@ -63,6 +63,12 @@ const schema = defineSchema(
       role: v.optional(roleValidator),
     }).index("email", ["email"]),
 
+    appSettings: defineTable({
+      key: v.string(),
+      value: v.string(),
+      updatedAt: v.number(),
+    }).index("by_key", ["key"]),
+
     leads: defineTable({
       propertyAddress: v.string(),
       city: v.string(),

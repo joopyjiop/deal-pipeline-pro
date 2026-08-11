@@ -48,6 +48,9 @@ type MongoHealth = {
   configured: boolean;
   connected: boolean;
   status: string;
+  fallbackConfigured?: boolean;
+  fallbackHost?: string | null;
+  usingFallback?: boolean;
 };
 
 type AutomationTask = {
@@ -118,6 +121,8 @@ export default function Toolkit() {
   );
   const getToolAccess = useAction(api.mongodb.getToolAccess);
   const healthCheck = useAction(api.mongodb.healthCheck);
+  const setMongoUriFallback = useAction(api.mongodb.setMongoUriFallback);
+  const clearMongoUriFallback = useAction(api.mongodb.clearMongoUriFallback);
   const setToolAccess = useAction(api.mongodb.setToolAccess);
   const getAiToolManifest = useAction(api.mongodb.getAiToolManifest);
   const getAutomationConfig = useAction(api.mongodb.getAutomationConfig);
@@ -133,6 +138,8 @@ export default function Toolkit() {
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
   const [automation, setAutomation] = useState<AutomationConfig>({ enabled: false, mode: "BOTH", dailyRunLimit: 24, maxTasksPerRun: 5, runsToday: 0, aiEnabled: false, providerConfigured: false, n8nSecretConfigured: false });
   const [mongoHealth, setMongoHealth] = useState<MongoHealth>({ configured: false, connected: false, status: "Not checked" });
+  const [mongoUriInput, setMongoUriInput] = useState("");
+  const [savingMongoUri, setSavingMongoUri] = useState(false);
   const [tasks, setTasks] = useState<AutomationTask[]>([]);
   const [manifest, setManifest] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
@@ -201,6 +208,32 @@ export default function Toolkit() {
       cancelled = true;
     };
   }, [getAiToolManifest, getAutomationConfig, getToolAccess, healthCheck, isOwner, listAutomationTasks]);
+
+  const saveMongoFallback = async () => {
+    const uri = mongoUriInput.trim();
+    if (!uri) return;
+    setSavingMongoUri(true);
+    try {
+      const result = await setMongoUriFallback({ uri });
+      setMongoUriInput("");
+      toast.success(result.host ? `Saved fallback connection (${result.host}).` : "Saved fallback connection.");
+      setMongoHealth(await healthCheck());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save fallback connection.");
+    } finally {
+      setSavingMongoUri(false);
+    }
+  };
+
+  const clearMongoFallback = async () => {
+    try {
+      await clearMongoUriFallback();
+      toast.success("Cleared saved fallback connection.");
+      setMongoHealth(await healthCheck());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not clear fallback connection.");
+    }
+  };
 
   const updateTool = async (tool: "SCRAPER" | "ESTIMATOR", enabled: boolean) => {
     try {
@@ -376,7 +409,7 @@ export default function Toolkit() {
         </section>
 
         <section className="mt-5 grid gap-3 md:grid-cols-3">
-          <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">MongoDB Atlas</p><ShieldCheck className="size-4 text-teal-600" /></div><p className="mt-3 text-lg font-semibold text-slate-900">{mongoHealth.connected ? "Connected" : mongoHealth.configured ? "Connection failed" : "Not configured"}</p><p className="mt-1 text-xs text-slate-500">{mongoHealth.connected ? "Source of truth is reachable" : mongoHealth.status}</p></div>
+          <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">MongoDB Atlas</p><ShieldCheck className="size-4 text-teal-600" /></div><p className="mt-3 text-lg font-semibold text-slate-900">{mongoHealth.connected ? "Connected" : mongoHealth.configured ? "Connection failed" : "Not configured"}</p><p className="mt-1 text-xs text-slate-500">{mongoHealth.connected ? (mongoHealth.usingFallback ? "Connected via saved fallback" : "Source of truth is reachable") : mongoHealth.status}</p>{mongoHealth.fallbackConfigured ? <p className="mt-1 text-[0.68rem] text-slate-500">Saved fallback: {mongoHealth.fallbackHost ?? "configured"}</p> : null}<div className="mt-3 flex items-center gap-2"><input type="password" value={mongoUriInput} onChange={(event) => setMongoUriInput(event.target.value)} placeholder="mongodb+srv://user:pass@cluster..." autoComplete="off" spellCheck={false} className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white/70 px-2.5 py-1.5 text-xs text-slate-700 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none" /><button type="button" onClick={() => void saveMongoFallback()} disabled={savingMongoUri || !mongoUriInput.trim()} className="shrink-0 rounded-lg bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50">{savingMongoUri ? "Saving…" : "Save"}</button></div>{mongoHealth.fallbackConfigured ? <button type="button" onClick={() => void clearMongoFallback()} className="mt-1.5 text-[0.68rem] text-slate-400 transition-colors hover:text-slate-600">Clear saved fallback</button> : null}<p className="mt-2 text-[0.68rem] leading-4 text-slate-400">Only used when the deployment's MONGODB_URI env var is missing or rejected. Stored in this project's Convex settings, owner-readable only.</p></div>
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">n8n handoff</p><ListChecks className="size-4 text-amber-600" /></div><p className="mt-3 text-lg font-semibold text-slate-900">{automation.n8nSecretConfigured ? "Ready" : "Needs secret"}</p><p className="mt-1 text-xs text-slate-500">{automation.n8nSecretConfigured ? "Authenticated queue is available" : "Add the Convex shared secret"}</p></div>
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">AI reviewer</p><Bot className="size-4 text-violet-600" /></div><p className="mt-3 text-lg font-semibold text-slate-900">{automation.providerConfigured && access.aiEnabled ? "Ready" : "Optional"}</p><p className="mt-1 text-xs text-slate-500">{automation.providerConfigured && access.aiEnabled ? "Temporary review suggestions enabled" : "Deterministic sourcing works without it"}</p></div>
         </section>

@@ -52,6 +52,12 @@ const estimateInputValidator = v.object({
   acquisitionPrice: v.optional(v.number()),
 });
 let clientPromise: Promise<MongoClient> | null = null;
+// Effective fallback URI resolved from the Convex-stored setting. Used when the
+// deployment's MONGODB_URI env var is missing or rejected (e.g. Freebuff-managed
+// deployments whose env cannot be edited). Populated by setMongoUriFallback and
+// healthCheck, then reused by every Mongo action.
+let cachedMongoUri: string | null = null;
+const MONGO_URI_SETTING_KEY = "mongoUri";
 
 const sourceTypeValidator = v.union(
   v.literal("SHERIFF_SALE"),
@@ -285,18 +291,64 @@ const importStagingValidator = v.object({
   rejectReason: v.optional(v.string()),
 });
 
+function uriHasCredentials(uri: string) {
+  // A usable driver URI embeds userinfo (`user:pass@host`). The Atlas SQL
+  // endpoint (no credentials) looks similar but contains no `@` and cannot be
+  // authenticated against by the driver.
+  return /^mongodb(\+srv)?:\/\/[^/@]+@/.test(uri);
+}
+
+function maskUriHost(uri: string) {
+  try {
+    return new URL(uri).host;
+  } catch {
+    return null;
+  }
+}
+
+async function getStoredMongoUri(ctx: ActionCtx): Promise<string | null> {
+  return (await ctx.runQuery(internal.settings.getByKey, { key: MONGO_URI_SETTING_KEY })) ?? null;
+}
+
+type MongoHealthResult = {
+  configured: boolean;
+  connected: boolean;
+  status: string;
+  fallbackConfigured: boolean;
+  fallbackHost: string | null;
+  usingFallback: boolean;
+};
+
+async function connectWithUri(uri: string): Promise<MongoClient> {
+  try {
+    const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10000 });
+    await client.connect();
+    return client;
+  } catch (error) {
+    clientPromise = null;
+    // The env value can be stale or credential-less on managed deployments.
+    // Retry against the owner-saved fallback before giving up.
+    if (cachedMongoUri && cachedMongoUri !== uri) {
+      const fallback = new MongoClient(cachedMongoUri, { serverSelectionTimeoutMS: 10000 });
+      await fallback.connect();
+      return fallback;
+    }
+    throw error;
+  }
+}
+
 function getMongoClient() {
-  const uri = process.env.MONGODB_URI;
+  const envUri = process.env.MONGODB_URI;
+  // Prefer the env var when it carries credentials. A credential-less env value
+  // (e.g. the Atlas SQL endpoint on managed deployments) is treated as absent
+  // so the owner-saved fallback is used directly instead of failing first.
+  const uri = envUri && uriHasCredentials(envUri) ? envUri : cachedMongoUri ?? envUri;
   if (!uri) {
     throw new Error("MONGODB_URI is not configured");
   }
 
   if (!clientPromise) {
-    const client = new MongoClient(uri);
-    clientPromise = client.connect().catch((error) => {
-      clientPromise = null;
-      throw error;
-    });
+    clientPromise = connectWithUri(uri);
   }
 
   return clientPromise;
@@ -589,20 +641,92 @@ function validateApprovedLead(lead: {
 
 export const healthCheck = action({
   args: {},
-  handler: async (ctx) => {
+  handler: async (ctx): Promise<MongoHealthResult> => {
     await requireOwner(ctx);
-    if (!process.env.MONGODB_URI) {
-      return { configured: false, connected: false, status: "MONGODB_URI is not configured" };
+    const envUri = process.env.MONGODB_URI;
+    const storedUri = await getStoredMongoUri(ctx);
+    const fallbackConfigured = Boolean(storedUri);
+    const fallbackHost = storedUri ? maskUriHost(storedUri) : null;
+
+    // Prefer the env var, but if it is missing or credential-less (the Atlas
+    // SQL endpoint), use the owner-saved fallback instead. Cache whichever we
+    // resolve so every Mongo action shares one effective connection.
+    let candidate: string | null = null;
+    if (envUri && uriHasCredentials(envUri)) candidate = envUri;
+    else if (storedUri) candidate = storedUri;
+    else if (envUri) candidate = envUri;
+    if (candidate) cachedMongoUri = candidate;
+
+    if (!candidate) {
+      return {
+        configured: false,
+        connected: false,
+        status: "MONGODB_URI is not configured",
+        fallbackConfigured,
+        fallbackHost,
+        usingFallback: false,
+      };
     }
 
     try {
       const database = await getDatabase();
       await database.command({ ping: 1 });
-      return { configured: true, connected: true, status: "Connected successfully" };
+      return {
+        configured: true,
+        connected: true,
+        status: "Connected successfully",
+        fallbackConfigured,
+        fallbackHost,
+        usingFallback: candidate === storedUri,
+      };
     } catch (error) {
       console.error("MongoDB Atlas health check failed", error);
-      return { configured: true, connected: false, status: "Connection failed" };
+      return {
+        configured: true,
+        connected: false,
+        status: "Connection failed",
+        fallbackConfigured,
+        fallbackHost,
+        usingFallback: false,
+      };
     }
+  },
+});
+
+export const setMongoUriFallback = action({
+  args: { uri: v.string() },
+  handler: async (ctx, args): Promise<{ ok: boolean; host: string | null }> => {
+    await requireOwner(ctx);
+    const uri = args.uri.trim();
+    if (!/^mongodb(\+srv)?:\/\//.test(uri)) {
+      throw new Error("Not a valid MongoDB connection string (must start with mongodb:// or mongodb+srv://)");
+    }
+
+    // Validate by actually connecting before persisting anything.
+    const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10000 });
+    try {
+      await client.connect();
+      await client.db().command({ ping: 1 });
+    } catch (error) {
+      throw new Error(`Connection test failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      await client.close();
+    }
+
+    cachedMongoUri = uri;
+    await ctx.runMutation(internal.settings.upsert, { key: MONGO_URI_SETTING_KEY, value: uri });
+    return { ok: true, host: maskUriHost(uri) };
+  },
+});
+
+export const clearMongoUriFallback = action({
+  args: {},
+  handler: async (ctx) => {
+    await requireOwner(ctx);
+    await ctx.runMutation(internal.settings.remove, { key: MONGO_URI_SETTING_KEY });
+    cachedMongoUri = process.env.MONGODB_URI ?? null;
+    clientPromise = null; // force a fresh connection against the new effective URI
+    return { ok: true };
   },
 });
 

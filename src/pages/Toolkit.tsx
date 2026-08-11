@@ -105,7 +105,7 @@ function pretty(value: string) {
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-const mcpEndpoint = `${((import.meta.env.VITE_CONVEX_URL as string | undefined) ?? "https://savory-terrier-340.convex.site")
+const mcpEndpoint = `${((import.meta.env.VITE_CONVEX_URL as string | undefined) ?? "https://keen-aardvark-333.convex.site")
   .replace(/\/$/, "")
   .replace(/\.convex\.cloud$/, ".convex.site")}/api/mcp`;
 

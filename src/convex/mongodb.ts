@@ -1471,12 +1471,56 @@ function courtConfidence(value: unknown): CourtConfidence {
   return value === "HIGH" || value === "MEDIUM" ? value : "LOW";
 }
 
-async function callCourtModel(prompt: string, maxTokens: number) {
+type CourtModelResult =
+  | { ok: true; value: Record<string, unknown>; provider: "SAMBANOVA" | "OLLAMA"; model: string }
+  | { ok: false; error: string };
+
+function parseCourtContent(content: unknown, provider: "SAMBANOVA" | "OLLAMA", model: string): CourtModelResult {
+  if (typeof content !== "string" || !content.trim()) return { ok: false, error: "AI consultant returned no content" };
+  try {
+    return { ok: true, value: JSON.parse(content.trim()) as Record<string, unknown>, provider, model };
+  } catch {
+    return { ok: false, error: "AI consultant returned invalid JSON" };
+  }
+}
+
+async function callOllamaCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {
+  const model = process.env.OLLAMA_COURT_MODEL ?? process.env.OLLAMA_MODEL ?? "gpt-oss:20b";
+  const response = await fetch("https://ollama.com/api/chat", {
+    method: "POST",
+    headers: { authorization: `Bearer ${process.env.OLLAMA_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      format: "json",
+      options: { temperature: 0, num_predict: maxTokens },
+      messages: [{ role: "user", content: prompt }],
+    }),
+    signal: AbortSignal.timeout(60000),
+  });
+  const payload = await response.json().catch(() => ({})) as { error?: string; message?: { content?: string } };
+  if (!response.ok) {
+    const detail = typeof payload.error === "string" ? `: ${payload.error.slice(0, 240)}` : "";
+    return { ok: false, error: `Ollama Cloud request failed (HTTP ${response.status}${detail})` };
+  }
+  return parseCourtContent(payload.message?.content, "OLLAMA", model);
+}
+
+async function callCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {
+  const sambaKey = process.env.SAMBANOVA_API_KEY?.trim();
+  const ollamaKey = process.env.OLLAMA_API_KEY?.trim();
+  const sambaModel = process.env.SAMBANOVA_MODEL ?? "Meta-Llama-3.3-70B-Instruct";
+
+  if (!sambaKey) {
+    if (!ollamaKey) return { ok: false, error: "No AI consultant provider is configured" };
+    return callOllamaCourtModel(prompt, maxTokens);
+  }
+
   const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
     method: "POST",
-    headers: { authorization: `Bearer ${process.env.SAMBANOVA_API_KEY}`, "content-type": "application/json" },
+    headers: { authorization: `Bearer ${sambaKey}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: process.env.SAMBANOVA_MODEL ?? "Meta-Llama-3.3-70B-Instruct",
+      model: sambaModel,
       temperature: 0,
       max_tokens: maxTokens,
       response_format: { type: "json_object" },
@@ -1484,25 +1528,19 @@ async function callCourtModel(prompt: string, maxTokens: number) {
     }),
     signal: AbortSignal.timeout(30000),
   });
-  if (!response.ok) {
-    return {
-      ok: false as const,
-      error: `AI consultant request failed (HTTP ${response.status})`,
-    };
-  }
-  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  const content = payload.choices?.[0]?.message?.content?.trim();
-  if (!content) return { ok: false as const, error: "AI consultant returned no content" };
-  try {
-    return { ok: true as const, value: JSON.parse(content) as Record<string, unknown> };
-  } catch {
-    return { ok: false as const, error: "AI consultant returned invalid JSON" };
-  }
+  const payload = await response.json().catch(() => ({})) as { choices?: Array<{ message?: { content?: string } }> };
+  if (response.ok) return parseCourtContent(payload.choices?.[0]?.message?.content, "SAMBANOVA", sambaModel);
+  if (response.status !== 429) return { ok: false, error: `AI consultant request failed (HTTP ${response.status})` };
+  if (!ollamaKey) return { ok: false, error: "SambaNova rate limit reached (HTTP 429); Ollama fallback is not configured" };
+
+  const fallback = await callOllamaCourtModel(prompt, maxTokens);
+  if (fallback.ok) return fallback;
+  return { ok: false, error: `SambaNova rate limit reached (HTTP 429); ${fallback.error}` };
 }
 
 async function runAiConsultantCourt(source: { title: string; excerpt: string; url: string }): Promise<CourtVerdict> {
   const reviewedAt = new Date().toISOString();
-  if (!process.env.SAMBANOVA_API_KEY) return { status: "SKIPPED_MISSING_KEY", reviewedAt };
+  if (!process.env.SAMBANOVA_API_KEY?.trim() && !process.env.OLLAMA_API_KEY?.trim()) return { status: "SKIPPED_MISSING_KEY", reviewedAt };
   const sourcePacket = `SOURCE URL: ${source.url}\nTITLE: ${source.title}\nSOURCE EXCERPT (the only evidence allowed): ${source.excerpt.slice(0, 7000)}`;
   const assignments: Array<{ role: CourtRole; task: string }> = [
     { role: "EVIDENCE_AUDITOR", task: "Audit whether the source contains enough explicit, reliable facts for a real deal review. Separate sourced facts from assumptions." },

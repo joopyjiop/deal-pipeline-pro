@@ -30,6 +30,12 @@ Agent skills integrated into this project (standard Agent Skills format: `SKILL.
 | --- | --- | --- | --- |
 | `prompt-master/` | **Prompt engineering** — tool routing, output contracts, coding-agent scope locks, credential stripping, prompt decompilation, failure patterns, and templates | `joopyjiop/prompt-master` | MIT (included) |
 
+## Official n8n — recurring workflow automation
+
+| Pack | Contents | Source | License |
+| --- | --- | --- | --- |
+| `n8n-official/` | **Recurring lead-run guidance** — scheduling, paced loops, deduplication, retries, persistent run state, credentials, and per-lead write verification | `n8n-io/skills` | Apache-2.0 upstream |
+
 ## Perplexity CLI — grounded source research
 
 | Pack | Contents | Source |

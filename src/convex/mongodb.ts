@@ -4,6 +4,8 @@ import { Document, MongoClient, ObjectId } from "mongodb";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, ActionCtx, internalAction } from "./_generated/server";
+import { rankLeads } from "./search";
+import type { SearchableLead } from "./search";
 
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
 const LEADS = "leads";
@@ -2040,6 +2042,7 @@ export const mcpListPipeline = internalAction({
     pipelineStatus: v.optional(pipelineStatusValidator),
     minDistressScore: v.optional(v.number()),
     limit: v.optional(v.number()),
+    search: v.optional(v.string()),
   },
   handler: async (_, args) => {
     const limit = Math.max(1, Math.min(50, Math.floor(args.limit ?? 25)));
@@ -2050,34 +2053,60 @@ export const mcpListPipeline = internalAction({
       pipelineStatus: args.pipelineStatus ?? { $in: ["SOURCED", "CRITIQUED", "APPROVED"] },
     };
     if (args.minDistressScore !== undefined) filter.distressScore = { $gte: args.minDistressScore };
+    const search = args.search?.trim();
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      filter.$or = [
+        { propertyAddress: { $regex: escaped, $options: "i" } },
+        { city: { $regex: escaped, $options: "i" } },
+        { county: { $regex: escaped, $options: "i" } },
+        { parcelId: { $regex: escaped, $options: "i" } },
+        { sourceRef: { $regex: escaped, $options: "i" } },
+      ];
+    }
     const documents = await database.collection(LEADS).find(filter).sort({ distressScore: -1, updatedAt: -1 }).limit(limit).toArray();
+    const leads = documents.map((document) => {
+      const lead = serialize(document);
+      return {
+        _id: lead._id,
+        propertyAddress: lead.propertyAddress,
+        city: lead.city,
+        state: lead.state,
+        zip: lead.zip,
+        county: lead.county,
+        sourceType: lead.sourceType,
+        sourceUrl: lead.sourceUrl,
+        sourceRef: lead.sourceRef,
+        sourceDate: lead.sourceDate,
+        distressScore: lead.distressScore,
+        distressSignals: lead.distressSignals,
+        verificationStatus: lead.verificationStatus,
+        pipelineStatus: lead.pipelineStatus,
+        arv: lead.arv,
+        repairs: lead.repairs,
+        mao: lead.mao,
+        estimatedProfit: calculateEstimatedProfit(lead),
+        updatedAt: lead.updatedAt,
+      };
+    });
+    if (!search) {
+      return {
+        dataOrigin: "verified_or_sourced" as const,
+        live: false,
+        leads,
+      };
+    }
+    const ranked = rankLeads(leads as unknown as SearchableLead[], search);
     return {
       dataOrigin: "verified_or_sourced" as const,
       live: false,
-      leads: documents.map((document) => {
-        const lead = serialize(document);
-        return {
-          _id: lead._id,
-          propertyAddress: lead.propertyAddress,
-          city: lead.city,
-          state: lead.state,
-          zip: lead.zip,
-          county: lead.county,
-          sourceType: lead.sourceType,
-          sourceUrl: lead.sourceUrl,
-          sourceRef: lead.sourceRef,
-          sourceDate: lead.sourceDate,
-          distressScore: lead.distressScore,
-          distressSignals: lead.distressSignals,
-          verificationStatus: lead.verificationStatus,
-          pipelineStatus: lead.pipelineStatus,
-          arv: lead.arv,
-          repairs: lead.repairs,
-          mao: lead.mao,
-          estimatedProfit: calculateEstimatedProfit(lead),
-          updatedAt: lead.updatedAt,
-        };
-      }),
+      search: { query: ranked.query, terms: ranked.terms, total: ranked.total, ranked: true },
+      leads: ranked.ranked
+        .map((item) => {
+          const lead = leads.find((candidate) => String(candidate._id) === item._id);
+          return lead ? { ...lead, relevance: { score: item.score, matchedFields: item.matchedFields } } : undefined;
+        })
+        .filter((lead): lead is NonNullable<typeof lead> => Boolean(lead)),
     };
   },
 });
@@ -2324,8 +2353,11 @@ export const listLeads = action({
         ...(args.maxDistressScore !== undefined ? { $lte: args.maxDistressScore } : {}),
       };
     }
-    if (args.search?.trim()) {
-      const escaped = args.search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const search = args.search?.trim();
+    if (search) {
+      // Candidate gate: keep the substring filter so MongoDB does the cheap
+      // narrowing, then re-rank the matches with the in-house BM25 scorer.
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       filter.$or = [
         { propertyAddress: { $regex: escaped, $options: "i" } },
         { city: { $regex: escaped, $options: "i" } },
@@ -2335,12 +2367,33 @@ export const listLeads = action({
       ];
     }
     const documents = await (await getDatabase()).collection(LEADS).find(filter).sort({ distressScore: -1, updatedAt: -1 }).limit(100).toArray();
+    const leads = documents.map((document) => {
+      const lead = serialize(document);
+      return { ...lead, estimatedProfit: calculateEstimatedProfit(lead) };
+    });
+    if (!search) {
+      return {
+        meta: { dataOrigin: "verified" as const, live: false },
+        leads,
+      };
+    }
+    const ranked = rankLeads(leads as unknown as SearchableLead[], search);
+    const rankedById = new Map(ranked.ranked.map((item) => [item._id, item]));
     return {
-      meta: { dataOrigin: "verified" as const, live: false },
-      leads: documents.map((document) => {
-        const lead = serialize(document);
-        return { ...lead, estimatedProfit: calculateEstimatedProfit(lead) };
-      }),
+      meta: {
+        dataOrigin: "verified" as const,
+        live: false,
+        search: { query: ranked.query, terms: ranked.terms, total: ranked.total, ranked: true },
+      },
+      leads: ranked.ranked
+        .map((item) => {
+          const lead = leads.find((candidate) => String(candidate._id) === item._id);
+          return lead ? { ...lead, relevance: { score: item.score, matchedFields: item.matchedFields } } : undefined;
+        })
+        .filter((lead): lead is NonNullable<typeof lead> => Boolean(lead)),
+      // Keep the unranked list for callers that need every matching row even
+      // when a term only appears in a low-weight field.
+      unranked: leads.map((lead) => ({ ...lead, relevance: rankedById.get(String(lead._id)) })),
     };
   },
 });

@@ -18,6 +18,7 @@ import type * as leads from "../leads.js";
 import type * as mongodb from "../mongodb.js";
 import type * as ollama from "../ollama.js";
 import type * as owner from "../owner.js";
+import type * as search from "../search.js";
 import type * as settings from "../settings.js";
 import type * as users from "../users.js";
 
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   mongodb: typeof mongodb;
   ollama: typeof ollama;
   owner: typeof owner;
+  search: typeof search;
   settings: typeof settings;
   users: typeof users;
 }>;

@@ -60,6 +60,7 @@ type CourtVerdict = {
   risks?: string[];
   missingEvidence?: string[];
   consultants?: Array<{ role: string; stance: string; confidence: string }>;
+  error?: string;
 };
 
 type Candidate = {
@@ -223,7 +224,10 @@ export default function Operations() {
       } else if (verdict.status === "SKIPPED_MISSING_KEY") {
         toast.warning("Add SAMBANOVA_API_KEY to run the consultant court.");
       } else {
-        toast.error("The consultant court could not complete this review.");
+        const failure = verdict.error ?? "The consultant court could not complete this review.";
+        toast.error(failure.includes("HTTP 429")
+          ? "SambaNova rate limit reached. Wait for the quota window to reset, then retry."
+          : failure);
       }
       refresh();
     } catch (error) {

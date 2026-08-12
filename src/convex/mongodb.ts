@@ -311,14 +311,6 @@ const dueDiligenceEntryValidator = v.object({
   checkedAt: v.optional(v.number()),
 });
 
-const dueDiligenceValidator = v.object({
-  titleAndLiens: dueDiligenceEntryValidator,
-  saleHistory: dueDiligenceEntryValidator,
-  condition: dueDiligenceEntryValidator,
-  occupancy: dueDiligenceEntryValidator,
-  lastAssessedAt: v.optional(v.number()),
-});
-
 function uriHasCredentials(uri: string) {
   // A usable driver URI embeds userinfo (`user:pass@host`). The Atlas SQL
   // endpoint (no credentials) looks similar but contains no `@` and cannot be
@@ -667,7 +659,6 @@ function validateApprovedLead(lead: {
   }
 }
 
-type DueDiligenceCategory = "TITLE_AND_LIENS" | "SALE_HISTORY" | "CONDITION" | "OCCUPANCY";
 type DueDiligenceEntry = {
   status: "UNCHECKED" | "FOUND" | "MISSING";
   sourceUrl?: string;
@@ -1699,43 +1690,51 @@ function parseCourtContent(content: unknown, provider: "OLLAMA", model: string):
 
 async function callOllamaCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {
   const model = process.env.OLLAMA_COURT_MODEL ?? process.env.OLLAMA_MODEL ?? "gpt-oss:20b";
-  const response = await fetch("https://ollama.com/api/chat", {
-    method: "POST",
-    headers: { authorization: `Bearer ${process.env.OLLAMA_API_KEY}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      format: "json",
-      // GPT-OSS ignores boolean thinking flags and needs a level. Keeping it
-      // at low leaves enough generation budget for the final JSON response.
-      think: model.toLowerCase().includes("gpt-oss") ? "low" : false,
-      options: { temperature: 0, num_predict: maxTokens },
-      messages: [{ role: "user", content: prompt }],
-    }),
-    signal: AbortSignal.timeout(60000),
-  });
-  const payload = await response.json().catch(() => ({})) as {
-    error?: string;
-    message?: { content?: unknown; thinking?: unknown };
-    choices?: Array<{ message?: { content?: unknown } }>;
-  };
-  if (!response.ok) {
-    const detail = typeof payload.error === "string" ? `: ${payload.error.slice(0, 240)}` : "";
-    return { ok: false, error: `Ollama Cloud request failed (HTTP ${response.status}${detail})` };
-  }
+  // Reasoning models can return truncated or malformed JSON when the generation
+  // budget is tight, so retry once on a parse failure. The court's strict
+  // coercion never trusts a partial object, and reasoning (message.thinking)
+  // is never parsed as the court result.
+  let result: CourtModelResult = { ok: false, error: "AI consultant returned invalid JSON" };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await fetch("https://ollama.com/api/chat", {
+      method: "POST",
+      headers: { authorization: `Bearer ${process.env.OLLAMA_API_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        format: "json",
+        // GPT-OSS ignores boolean thinking flags and needs a level. Keeping it
+        // at low leaves enough generation budget for the final JSON response.
+        think: model.toLowerCase().includes("gpt-oss") ? "low" : false,
+        options: { temperature: 0, num_predict: maxTokens },
+        messages: [{ role: "user", content: prompt }],
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+    const payload = await response.json().catch(() => ({})) as {
+      error?: string;
+      message?: { content?: unknown };
+      choices?: Array<{ message?: { content?: unknown } }>;
+    };
+    if (!response.ok) {
+      const detail = typeof payload.error === "string" ? `: ${payload.error.slice(0, 240)}` : "";
+      return { ok: false, error: `Ollama Cloud request failed (HTTP ${response.status}${detail})` };
+    }
 
-  const messageContent = payload.message?.content;
-  const compatibleContent = payload.choices?.[0]?.message?.content;
-  const thinkingContent = payload.message?.thinking;
-  const content = typeof messageContent === "string" && messageContent.trim()
-    ? messageContent
-    : typeof compatibleContent === "string" && compatibleContent.trim()
-      ? compatibleContent
-      : typeof thinkingContent === "string" && thinkingContent.trim()
-        ? thinkingContent
+    const messageContent = payload.message?.content;
+    const compatibleContent = payload.choices?.[0]?.message?.content;
+    // Only the final answer content is accepted; reasoning (message.thinking)
+    // is never parsed as the court result because it is not the JSON output.
+    const content = typeof messageContent === "string" && messageContent.trim()
+      ? messageContent
+      : typeof compatibleContent === "string" && compatibleContent.trim()
+        ? compatibleContent
         : undefined;
 
-  return parseCourtContent(content, "OLLAMA", model);
+    result = parseCourtContent(content, "OLLAMA", model);
+    if (result.ok) return result;
+  }
+  return result;
 }
 
 async function callCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {
@@ -1753,7 +1752,7 @@ async function runAiConsultantCourt(source: { title: string; excerpt: string; ur
     { role: "RISK_COMPLIANCE", task: "Look for verification, privacy, source-quality, solicitation, duplicate, and compliance risks. Do not give legal advice and do not invent risks as facts." },
   ];
   const consultantResults: Array<{ role: CourtRole; consultant?: CourtConsultant; error?: string }> = await Promise.all(assignments.map(async ({ role, task }) => {
-    const result = await callCourtModel(`You are the ${role} on an evidence-only real-estate deal review court. ${task}\n\nReturn JSON only with exactly these keys: stance (SUPPORT|CAUTION|OPPOSE), confidence (LOW|MEDIUM|HIGH), summary, findings, missingEvidence, risks. findings must be an array of objects with claim, quote, sourceUrl, and optional sourceDate. A quote is valid only when copied exactly from the supplied source excerpt and sourceUrl equals the supplied URL. Never invent names, addresses, phones, emails, parcels, prices, comps, ownership, motivation, or distress. This is a recommendation for the owner, not approval.\n\n${sourcePacket}`, 1000);
+    const result = await callCourtModel(`You are the ${role} on an evidence-only real-estate deal review court. ${task}\n\nReturn JSON only with exactly these keys: stance (SUPPORT|CAUTION|OPPOSE), confidence (LOW|MEDIUM|HIGH), summary, findings, missingEvidence, risks. findings must be an array of objects with claim, quote, sourceUrl, and optional sourceDate. A quote is valid only when copied exactly from the supplied source excerpt and sourceUrl equals the supplied URL. Never invent names, addresses, phones, emails, parcels, prices, comps, ownership, motivation, or distress. This is a recommendation for the owner, not approval.\n\n${sourcePacket}`, 2500);
     if (!result.ok) return { role, error: result.error };
     const value = result.value;
     const findings = courtEvidence(value.findings, source);
@@ -1774,7 +1773,7 @@ async function runAiConsultantCourt(source: { title: string; excerpt: string; ur
   if (failed && !failed.consultant) return { status: "FAILED", reviewedAt, error: failed.error ?? "AI consultant failed" };
   const consultants: CourtConsultant[] = consultantResults.flatMap((result) => result.consultant ? [result.consultant] : []);
   const judgeInput = JSON.stringify(consultants);
-  const judge = await callCourtModel(`You are the presiding judge of an evidence-only real-estate deal review court. Reconcile three consultant reports. Return JSON only with exactly these keys: verdict (PROCEED|HOLD|PASS), confidence (LOW|MEDIUM|HIGH), score (0-100), summary, decisiveEvidence, risks, missingEvidence, judgeNotes. PROCEED means evidence supports continued owner review, HOLD means more verification is required, and PASS means the evidence is too weak or risks outweigh the opportunity. Use only exact quotes from the source excerpt for decisiveEvidence. Do not approve the lead, mark facts verified, invent PII, invent prices/comps, or give legal advice. If the consultants disagree or there is no valid exact evidence, choose HOLD.\n\n${sourcePacket}\n\nCONSULTANT REPORTS: ${judgeInput}`, 1200);
+  const judge = await callCourtModel(`You are the presiding judge of an evidence-only real-estate deal review court. Reconcile three consultant reports. Return JSON only with exactly these keys: verdict (PROCEED|HOLD|PASS), confidence (LOW|MEDIUM|HIGH), score (0-100), summary, decisiveEvidence, risks, missingEvidence, judgeNotes. PROCEED means evidence supports continued owner review, HOLD means more verification is required, and PASS means the evidence is too weak or risks outweigh the opportunity. Use only exact quotes from the source excerpt for decisiveEvidence. Do not approve the lead, mark facts verified, invent PII, invent prices/comps, or give legal advice. If the consultants disagree or there is no valid exact evidence, choose HOLD.\n\n${sourcePacket}\n\nCONSULTANT REPORTS: ${judgeInput}`, 3000);
   if (!judge.ok) return { status: "FAILED", reviewedAt, error: judge.error, consultants };
   const judgeValue = judge.value;
   const decisiveEvidence = courtEvidence(judgeValue.decisiveEvidence, source);

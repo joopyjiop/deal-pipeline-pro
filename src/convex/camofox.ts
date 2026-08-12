@@ -52,6 +52,11 @@ type CreateTabResponse = {
   url?: string;
 };
 
+type LinksResponse = {
+  links?: Array<{ url?: string; text?: string }>;
+  pagination?: { total?: number; hasMore?: boolean };
+};
+
 function camofoxBaseUrl(): string {
   const url = process.env.CAMOFOX_BASE_URL?.trim().replace(/\/+$/, "");
   if (!url) {
@@ -138,6 +143,10 @@ function normalizeUrl(rawUrl: string, baseUrl: string): string | null {
   } catch {
     return null;
   }
+}
+
+function siteKey(url: string): string {
+  return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
 }
 
 function extractLinks(snapshot: string, baseUrl: string): string[] {
@@ -259,7 +268,7 @@ export const camofoxCrawl = action({
     const sessionKey = (args.sessionKey ?? DEFAULT_SESSION).trim() || DEFAULT_SESSION;
     const sameOriginOnly = args.sameOriginOnly ?? true;
     const shouldDiscover = args.discoverLinks ?? true;
-    const allowedOrigins = new Set(seeds.map((url) => new URL(url).origin));
+    const allowedSites = new Set(seeds.map(siteKey));
     const queue = [...seeds];
     const visited = new Set<string>();
     const discovered = new Set<string>();
@@ -300,9 +309,27 @@ export const camofoxCrawl = action({
           timeoutMs,
         )) as SnapshotResponse;
         const finalUrl = snapshot.url ?? created.url ?? pageUrl;
-        const links = shouldDiscover ? extractLinks(snapshot.snapshot ?? "", finalUrl) : [];
+        let links: string[] = [];
+        if (shouldDiscover) {
+          // The DOM links endpoint sees rendered listing anchors that are not
+          // always represented in an accessibility snapshot. Keep the
+          // snapshot parser as a fallback for Camofox versions without it.
+          try {
+            const linkResponse = (await camofox(
+              `/tabs/${encodeURIComponent(tabId)}/links?userId=${encodeURIComponent(CAMOFOX_USER)}&limit=500`,
+              { method: "GET" },
+              timeoutMs,
+            )) as LinksResponse;
+            links = (linkResponse.links ?? [])
+              .map((link) => (link.url ? normalizeUrl(link.url, finalUrl) : null))
+              .filter((link): link is string => Boolean(link));
+          } catch {
+            links = [];
+          }
+          links = Array.from(new Set([...links, ...extractLinks(snapshot.snapshot ?? "", finalUrl)]));
+        }
         const acceptedLinks = links.filter((link) => {
-          if (sameOriginOnly && !allowedOrigins.has(new URL(link).origin)) return false;
+          if (sameOriginOnly && !allowedSites.has(siteKey(link))) return false;
           if (!visited.has(link)) discovered.add(link);
           return !visited.has(link);
         });

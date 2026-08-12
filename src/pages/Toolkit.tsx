@@ -368,6 +368,10 @@ export default function Toolkit() {
       toast.error("Add at least one URL to crawl.");
       return;
     }
+    if (urls.some((url) => /^(?:https?:\/\/)?(?:www\.)?auction\.co\/?$/i.test(url))) {
+      toast.error("Use https://www.auction.com/ — auction.co is not the Auction.com listing site.");
+      return;
+    }
     setCrawling(true);
     try {
       const result = await crawlWithCamofox({

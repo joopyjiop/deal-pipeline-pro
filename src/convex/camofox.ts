@@ -125,6 +125,39 @@ function assertHttpUrl(url: string) {
   }
 }
 
+function normalizeUrl(rawUrl: string, baseUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl.trim(), baseUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    parsed.hash = "";
+    const pathname = parsed.pathname.toLowerCase();
+    if (/\.(?:css|csv|gif|ico|jpe?g|js|json|mp3|mp4|pdf|png|svg|webp|woff2?|xml|zip)$/i.test(pathname)) {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function extractLinks(snapshot: string, baseUrl: string): string[] {
+  const candidates = new Set<string>();
+  const addMatches = (pattern: RegExp) => {
+    for (const match of snapshot.matchAll(pattern)) {
+      const candidate = normalizeUrl(match[1] ?? match[0], baseUrl);
+      if (candidate) candidates.add(candidate);
+    }
+  };
+
+  // Accessibility snapshots can expose links as absolute text, markdown, or
+  // href-like attributes depending on the page and Camofox version.
+  addMatches(/https?:\/\/[^\s"'<>()[\]{}]+/gi);
+  addMatches(/(?:href|url)\s*[:=]\s*["']([^"']+)["']/gi);
+  addMatches(/\]\((https?:\/\/[^)]+)\)/gi);
+
+  return Array.from(candidates).slice(0, 100);
+}
+
 /** GET /health — is the camofox browser engine up? */
 export const camofoxCheck = action({
   args: {},
@@ -193,6 +226,122 @@ export const camofoxScrape = action({
       hasMore: snapshot.hasMore ?? false,
       nextOffset: snapshot.nextOffset ?? 0,
       sessionKey,
+    };
+  },
+});
+
+/**
+ * Crawl a bounded set of owner-provided URLs and links discovered from them.
+ * Explicit seed URLs may be from different sites; discovered links are kept
+ * on the seed origins by default. Pages are processed sequentially and tabs
+ * are closed after capture so a free browser host is not overwhelmed.
+ */
+export const camofoxCrawl = action({
+  args: {
+    urls: v.array(v.string()),
+    sessionKey: v.optional(v.string()),
+    maxPages: v.optional(v.number()),
+    discoverLinks: v.optional(v.boolean()),
+    sameOriginOnly: v.optional(v.boolean()),
+    timeoutMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const seeds = Array.from(
+      new Set(args.urls.map((url) => url.trim()).filter(Boolean)),
+    );
+    if (seeds.length === 0) throw new Error("At least one URL is required");
+    if (seeds.length > 20) throw new Error("You can submit at most 20 starting URLs per crawl");
+    seeds.forEach(assertHttpUrl);
+
+    const maxPages = Math.max(1, Math.min(12, Math.floor(args.maxPages ?? 8)));
+    const timeoutMs = Math.max(10_000, Math.min(60_000, args.timeoutMs ?? 45_000));
+    const sessionKey = (args.sessionKey ?? DEFAULT_SESSION).trim() || DEFAULT_SESSION;
+    const sameOriginOnly = args.sameOriginOnly ?? true;
+    const shouldDiscover = args.discoverLinks ?? true;
+    const allowedOrigins = new Set(seeds.map((url) => new URL(url).origin));
+    const queue = [...seeds];
+    const visited = new Set<string>();
+    const discovered = new Set<string>();
+    const pages: Array<{
+      url: string;
+      finalUrl: string;
+      snapshot: string;
+      truncated: boolean;
+      refsCount: number;
+      discoveredLinks: string[];
+    }> = [];
+    const failed: Array<{ url: string; error: string }> = [];
+
+    while (queue.length > 0 && pages.length + failed.length < maxPages) {
+      const requestedUrl = queue.shift();
+      if (!requestedUrl) break;
+      const pageUrl = normalizeUrl(requestedUrl, requestedUrl);
+      if (!pageUrl || visited.has(pageUrl)) continue;
+      visited.add(pageUrl);
+
+      let tabId: string | undefined;
+      try {
+        const created = (await camofox(
+          "/tabs",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ userId: CAMOFOX_USER, sessionKey, url: pageUrl }),
+          },
+          timeoutMs,
+        )) as CreateTabResponse;
+        tabId = created.tabId;
+        if (!tabId) throw new Error("Camofox did not return a tabId");
+
+        const snapshot = (await camofox(
+          `/tabs/${encodeURIComponent(tabId)}/snapshot?userId=${encodeURIComponent(CAMOFOX_USER)}`,
+          { method: "GET" },
+          timeoutMs,
+        )) as SnapshotResponse;
+        const finalUrl = snapshot.url ?? created.url ?? pageUrl;
+        const links = shouldDiscover ? extractLinks(snapshot.snapshot ?? "", finalUrl) : [];
+        const acceptedLinks = links.filter((link) => {
+          if (sameOriginOnly && !allowedOrigins.has(new URL(link).origin)) return false;
+          if (!visited.has(link)) discovered.add(link);
+          return !visited.has(link);
+        });
+        for (const link of acceptedLinks) {
+          if (!queue.includes(link) && queue.length < maxPages * 4) queue.push(link);
+        }
+
+        const rawSnapshot = snapshot.snapshot ?? "";
+        pages.push({
+          url: pageUrl,
+          finalUrl,
+          snapshot: rawSnapshot.slice(0, 16_000),
+          truncated: Boolean(snapshot.truncated) || rawSnapshot.length > 16_000,
+          refsCount: snapshot.refsCount ?? 0,
+          discoveredLinks: acceptedLinks,
+        });
+      } catch (error) {
+        failed.push({
+          url: pageUrl,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        if (tabId) {
+          await camofox(
+            `/tabs/${encodeURIComponent(tabId)}?userId=${encodeURIComponent(CAMOFOX_USER)}`,
+            { method: "DELETE" },
+          ).catch(() => undefined);
+        }
+      }
+    }
+
+    return {
+      requested: seeds,
+      sessionKey,
+      maxPages,
+      pages,
+      failed,
+      discoveredLinks: Array.from(discovered).slice(0, 100),
+      queuedButNotVisited: queue.slice(0, 50),
     };
   },
 });

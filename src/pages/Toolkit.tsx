@@ -3,6 +3,7 @@ import { CONVEX_SITE_URL } from "@/lib/convex-url";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { useAction } from "convex/react";
 import {
@@ -14,6 +15,7 @@ import {
   ExternalLink,
   FileSearch,
   Globe2,
+  Link2,
   ListChecks,
   Landmark,
   Loader2,
@@ -74,6 +76,22 @@ type ScrapeResult = {
   piiCreated: boolean;
 };
 
+type CrawlResult = {
+  requested: string[];
+  maxPages: number;
+  pages: Array<{
+    url: string;
+    finalUrl: string;
+    snapshot: string;
+    truncated: boolean;
+    refsCount: number;
+    discoveredLinks: string[];
+  }>;
+  failed: Array<{ url: string; error: string }>;
+  discoveredLinks: string[];
+  queuedButNotVisited: string[];
+};
+
 type EstimateResult = {
   estimateStatus: "READY" | "NEEDS_APPRAISAL";
   compCount: number;
@@ -131,6 +149,7 @@ export default function Toolkit() {
   const listAutomationTasks = useAction(api.mongodb.listAutomationTasks);
   const runAutomationNow = useAction(api.mongodb.runAutomationNow);
   const scrapeSource = useAction(api.mongodb.scrapeSource);
+  const crawlWithCamofox = useAction(api.camofox.camofoxCrawl);
   const qualifyStagedSource = useAction(api.mongodb.qualifyStagedSource);
   const estimateDeal = useAction(api.mongodb.estimateDeal);
 
@@ -145,6 +164,12 @@ export default function Toolkit() {
   const [scraping, setScraping] = useState(false);
   const [estimating, setEstimating] = useState(false);
   const [scrapeResult, setScrapeResult] = useState<ScrapeResult | null>(null);
+  const [crawlResult, setCrawlResult] = useState<CrawlResult | null>(null);
+  const [crawling, setCrawling] = useState(false);
+  const [crawlUrls, setCrawlUrls] = useState("");
+  const [crawlMaxPages, setCrawlMaxPages] = useState("8");
+  const [crawlDiscoverLinks, setCrawlDiscoverLinks] = useState(true);
+  const [crawlSameOrigin, setCrawlSameOrigin] = useState(true);
   const [estimateResult, setEstimateResult] = useState<EstimateResult | null>(null);
   const [copiedMcpField, setCopiedMcpField] = useState<string | null>(null);
   const [queueUrl, setQueueUrl] = useState("");
@@ -328,6 +353,30 @@ export default function Toolkit() {
     }
   };
 
+  const handleCrawl = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const urls = Array.from(new Set(crawlUrls.split(/\r?\n|,/).map((url) => url.trim()).filter(Boolean)));
+    if (urls.length === 0) {
+      toast.error("Add at least one URL to crawl.");
+      return;
+    }
+    setCrawling(true);
+    try {
+      const result = await crawlWithCamofox({
+        urls,
+        maxPages: Number(crawlMaxPages),
+        discoverLinks: crawlDiscoverLinks,
+        sameOriginOnly: crawlSameOrigin,
+      }) as CrawlResult;
+      setCrawlResult(result);
+      toast.success(`Crawl finished: ${result.pages.length} page${result.pages.length === 1 ? "" : "s"} captured${result.failed.length ? `, ${result.failed.length} failed` : ""}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not crawl these links.");
+    } finally {
+      setCrawling(false);
+    }
+  };
+
   const handleEstimate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setEstimating(true);
@@ -430,6 +479,22 @@ export default function Toolkit() {
           <form onSubmit={queueScrape} className="mt-3 flex flex-col gap-2 sm:flex-row"><Input required type="url" value={queueUrl} onChange={(event) => setQueueUrl(event.target.value)} placeholder="Queue an official public source URL for the next cycle" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /><Button type="submit" disabled={!automation.enabled} className="h-10 gap-2 rounded-xl bg-sky-700 text-xs hover:bg-sky-800"><ListChecks className="size-4" /> Queue source</Button><Button type="button" disabled={!automation.enabled} onClick={() => void queueOfficialAllenCountySources()} variant="outline" className="h-10 gap-2 rounded-xl border-amber-200/80 bg-amber-50/55 text-xs text-amber-800"><Landmark className="size-4" /> Queue Allen County</Button><Button type="button" disabled={!automation.enabled} onClick={() => void runCycle()} variant="outline" className="h-10 gap-2 rounded-xl border-white/85 bg-white/65 text-xs"><Play className="size-4" /> Run now</Button></form>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><p className="text-[0.68rem] text-slate-500">Today: {automation.runsToday} / {automation.dailyRunLimit} cycles · {tasks.filter((task) => task.status === "PENDING").length} pending tasks</p><div className="flex flex-wrap gap-2">{tasks.slice(0, 5).map((task) => <Badge key={task._id} variant="outline" className="border-white/90 bg-white/55 text-[0.65rem] text-slate-600">{task.kind} · {task.status}</Badge>)}</div></div>
           <div className="mt-4 rounded-2xl border border-sky-100/80 bg-sky-50/45 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">n8n scheduler handoff</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">n8n can schedule source URLs and retry this queue endpoint. Use one workflow with a daily or twice-daily schedule to conserve trial executions; Convex still validates the URL, fetches bounded evidence, writes Mongo staging, and keeps every candidate in owner review.</p></div><Badge className={automation.n8nSecretConfigured ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-amber-100/80 text-amber-800"}>{automation.n8nSecretConfigured ? "Connected" : "Needs secret"}</Badge></div><div className="mt-3 grid gap-2 text-[0.68rem] leading-5 text-slate-500 sm:grid-cols-3"><p><strong className="text-slate-700">Endpoint</strong><br />your Convex site URL + <code>/api/n8n/source</code></p><p><strong className="text-slate-700">Header</strong><br /><code>x-convex-n8n-secret</code></p><p><strong className="text-slate-700">Body</strong><br /><code>{"{ url, sourceType, idempotencyKey? }"}</code></p></div><p className="mt-3 text-[0.68rem] text-slate-500">Add <code>CONVEX_N8N_WEBHOOK_SECRET</code> in the Convex Environment vars panel, then store the same value as an n8n secret. Do not put it in browser code.</p></div>
+        </section>
+
+        <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cyan-100/80 text-cyan-700"><Link2 className="size-5" /></div><div><p className="eyebrow">Camofox link crawler</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Scrape the links you send</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Paste one or more public URLs, one per line. The browser captures each page sequentially, optionally follows links it can identify, and closes every tab after capture. Results stay evidence-only until you review and qualify them.</p></div></div>
+            <Badge className="border-0 bg-cyan-100/80 text-cyan-800">Owner only</Badge>
+          </div>
+          <form onSubmit={handleCrawl} className="mt-5 grid gap-3">
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Starting links</span><Textarea required value={crawlUrls} onChange={(event) => setCrawlUrls(event.target.value)} placeholder={"https://county.gov/sales\nhttps://auction.example/listings"} className="min-h-28 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
+            <div className="grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)_auto] sm:items-end">
+              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Maximum pages</span><Input required min="1" max="12" type="number" value={crawlMaxPages} onChange={(event) => setCrawlMaxPages(event.target.value)} className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
+              <div className="flex flex-wrap gap-4 pb-2 text-xs text-slate-600"><label className="inline-flex items-center gap-2"><input type="checkbox" checked={crawlDiscoverLinks} onChange={(event) => setCrawlDiscoverLinks(event.target.checked)} className="size-4 accent-cyan-700" /> Follow discovered links</label><label className="inline-flex items-center gap-2"><input type="checkbox" checked={crawlSameOrigin} onChange={(event) => setCrawlSameOrigin(event.target.checked)} className="size-4 accent-cyan-700" /> Keep discovered links on seed sites</label></div>
+              <Button disabled={crawling} type="submit" className="h-10 gap-2 rounded-xl bg-cyan-700 text-xs hover:bg-cyan-800">{crawling ? <Loader2 className="size-4 animate-spin" /> : <Globe2 className="size-4" />} {crawling ? "Crawling…" : "Start crawl"}</Button>
+            </div>
+          </form>
+          {crawlResult && <div className="mt-5 space-y-3"><div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><Badge className="border-0 bg-teal-100/80 text-teal-800">{crawlResult.pages.length} captured</Badge><Badge className={crawlResult.failed.length ? "border-0 bg-amber-100/80 text-amber-800" : "border-0 bg-slate-100/80 text-slate-600"}>{crawlResult.failed.length} failed</Badge><span>{crawlResult.discoveredLinks.length} links discovered · {crawlResult.queuedButNotVisited.length} left in bound</span></div>{crawlResult.pages.map((page) => <details key={page.url} className="rounded-2xl border border-white/80 bg-white/45 p-4"><summary className="cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-2"><span className="min-w-0 truncate text-xs font-semibold text-slate-700">{page.finalUrl}</span><span className="text-[0.68rem] text-slate-400">{page.discoveredLinks.length} links · {page.refsCount} refs</span></div></summary><p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-slate-600">{page.snapshot.slice(0, 1400) || "No readable snapshot returned."}{page.truncated ? "\n\n[Snapshot truncated for safety]" : ""}</p></details>)}{crawlResult.failed.map((failure) => <div key={failure.url} className="rounded-2xl border border-rose-100/80 bg-rose-50/45 p-3 text-xs"><p className="font-semibold text-rose-800">{failure.url}</p><p className="mt-1 text-rose-700">{failure.error}</p></div>)}</div>}
         </section>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">

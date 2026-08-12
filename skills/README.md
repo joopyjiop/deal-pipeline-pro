@@ -48,6 +48,15 @@ Agent skills integrated into this project (standard Agent Skills format: `SKILL.
 - **Prerequisite:** `FIRECRAWL_API_KEY` (hosted) or `FIRECRAWL_API_URL` (self-hosted) in the backend env vars (Convex dashboard for `keen-aardvark-333`). The CLI skills additionally need the Firecrawl CLI (`npx -y firecrawl-cli@latest init --all`).
 - **E2E / component tests:** `playwright` skills cover browser automation (`playwright-cli`), component tests for the React UI (`playwright-component-testing` — story-gallery pattern fits this app's shadcn/ui components), and trace debugging (`playwright-trace`). `@playwright/test` is not yet installed in this project — say the word and I'll add it plus a first smoke test.
 
+## nextlevelbuilder — compatible project skills
+
+| Pack | Contents | Source |
+| --- | --- | --- |
+| `nextlevelbuilder/ui-ux-pro-max/` | **UI/UX guidance** — visual hierarchy, responsive layouts, interaction states, accessibility, motion, and preview verification for the existing React/Tailwind/shadcn shell | `nextlevelbuilder/ui-ux-pro-max-skill` |
+| `nextlevelbuilder/agentwiki/` | **Knowledge-capture guidance** — durable decisions, operational runbooks, implementation pointers, verification notes, and safe handling of secrets | `nextlevelbuilder/agentwiki-skills` |
+
+The full organization inventory and integration decisions are documented in `docs/nextlevelbuilder-repositories.md`. `skillx`, `agentbrain-cli`, `goclaw-mcp`, `goclaw`, `goclaw-cli`, `goclaw-plugin-webchat`, `f2u-cli`, `goclaw-docs`, and `openclaw-event-2026` remain external references because they are standalone tools, services, plugins, or content repositories rather than drop-in skills for this app.
+
 ## Conventions
 
 - Skills are read-only reference; the source-of-truth for behavior stays in `src/convex/` and `src/pages/`.

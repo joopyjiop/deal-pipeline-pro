@@ -1545,19 +1545,55 @@ async function fetchAndStageSource(database: Awaited<ReturnType<typeof getDataba
     throw new Error("This scraper currently supports text, HTML, XML, and JSON sources");
   }
   const body = (await response.text()).slice(0, 1_000_000);
-  const title = decodeHtml(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() ?? parsedUrl.hostname);
-  const evidenceText = htmlToText(body).slice(0, 8000);
+  let title = decodeHtml(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() ?? parsedUrl.hostname);
+  let evidenceText = htmlToText(body).slice(0, 8000);
+  let stagedContentType = contentType;
+
+  // Some portals (e.g. auction.com behind Incapsula) answer 200 with a JS
+  // challenge shell that carries almost no text. When the page is effectively
+  // empty, re-render it through the Firecrawl fallback so the staged evidence
+  // contains the listing facts instead of the challenge stub. If Firecrawl is
+  // unconfigured or fails, the original evidence is kept — staging never
+  // fabricates and never blocks on the fallback.
+  if (evidenceText.trim().length < 200) {
+    try {
+      const scraped = await firecrawlRequest<FirecrawlScrapeResponse>("/scrape", {
+        url: parsedUrl.toString(),
+        formats: ["markdown"],
+        onlyMainContent: true,
+        removeBase64Images: true,
+      });
+      const markdown = scraped.data?.markdown ?? "";
+      if (markdown.trim().length >= 200) {
+        evidenceText = markdown.slice(0, 8000);
+        stagedContentType = "firecrawl-markdown";
+        if (scraped.data?.metadata?.title) title = scraped.data.metadata.title;
+      }
+    } catch {
+      // Fallback unavailable (missing FIRECRAWL_API_KEY, quota, or failure):
+      // keep the plain evidence; the qualification gate rejects it safely.
+    }
+  }
+
   const excerpt = evidenceText.slice(0, 2000);
   const links = [...body.matchAll(/href=["'](https?:\/\/[^"']+)["']/gi)].map((match) => match[1]).filter(Boolean).slice(0, 20);
   const fetchedAt = new Date().toISOString();
   const staged = await database.collection(IMPORT_STAGING).insertOne({
     sourceType: args.sourceType,
-    rawJson: { url: parsedUrl.toString(), title, excerpt: evidenceText, links, contentType, fetchedAt },
+    rawJson: {
+      url: parsedUrl.toString(),
+      title,
+      excerpt: evidenceText,
+      links,
+      contentType: stagedContentType,
+      fetchedAt,
+      ...(stagedContentType === "firecrawl-markdown" ? { provider: "firecrawl-render" } : {}),
+    },
     status: "NEW",
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
-  return { stagedId: String(staged.insertedId), url: parsedUrl.toString(), title, excerpt, links, contentType, fetchedAt, piiCreated: false };
+  return { stagedId: String(staged.insertedId), url: parsedUrl.toString(), title, excerpt, links, contentType: stagedContentType, fetchedAt, piiCreated: false };
 }
 
 type SourcedCandidate = {

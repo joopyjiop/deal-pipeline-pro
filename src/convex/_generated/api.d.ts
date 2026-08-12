@@ -9,6 +9,7 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as agents from "../agents.js";
 import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
 import type * as camofox from "../camofox.js";
@@ -20,6 +21,7 @@ import type * as ollama from "../ollama.js";
 import type * as owner from "../owner.js";
 import type * as search from "../search.js";
 import type * as settings from "../settings.js";
+import type * as underwriting from "../underwriting.js";
 import type * as users from "../users.js";
 
 import type {
@@ -30,6 +32,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  agents: typeof agents;
   auth: typeof auth;
   "auth/emailOtp": typeof auth_emailOtp;
   camofox: typeof camofox;
@@ -41,6 +44,7 @@ declare const fullApi: ApiFromModules<{
   owner: typeof owner;
   search: typeof search;
   settings: typeof settings;
+  underwriting: typeof underwriting;
   users: typeof users;
 }>;
 

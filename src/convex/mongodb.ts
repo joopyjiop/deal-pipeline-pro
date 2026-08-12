@@ -6,6 +6,17 @@ import { internal } from "./_generated/api";
 import { action, ActionCtx, internalAction } from "./_generated/server";
 import { rankLeads } from "./search";
 import type { SearchableLead } from "./search";
+import { median, rentalUnderwriting, repairEstimate } from "./underwriting";
+import type { RentalUnderwritingInput, RentalUnderwritingResult } from "./underwriting";
+import {
+  arvRepairsAgent,
+  buyerMatchingAgent,
+  readinessReport,
+  sourcingAgent,
+  underwritingAgentFromModel,
+  verificationAgent,
+} from "./agents";
+import type { AgentLead, AgentReport, BuyerLike, DueDiligenceLike, ReadinessReport, ScoredBuyerMatch } from "./agents";
 
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
 
@@ -54,6 +65,22 @@ const estimateInputValidator = v.object({
   closingCosts: v.number(),
   holdingCosts: v.number(),
   acquisitionPrice: v.optional(v.number()),
+});
+
+const rentalUnderwritingInputValidator = v.object({
+  purchasePrice: v.number(),
+  rentComps: v.optional(v.array(v.number())),
+  marketRentPerSqFt: v.optional(v.number()),
+  squareFeet: v.optional(v.number()),
+  annualPropertyTax: v.optional(v.number()),
+  annualInsurance: v.optional(v.number()),
+  managementPct: v.optional(v.number()),
+  vacancyPct: v.optional(v.number()),
+  maintenancePct: v.optional(v.number()),
+  loanAmount: v.optional(v.number()),
+  loanToValuePct: v.optional(v.number()),
+  interestRatePct: v.optional(v.number()),
+  loanTermYears: v.optional(v.number()),
 });
 let clientPromise: Promise<MongoClient> | null = null;
 // Effective fallback URI resolved from the Convex-stored setting. Used when the
@@ -446,6 +473,246 @@ function objectId(id: string) {
   return new ObjectId(id);
 }
 
+// Off-market source presets for the sourcing agent: probate filings, tax
+// delinquency, and government-owned/seized property. Every preset is a real
+// public site the owner can crawl in bounded batches; none of them generate
+// leads automatically — they seed the review queue.
+const OFF_MARKET_SOURCE_PRESETS = [
+  {
+    name: "Probate & trust property sales",
+    url: "https://www.trustpropertiesusa.com/",
+    sourceType: "PROBATE" as const,
+  },
+  {
+    name: "Harris County delinquent tax sale listings",
+    url: "https://www.hctax.net/Property/listings/taxsalelisting",
+    sourceType: "TAX_SALE" as const,
+  },
+  {
+    name: "Bid4Assets county tax & government-seized property auctions",
+    url: "https://www.bid4assets.com/",
+    sourceType: "OFF_MARKET" as const,
+  },
+] as const;
+
+export const queueOffMarketSources = action({
+  args: {},
+  handler: async (ctx) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const queued = await Promise.all(
+      OFF_MARKET_SOURCE_PRESETS.map(async (source) => ({
+        ...source,
+        ...(await enqueueSourceTask(database, source.url, source.sourceType, `off-market:${source.sourceType}:2026`)),
+      })),
+    );
+    return { queued, ownerApprovalRequired: true };
+  },
+});
+
+// ---- Coordinated agent team (Tranchi-style pipeline) ----
+//
+// Run the sourcing, verification, underwriting, and ARV/repairs agents over one
+// lead, then aggregate their blocking data gaps through the readiness gate. The
+// team only reads data the lead already carries plus the owner-provided rental
+// and comp inputs — nothing is invented, and an incomplete deal is flagged.
+
+function leadText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function leadNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function toAgentLead(document: Document): AgentLead {
+  return {
+    _id: String(document._id),
+    propertyAddress: leadText(document.propertyAddress),
+    city: leadText(document.city),
+    state: leadText(document.state),
+    zip: leadText(document.zip),
+    county: leadText(document.county),
+    parcelId: leadText(document.parcelId),
+    sourceType: leadText(document.sourceType),
+    sourceUrl: leadText(document.sourceUrl),
+    sourceRef: leadText(document.sourceRef),
+    sourceDate: leadText(document.sourceDate),
+    distressScore: leadNumber(document.distressScore),
+    distressSignals: Array.isArray(document.distressSignals)
+      ? (document.distressSignals as Array<Record<string, unknown>>).map((signal) => ({
+          type: leadText(signal.type),
+          evidence: leadText(signal.evidence),
+          verified: signal.verified === true,
+          sourceUrl: leadText(signal.sourceUrl),
+          sourceDate: leadText(signal.sourceDate),
+        }))
+      : [],
+    dueDiligence: document.dueDiligence as DueDiligenceLike | undefined,
+    fabricated: document.fabricated === true,
+    squareFeet: leadNumber(document.squareFeet),
+    arv: leadNumber(document.arv),
+    repairs: leadNumber(document.repairs),
+    mao: leadNumber(document.mao),
+    acquisitionPrice: leadNumber(document.acquisitionPrice),
+    estimatedProfit: leadNumber(document.estimatedProfit),
+  };
+}
+
+type StoredAgentTeam = {
+  reports?: AgentReport[];
+  readiness?: ReadinessReport;
+  ranAt?: number;
+};
+
+export const runAgentTeam = action({
+  args: {
+    leadId: v.string(),
+    rental: v.optional(rentalUnderwritingInputValidator),
+    compPrices: v.optional(v.array(v.number())),
+    repairTier: v.optional(repairTierValidator),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+    if (!document) throw new Error("Lead not found");
+
+    const lead = toAgentLead(document);
+    const purchasePrice =
+      args.rental?.purchasePrice ??
+      leadNumber(document.acquisitionPrice) ??
+      leadNumber(document.mao) ??
+      0;
+    const rentalInput: RentalUnderwritingInput = args.rental ?? { purchasePrice };
+    const model = rentalUnderwriting(rentalInput);
+    const rentalModel = model.dscr !== undefined || model.annualCashFlow !== undefined
+      ? { dscr: model.dscr, annualCashFlow: model.annualCashFlow, monthlyCashFlow: model.monthlyCashFlow }
+      : undefined;
+
+    const reports: AgentReport[] = [
+      sourcingAgent(lead),
+      verificationAgent(lead.dueDiligence),
+      arvRepairsAgent({
+        squareFeet: lead.squareFeet,
+        compPrices: args.compPrices ?? [],
+        repairTier: args.repairTier,
+      }),
+      underwritingAgentFromModel(model),
+    ];
+    const readiness = readinessReport(reports);
+    const ranAt = Date.now();
+    await database.collection(LEADS).updateOne(
+      { _id: document._id },
+      {
+        $set: withoutUndefined({
+          agentTeam: { reports, readiness, ranAt },
+          rentalModel: rentalModel ?? undefined,
+          readinessStatus: readiness.status,
+          updatedAt: ranAt,
+        }),
+      },
+    );
+    return { leadId: args.leadId, reports, readiness, rentalModel };
+  },
+});
+
+export const getAgentTeam = action({
+  args: { leadId: v.string() },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const document = await (await getDatabase()).collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+    if (!document) throw new Error("Lead not found");
+    const stored = document.agentTeam as StoredAgentTeam | undefined;
+    return { leadId: args.leadId, agentTeam: stored ?? null };
+  },
+});
+
+export const runBuyerMatches = action({
+  args: {
+    leadId: v.string(),
+    minScore: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+    if (!document) throw new Error("Lead not found");
+
+    const rentalModel = document.rentalModel as { dscr?: number; annualCashFlow?: number; monthlyCashFlow?: number } | undefined;
+    const leadForScoring = {
+      city: leadText(document.city) ?? "",
+      county: leadText(document.county) ?? "",
+      state: leadText(document.state) ?? "",
+      mao: leadNumber(document.mao),
+      arv: leadNumber(document.arv),
+      acquisitionPrice: leadNumber(document.acquisitionPrice),
+      estimatedProfit: leadNumber(document.estimatedProfit),
+      rentalModel,
+    };
+
+    const buyerDocuments = await database.collection(BUYERS).find({ intakeStatus: "APPROVED" }).limit(500).toArray();
+    const buyerLikes: BuyerLike[] = buyerDocuments.map((buyer) => {
+      const exitType = buyer.exitType;
+      return {
+        _id: String(buyer._id),
+        budgetMin: leadNumber(buyer.budgetMin) ?? 0,
+        budgetMax: leadNumber(buyer.budgetMax) ?? 0,
+        targetAreas: Array.isArray(buyer.targetAreas) ? buyer.targetAreas.map((area: unknown) => String(area)) : [],
+        exitType: exitType === "BUY_HOLD" || exitType === "FLIP" || exitType === "ASSIGN" ? exitType : "ASSIGN",
+        proofOfFundsStatus: buyer.proofOfFundsStatus === "VERIFIED" || buyer.proofOfFundsStatus === "SELF_REPORTED" ? buyer.proofOfFundsStatus : "NONE",
+      };
+    });
+
+    const scored = buyerMatchingAgent(leadForScoring, buyerLikes, args.minScore ?? 55);
+    const matches: ScoredBuyerMatch[] = scored.matches;
+    return {
+      leadId: args.leadId,
+      matches,
+      skipped: scored.skipped,
+      buyersScored: buyerLikes.length,
+    };
+  },
+});
+
+export const listPipelineBrief = action({
+  args: {},
+  handler: async (ctx) => {
+    await requireOwner(ctx);
+    const documents = await (await getDatabase()).collection(LEADS)
+      .find({ fabricated: { $ne: true } })
+      .sort({ updatedAt: -1 })
+      .limit(200)
+      .toArray();
+    const leads = documents.map((document) => {
+      const lead = toAgentLead(document);
+      const team = document.agentTeam as StoredAgentTeam | undefined;
+      const gaps = team?.readiness?.gaps ?? team?.reports?.flatMap((report) => report.dataGaps) ?? [];
+      return {
+        _id: String(document._id),
+        propertyAddress: lead.propertyAddress ?? "",
+        city: lead.city ?? "",
+        state: lead.state ?? "",
+        sourceType: lead.sourceType ?? "",
+        pipelineStatus: leadText(document.pipelineStatus) ?? "SOURCED",
+        verificationStatus: leadText(document.verificationStatus) ?? "UNVERIFIED",
+        readinessStatus: leadText(document.readinessStatus) ?? "NOT_RUN",
+        ready: team?.readiness?.ready ?? false,
+        gapCount: gaps.filter((gap) => gap.blocksReady).length,
+        ranAt: team?.ranAt ?? undefined,
+      };
+    });
+    const readyCount = leads.filter((lead) => lead.ready).length;
+    return {
+      total: leads.length,
+      readyCount,
+      incompleteCount: leads.length - readyCount,
+      notRunCount: leads.filter((lead) => lead.readinessStatus === "NOT_RUN").length,
+      leads,
+    };
+  },
+});
+
 function calculateEstimatedProfit(value: { mao?: unknown; acquisitionPrice?: unknown } | Record<string, unknown>) {
   return typeof value.mao === "number" && typeof value.acquisitionPrice === "number"
     ? value.mao - value.acquisitionPrice
@@ -504,33 +771,6 @@ function htmlToText(value: string) {
   );
 }
 
-function median(values: number[]) {
-  // @codebuff-probe2
-  const sorted = [...values].sort((a, b) => a - b);
-  if (sorted.length === 0) return undefined;
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[middle - 1] + sorted[middle]) / 2
-    : sorted[middle];
-}
-
-function calculateRepairEstimate(squareFeet: number, tier: "BASE" | "MEDIUM" | "GUT", yearBuilt?: number) {
-  const tierRate = { BASE: 15, MEDIUM: 30, GUT: 50 }[tier];
-  const ageAdjustment = yearBuilt !== undefined && yearBuilt < 1960 ? 1.1 : 1;
-  const base = squareFeet * tierRate * ageAdjustment;
-  const items = {
-    roof: Math.round(base * 0.2),
-    hvac: Math.round(base * 0.15),
-    kitchen: Math.round(base * 0.2),
-    bath: Math.round(base * 0.1),
-    flooring: Math.round(base * 0.12),
-    paint: Math.round(base * 0.08),
-    electrical: Math.round(base * 0.05),
-  };
-  const subtotal = Object.values(items).reduce((total, value) => total + value, 0);
-  const contingency = Math.round(subtotal * 0.1);
-  return { items, subtotal, contingency, total: subtotal + contingency, ratePerSquareFoot: tierRate * ageAdjustment };
-}
 
 type EstimateInput = {
   leadId?: string;
@@ -559,7 +799,7 @@ function calculateDealEstimate(args: EstimateInput) {
   }
   const compValues = args.soldComps.map((comp) => comp.salePrice).filter((value) => value > 0);
   const compMedian = median(compValues);
-  const repairs = calculateRepairEstimate(args.squareFeet, args.repairTier, args.yearBuilt);
+  const repairs = repairEstimate(args.squareFeet, args.repairTier, args.yearBuilt);
   const arv = compMedian === undefined ? undefined : {
     conservative: Math.round(compMedian * 0.9),
     median: Math.round(compMedian),

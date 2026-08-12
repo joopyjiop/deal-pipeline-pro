@@ -11,6 +11,7 @@ import {
   Bot,
   Calculator,
   Check,
+  ClipboardList,
   Copy,
   ExternalLink,
   FileSearch,
@@ -21,10 +22,12 @@ import {
   Loader2,
   LogOut,
   Play,
+  Radar,
   RefreshCw,
   ShieldCheck,
   Smartphone,
   Sparkles,
+  Users,
   Wrench,
 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
@@ -118,6 +121,52 @@ type EstimateResult = {
   estimatedProfit?: number;
 };
 
+type DataGap = { category: string; detail: string; blocksReady: boolean };
+
+type AgentReport = {
+  agent: string;
+  status: "COMPLETED" | "BLOCKED";
+  summary: string;
+  findings: string[];
+  dataGaps: DataGap[];
+};
+
+type ReadinessReport = {
+  ready: boolean;
+  status: "READY" | "INCOMPLETE";
+  gaps: DataGap[];
+  categories: Record<string, "FOUND" | "MISSING">;
+  ranAt: number;
+};
+
+type ScoredBuyerMatch = {
+  buyerId: string;
+  matchScore: number;
+  confidence: "LOW" | "MEDIUM" | "HIGH";
+  components: { area: number; budget: number; exit: number; pofBoost: number };
+  summary: string;
+  rejectReason?: string;
+};
+
+type TeamLead = { _id: string; propertyAddress: string; city: string; state: string };
+
+type PipelineBrief = {
+  total: number;
+  readyCount: number;
+  incompleteCount: number;
+  notRunCount: number;
+  leads: Array<{
+    _id: string;
+    propertyAddress: string;
+    city: string;
+    state: string;
+    sourceType: string;
+    readinessStatus: string;
+    ready: boolean;
+    gapCount: number;
+  }>;
+};
+
 const sourceTypes = [
   ["SHERIFF_SALE", "Sheriff sale"],
   ["TAX_SALE", "Tax sale"],
@@ -183,6 +232,12 @@ export default function Toolkit() {
   const crawlWithFirecrawl = useAction(api.mongodb.firecrawlCrawl);
   const qualifyStagedSource = useAction(api.mongodb.qualifyStagedSource);
   const estimateDeal = useAction(api.mongodb.estimateDeal);
+  const runAgentTeamAction = useAction(api.mongodb.runAgentTeam);
+  const getAgentTeamAction = useAction(api.mongodb.getAgentTeam);
+  const runBuyerMatchesAction = useAction(api.mongodb.runBuyerMatches);
+  const listPipelineBriefAction = useAction(api.mongodb.listPipelineBrief);
+  const queueOffMarket = useAction(api.mongodb.queueOffMarketSources);
+  const listLeadsAction = useAction(api.mongodb.listLeads);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
   const [automation, setAutomation] = useState<AutomationConfig>({ enabled: false, mode: "BOTH", dailyRunLimit: 24, maxTasksPerRun: 5, runsToday: 0, aiEnabled: false, providerConfigured: false, n8nSecretConfigured: false });
@@ -219,6 +274,17 @@ export default function Toolkit() {
     holdingCosts: "5000",
     acquisitionPrice: "",
   });
+  const [teamLeads, setTeamLeads] = useState<Array<{ _id: string; propertyAddress: string; city: string; state: string }>>([]);
+  const [teamLeadId, setTeamLeadId] = useState("");
+  const [loadingLeads, setLoadingLeads] = useState(false);
+  const [teamRental, setTeamRental] = useState({ purchasePrice: "", rentComps: "", annualPropertyTax: "", annualInsurance: "", loanAmount: "", interestRatePct: "", loanTermYears: "", squareFeet: "", compPrices: "", repairTier: "MEDIUM" as "BASE" | "MEDIUM" | "GUT" });
+  const [teamRunning, setTeamRunning] = useState(false);
+  const [teamReports, setTeamReports] = useState<AgentReport[] | null>(null);
+  const [teamReadiness, setTeamReadiness] = useState<ReadinessReport | null>(null);
+  const [matching, setMatching] = useState(false);
+  const [teamMatches, setTeamMatches] = useState<ScoredBuyerMatch[] | null>(null);
+  const [brief, setBrief] = useState<PipelineBrief | null>(null);
+  const [loadingBrief, setLoadingBrief] = useState(false);
 
   const loadAccess = async () => {
     setLoading(true);
@@ -264,6 +330,25 @@ export default function Toolkit() {
       cancelled = true;
     };
   }, [getAiToolManifest, getAutomationConfig, getToolAccess, healthCheck, isOwner, listAutomationTasks]);
+
+  useEffect(() => {
+    if (!isOwner) return;
+    let cancelled = false;
+    Promise.all([listLeadsAction({}), listPipelineBriefAction({})])
+      .then(([leadsResult, briefResult]) => {
+        if (cancelled) return;
+        const leads = (leadsResult as unknown as { leads: TeamLead[] }).leads;
+        setTeamLeads(leads.slice(0, 100));
+        if (leads.length > 0) setTeamLeadId(leads[0]._id);
+        setBrief(briefResult as PipelineBrief);
+      })
+      .catch((error) => {
+        if (!cancelled) toast.error(error instanceof Error ? error.message : "Could not load the agent team data.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwner, listLeadsAction, listPipelineBriefAction]);
 
   const saveMongoFallback = async () => {
     const uri = mongoUriInput.trim();
@@ -513,6 +598,98 @@ export default function Toolkit() {
     }
   };
 
+  const loadTeamLeads = async () => {
+    setLoadingLeads(true);
+    try {
+      const result = await listLeadsAction({}) as unknown as { leads: TeamLead[] };
+      setTeamLeads(result.leads.slice(0, 100));
+      if (teamLeadId === "" && result.leads.length > 0) setTeamLeadId(result.leads[0]._id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not load leads.");
+    } finally {
+      setLoadingLeads(false);
+    }
+  };
+
+  const runAgentTeamNow = async () => {
+    if (!teamLeadId) {
+      toast.error("Pick a lead first.");
+      return;
+    }
+    setTeamRunning(true);
+    setTeamReports(null);
+    setTeamReadiness(null);
+    setTeamMatches(null);
+    try {
+      const purchasePrice = Number(teamRental.purchasePrice);
+      const rental = purchasePrice > 0
+        ? {
+            purchasePrice,
+            rentComps: teamRental.rentComps.split(",").map((value) => Number(value.trim())).filter((value) => Number.isFinite(value) && value > 0),
+            annualPropertyTax: teamRental.annualPropertyTax ? Number(teamRental.annualPropertyTax) : undefined,
+            annualInsurance: teamRental.annualInsurance ? Number(teamRental.annualInsurance) : undefined,
+            loanAmount: teamRental.loanAmount ? Number(teamRental.loanAmount) : undefined,
+            interestRatePct: teamRental.interestRatePct ? Number(teamRental.interestRatePct) : undefined,
+            loanTermYears: teamRental.loanTermYears ? Number(teamRental.loanTermYears) : undefined,
+          }
+        : undefined;
+      const compPrices = teamRental.compPrices.split(",").map((value) => Number(value.trim())).filter((value) => Number.isFinite(value) && value > 0);
+      const result = await runAgentTeamAction({
+        leadId: teamLeadId,
+        rental,
+        compPrices,
+        repairTier: teamRental.repairTier,
+      }) as { reports: AgentReport[]; readiness: ReadinessReport };
+      setTeamReports(result.reports);
+      setTeamReadiness(result.readiness);
+      const blocking = result.readiness.gaps.length;
+      if (result.readiness.ready) toast.success("Agent team complete — this deal is ready for owner review.");
+      else toast.warning(`Agent team flagged ${blocking} blocking gap${blocking === 1 ? "" : "s"} — this deal is not ready.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not run the agent team.");
+    } finally {
+      setTeamRunning(false);
+    }
+  };
+
+  const runBuyerMatchesNow = async () => {
+    if (!teamLeadId) {
+      toast.error("Pick a lead first.");
+      return;
+    }
+    setMatching(true);
+    try {
+      const result = await runBuyerMatchesAction({ leadId: teamLeadId, minScore: 55 }) as { matches: ScoredBuyerMatch[]; skipped: number; buyersScored: number };
+      setTeamMatches(result.matches);
+      toast.success(`${result.matches.length} buyer match${result.matches.length === 1 ? "" : "es"} from ${result.buyersScored} approved buyers (${result.skipped} below the 55-point minimum).`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not run buyer matching.");
+    } finally {
+      setMatching(false);
+    }
+  };
+
+  const loadPipelineBrief = async () => {
+    setLoadingBrief(true);
+    try {
+      setBrief(await listPipelineBriefAction({}) as PipelineBrief);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not load the pipeline brief.");
+    } finally {
+      setLoadingBrief(false);
+    }
+  };
+
+  const queueOffMarketSourcesNow = async () => {
+    try {
+      const result = await queueOffMarket({});
+      setTasks((await listAutomationTasks({ status: "PENDING" })) as AutomationTask[]);
+      toast.success(`${result.queued.length} off-market source${result.queued.length === 1 ? "" : "s"} queued for review.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not queue the off-market sources.");
+    }
+  };
+
   const copyMcpValue = async (field: string, value: string) => {
     try {
       await navigator.clipboard.writeText(value);
@@ -557,6 +734,43 @@ export default function Toolkit() {
           </div>
         </header>
 
+        <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100/80 text-indigo-700"><Radar className="size-5" /></div><div><p className="eyebrow">Coordinated agent team</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Full financial model before a deal surfaces</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Sourcing, title/lien verification, rental underwriting (rent, NOI, DSCR, cap rate, cash flow), and ARV/repairs run as one team over the chosen lead. The readiness gate aggregates every blocking data gap — an incomplete deal is flagged, never presented as ready. Every input is explicit; nothing is invented.</p></div></div>
+            <Badge className={teamReadiness ? (teamReadiness.ready ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-amber-100/80 text-amber-800") : "border-0 bg-slate-100/80 text-slate-600"}>{teamReadiness ? (teamReadiness.ready ? "READY" : "INCOMPLETE") : "Not run"}</Badge>
+          </div>
+          <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="rounded-2xl border border-white/80 bg-white/45 p-4">
+              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Lead to model</span><div className="flex gap-2"><select value={teamLeadId} onChange={(event) => setTeamLeadId(event.target.value)} className="h-10 min-w-0 flex-1 rounded-xl border border-white/85 bg-white/70 px-3 text-sm text-slate-700 outline-none"><option value="">Choose an eligible lead…</option>{teamLeads.map((lead) => <option key={lead._id} value={lead._id}>{lead.propertyAddress || lead._id} · {lead.city}, {lead.state}</option>)}</select><Button type="button" variant="outline" onClick={() => void loadTeamLeads()} disabled={loadingLeads} className="h-10 shrink-0 rounded-xl border-white/85 bg-white/65 px-3 text-xs" aria-label="Refresh leads">{loadingLeads ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}</Button></div></label>
+              <p className="mt-2 text-[0.68rem] leading-4 text-slate-500">Only non-fabricated leads are eligible. Rental underwriting falls back to the lead's MAO or acquisition price when no purchase price is entered below.</p>
+            </div>
+            <div className="rounded-2xl border border-white/80 bg-white/45 p-4">
+              <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">Pipeline brief</p><p className="mt-1 text-xs text-slate-500">Readiness across every eligible lead.</p></div><Button type="button" variant="outline" onClick={() => void loadPipelineBrief()} disabled={loadingBrief} className="h-9 gap-2 rounded-xl border-white/85 bg-white/65 text-xs"><ClipboardList className="size-3.5" /> {loadingBrief ? "Loading…" : "Load brief"}</Button></div>
+              {brief && <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs"><div className="glass-inset rounded-xl p-2"><p className="text-slate-400">Leads</p><p className="mt-0.5 font-semibold text-slate-800">{brief.total}</p></div><div className="glass-inset rounded-xl p-2"><p className="text-slate-400">Ready</p><p className="mt-0.5 font-semibold text-teal-700">{brief.readyCount}</p></div><div className="glass-inset rounded-xl p-2"><p className="text-slate-400">Incomplete</p><p className="mt-0.5 font-semibold text-amber-700">{brief.incompleteCount}</p></div><div className="glass-inset rounded-xl p-2"><p className="text-slate-400">Not run</p><p className="mt-0.5 font-semibold text-slate-600">{brief.notRunCount}</p></div></div>}
+            </div>
+          </div>
+          <div className="mt-3 grid gap-3 rounded-2xl border border-white/80 bg-white/45 p-4 sm:grid-cols-2 lg:grid-cols-5">
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Purchase price</span><Input type="number" min="0" value={teamRental.purchasePrice} onChange={(event) => setTeamRental((current) => ({ ...current, purchasePrice: event.target.value }))} placeholder="Optional" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Rent comps /mo</span><Input value={teamRental.rentComps} onChange={(event) => setTeamRental((current) => ({ ...current, rentComps: event.target.value }))} placeholder="1400, 1500, 1600" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Property tax /yr</span><Input type="number" min="0" value={teamRental.annualPropertyTax} onChange={(event) => setTeamRental((current) => ({ ...current, annualPropertyTax: event.target.value }))} placeholder="Required for NOI" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Insurance /yr</span><Input type="number" min="0" value={teamRental.annualInsurance} onChange={(event) => setTeamRental((current) => ({ ...current, annualInsurance: event.target.value }))} placeholder="Required for NOI" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Repair tier</span><select value={teamRental.repairTier} onChange={(event) => setTeamRental((current) => ({ ...current, repairTier: event.target.value as typeof current.repairTier }))} className="h-9 rounded-xl border border-white/85 bg-white/70 px-3 text-xs text-slate-700 outline-none"><option value="BASE">Base · $15/SF</option><option value="MEDIUM">Medium · $30/SF</option><option value="GUT">Gut · $50/SF</option></select></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Square feet</span><Input type="number" min="0" value={teamRental.squareFeet} onChange={(event) => setTeamRental((current) => ({ ...current, squareFeet: event.target.value }))} placeholder="For repairs" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Sold comps</span><Input value={teamRental.compPrices} onChange={(event) => setTeamRental((current) => ({ ...current, compPrices: event.target.value }))} placeholder="145000, 152000" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Loan amount</span><Input type="number" min="0" value={teamRental.loanAmount} onChange={(event) => setTeamRental((current) => ({ ...current, loanAmount: event.target.value }))} placeholder="Defaults to 75% LTV" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Interest %</span><Input type="number" min="0" step="0.01" value={teamRental.interestRatePct} onChange={(event) => setTeamRental((current) => ({ ...current, interestRatePct: event.target.value }))} placeholder="6.5" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Term years</span><Input type="number" min="1" value={teamRental.loanTermYears} onChange={(event) => setTeamRental((current) => ({ ...current, loanTermYears: event.target.value }))} placeholder="30" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button type="button" disabled={teamRunning || !teamLeadId} onClick={() => void runAgentTeamNow()} className="h-10 gap-2 rounded-xl bg-indigo-700 text-xs hover:bg-indigo-800">{teamRunning ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-4" />} {teamRunning ? "Running team…" : "Run agent team"}</Button>
+            <Button type="button" disabled={matching || !teamLeadId} onClick={() => void runBuyerMatchesNow()} variant="outline" className="h-10 gap-2 rounded-xl border-indigo-200/80 bg-white/65 text-xs text-indigo-800">{matching ? <Loader2 className="size-4 animate-spin" /> : <Users className="size-4" />} {matching ? "Scoring buyers…" : "Match approved buyers"}</Button>
+            <p className="text-[0.68rem] leading-4 text-slate-500">Agent outputs are recommendations only. Approval, exports, and contact actions stay owner-only.</p>
+          </div>
+          {teamReadiness && <div className={`mt-4 rounded-2xl border p-4 ${teamReadiness.ready ? "border-teal-100/80 bg-teal-50/45" : "border-amber-200/80 bg-amber-50/55"}`}><div><p className="text-xs font-semibold text-slate-700">{teamReadiness.ready ? "Readiness gate passed" : "Readiness gate: not ready"}</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">{teamReadiness.ready ? "Every blocking category is covered across the team. The owner may still reject the deal after review." : `${teamReadiness.gaps.length} blocking data gap${teamReadiness.gaps.length === 1 ? "" : "s"} must be resolved before this deal can surface as ready.`}</p></div>{teamReadiness.gaps.length > 0 && <div className="mt-3 grid gap-2 sm:grid-cols-2">{teamReadiness.gaps.map((gap) => <div key={`${gap.category}-${gap.detail}`} className="rounded-xl border border-amber-200/70 bg-white/60 p-3"><p className="text-xs font-semibold text-amber-800">{pretty(gap.category)}</p><p className="mt-1 text-[0.68rem] leading-4 text-slate-600">{gap.detail}</p></div>)}</div>}</div>}
+          {teamReports && <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{teamReports.map((report) => <div key={report.agent} className={`rounded-2xl border p-3 ${report.status === "COMPLETED" ? "border-teal-100/80 bg-white/50" : "border-amber-200/80 bg-amber-50/45"}`}><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-800">{pretty(report.agent)}</p><Badge className={report.status === "COMPLETED" ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-amber-100/80 text-amber-800"}>{report.status === "COMPLETED" ? "OK" : "Blocked"}</Badge></div><p className="mt-2 text-[0.68rem] leading-4 text-slate-600">{report.summary}</p>{report.findings.length > 0 && <ul className="mt-2 space-y-1 text-[0.65rem] leading-4 text-slate-500">{report.findings.map((finding) => <li key={finding}>· {finding}</li>)}</ul>}</div>)}</div>}
+          {teamMatches && <div className="mt-4 rounded-2xl border border-indigo-100/80 bg-indigo-50/40 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">Buyer matches</p><p className="mt-1 text-xs text-slate-500">Ranked recommendations against approved buyers. Save the ones you approve in Operations.</p></div><Badge className="border-0 bg-indigo-100/80 text-indigo-800">{teamMatches.length} match{teamMatches.length === 1 ? "" : "es"}</Badge></div>{teamMatches.length === 0 ? <p className="mt-3 text-xs text-slate-500">No approved buyer cleared the 55-point minimum for this lead.</p> : <div className="mt-3 grid gap-2">{teamMatches.map((match) => <div key={match.buyerId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/80 bg-white/60 p-3"><div className="min-w-0"><div className="flex items-center gap-2"><p className="text-xs font-semibold text-slate-800">{match.buyerId}</p><Badge className={match.confidence === "HIGH" ? "border-0 bg-teal-100/80 text-teal-800" : match.confidence === "MEDIUM" ? "border-0 bg-sky-100/80 text-sky-800" : "border-0 bg-slate-100/80 text-slate-600"}>{match.confidence}</Badge></div><p className="mt-1 text-[0.68rem] leading-4 text-slate-500">{match.summary}</p></div><p className="shrink-0 text-right"><span className="text-lg font-semibold text-indigo-800">{match.matchScore}</span><span className="block text-[0.6rem] text-slate-400">/100</span></p></div>)}</div>}</div>}
+        </section>
+
         <section className="mt-5 grid gap-3 md:grid-cols-3">
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">Scraper</p><Globe2 className="size-4 text-sky-600" /></div><div className="mt-3 flex items-center justify-between"><p className="text-lg font-semibold text-slate-900">{access.scraperEnabled ? "Enabled" : "Disabled"}</p><button type="button" role="switch" aria-checked={access.scraperEnabled} onClick={() => void updateTool("SCRAPER", !access.scraperEnabled)} className={`relative h-6 w-11 rounded-full transition-colors ${access.scraperEnabled ? "bg-sky-700" : "bg-slate-300"}`}><span className={`absolute top-1 size-4 rounded-full bg-white transition-transform ${access.scraperEnabled ? "translate-x-6" : "translate-x-1"}`} /></button></div><p className="mt-1 text-xs text-slate-500">Public evidence URLs only</p></div>
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">Estimator</p><Calculator className="size-4 text-teal-600" /></div><div className="mt-3 flex items-center justify-between"><p className="text-lg font-semibold text-slate-900">{access.estimatorEnabled ? "Enabled" : "Disabled"}</p><button type="button" role="switch" aria-checked={access.estimatorEnabled} onClick={() => void updateTool("ESTIMATOR", !access.estimatorEnabled)} className={`relative h-6 w-11 rounded-full transition-colors ${access.estimatorEnabled ? "bg-teal-700" : "bg-slate-300"}`}><span className={`absolute top-1 size-4 rounded-full bg-white transition-transform ${access.estimatorEnabled ? "translate-x-6" : "translate-x-1"}`} /></button></div><p className="mt-1 text-xs text-slate-500">Explicit inputs, no invented comps</p></div>
@@ -583,7 +797,7 @@ export default function Toolkit() {
             </div>
             <div className="rounded-2xl border border-white/80 bg-white/45 p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">AI consultant court</p><p className="mt-1 text-xs text-slate-500">{automation.providerConfigured ? "Three consultants and a judge run through Ollama Cloud." : "Add OLLAMA_API_KEY in Environment vars to activate the court."}</p></div><Badge className={automation.providerConfigured && access.aiEnabled ? "border-0 bg-violet-100/80 text-violet-800" : "border-0 bg-slate-100/80 text-slate-500"}>{automation.providerConfigured && access.aiEnabled ? "Available" : "Waiting"}</Badge></div><p className="mt-4 text-[0.68rem] leading-5 text-slate-500">The evidence auditor, underwriting analyst, and risk/compliance consultant review independently; a judge reconciles them. The verdict is a recommendation only, and the owner must still approve.</p></div>
           </div>
-          <form onSubmit={queueScrape} className="mt-3 flex flex-col gap-2 sm:flex-row"><Input required type="url" value={queueUrl} onChange={(event) => setQueueUrl(event.target.value)} placeholder="Queue an official public source URL for the next cycle" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /><Button type="submit" disabled={!automation.enabled} className="h-10 gap-2 rounded-xl bg-sky-700 text-xs hover:bg-sky-800"><ListChecks className="size-4" /> Queue source</Button><Button type="button" disabled={!automation.enabled} onClick={() => void queueOfficialAllenCountySources()} variant="outline" className="h-10 gap-2 rounded-xl border-amber-200/80 bg-amber-50/55 text-xs text-amber-800"><Landmark className="size-4" /> Queue Allen County</Button><Button type="button" disabled={!automation.enabled} onClick={() => void runCycle()} variant="outline" className="h-10 gap-2 rounded-xl border-white/85 bg-white/65 text-xs"><Play className="size-4" /> Run now</Button></form>
+          <form onSubmit={queueScrape} className="mt-3 flex flex-col gap-2 sm:flex-row"><Input required type="url" value={queueUrl} onChange={(event) => setQueueUrl(event.target.value)} placeholder="Queue an official public source URL for the next cycle" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /><Button type="submit" disabled={!automation.enabled} className="h-10 gap-2 rounded-xl bg-sky-700 text-xs hover:bg-sky-800"><ListChecks className="size-4" /> Queue source</Button><Button type="button" disabled={!automation.enabled} onClick={() => void queueOfficialAllenCountySources()} variant="outline" className="h-10 gap-2 rounded-xl border-amber-200/80 bg-amber-50/55 text-xs text-amber-800"><Landmark className="size-4" /> Queue Allen County</Button><Button type="button" disabled={!automation.enabled} onClick={() => void queueOffMarketSourcesNow()} variant="outline" className="h-10 gap-2 rounded-xl border-teal-200/80 bg-teal-50/55 text-xs text-teal-800"><Radar className="size-4" /> Queue off-market</Button><Button type="button" disabled={!automation.enabled} onClick={() => void runCycle()} variant="outline" className="h-10 gap-2 rounded-xl border-white/85 bg-white/65 text-xs"><Play className="size-4" /> Run now</Button></form>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><p className="text-[0.68rem] text-slate-500">Today: {automation.runsToday} / {automation.dailyRunLimit} cycles · {tasks.filter((task) => task.status === "PENDING").length} pending tasks</p><div className="flex flex-wrap gap-2">{tasks.slice(0, 5).map((task) => <Badge key={task._id} variant="outline" className="border-white/90 bg-white/55 text-[0.65rem] text-slate-600">{task.kind} · {task.status}</Badge>)}</div></div>
           <div className="mt-4 rounded-2xl border border-sky-100/80 bg-sky-50/45 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">n8n scheduler handoff</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">n8n can schedule source URLs and retry this queue endpoint. Use one workflow with a daily or twice-daily schedule to conserve trial executions; Convex still validates the URL, fetches bounded evidence, writes Mongo staging, and keeps every candidate in owner review.</p></div><Badge className={automation.n8nSecretConfigured ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-amber-100/80 text-amber-800"}>{automation.n8nSecretConfigured ? "Connected" : "Needs secret"}</Badge></div><div className="mt-3 grid gap-2 text-[0.68rem] leading-5 text-slate-500 sm:grid-cols-3"><p><strong className="text-slate-700">Endpoint</strong><br />your Convex site URL + <code>/api/n8n/source</code></p><p><strong className="text-slate-700">Header</strong><br /><code>x-convex-n8n-secret</code></p><p><strong className="text-slate-700">Body</strong><br /><code>{"{ url, sourceType, idempotencyKey? }"}</code></p></div><p className="mt-3 text-[0.68rem] text-slate-500">Add <code>CONVEX_N8N_WEBHOOK_SECRET</code> in the Convex Environment vars panel, then store the same value as an n8n secret. Do not put it in browser code.</p></div>
         </section>

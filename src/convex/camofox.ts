@@ -81,22 +81,37 @@ async function camofox(
   path: string,
   init: RequestInit = {},
   timeoutMs = REQUEST_TIMEOUT_MS,
+  retryTransient = true,
 ): Promise<unknown> {
   // Render can briefly return a gateway error while the browser worker is
-  // waking. Retry tab creation once, but do not multiply long browser
-  // navigation timeouts or retry reads/deletes.
-  const retryTabCreation = init.method === "POST" && path === "/tabs";
+  // waking. Retry quick gateway responses, but do not retry a timed-out
+  // browser navigation during a batch crawl: that would multiply the action
+  // duration and can cause the whole Convex request to be aborted.
+  const retryTabCreation = retryTransient && init.method === "POST" && path === "/tabs";
   const attempts = retryTabCreation ? 2 : 1;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const response = await fetch(`${camofoxBaseUrl()}${path}`, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${camofoxApiKey()}`,
-        ...(init.headers as Record<string, string> | undefined),
-      },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${camofoxBaseUrl()}${path}`, {
+        ...init,
+        headers: {
+          authorization: `Bearer ${camofoxApiKey()}`,
+          ...(init.headers as Record<string, string> | undefined),
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.name === "TimeoutError" ||
+          error.name === "AbortError" ||
+          /aborted|timeout/i.test(error.message))
+      ) {
+        throw new Error(`Camofox ${init.method ?? "GET"} ${path} timed out after ${timeoutMs}ms`);
+      }
+      throw error;
+    }
     const body: unknown = await response.json().catch(() => null);
     const transientGatewayError = response.status === 502 || response.status === 503 || response.status === 504;
     if (response.ok) return body;
@@ -278,12 +293,16 @@ export const camofoxCrawl = action({
     seeds.forEach(assertHttpUrl);
 
     const maxPages = Math.max(1, Math.min(12, Math.floor(args.maxPages ?? 8)));
-    const timeoutMs = Math.max(10_000, Math.min(60_000, args.timeoutMs ?? 45_000));
+    // Keep a batch within the Convex action window when a browser worker is
+    // unhealthy. A timed-out URL is recorded in `failed` and the next seed
+    // still gets its own attempt.
+    const timeoutMs = Math.max(10_000, Math.min(30_000, args.timeoutMs ?? 20_000));
     const sessionKey = (args.sessionKey ?? DEFAULT_SESSION).trim() || DEFAULT_SESSION;
     const sameOriginOnly = args.sameOriginOnly ?? true;
     const shouldDiscover = args.discoverLinks ?? true;
     const allowedSites = new Set(seeds.map(siteKey));
     const queue = [...seeds];
+    const crawlDeadline = Date.now() + 90_000;
     const visited = new Set<string>();
     const discovered = new Set<string>();
     const pages: Array<{
@@ -296,7 +315,11 @@ export const camofoxCrawl = action({
     }> = [];
     const failed: Array<{ url: string; error: string }> = [];
 
-    while (queue.length > 0 && pages.length + failed.length < maxPages) {
+    while (
+      queue.length > 0 &&
+      pages.length + failed.length < maxPages &&
+      Date.now() < crawlDeadline
+    ) {
       const requestedUrl = queue.shift();
       if (!requestedUrl) break;
       const pageUrl = normalizeUrl(requestedUrl, requestedUrl);
@@ -313,6 +336,7 @@ export const camofoxCrawl = action({
             body: JSON.stringify({ userId: CAMOFOX_USER, sessionKey, url: pageUrl }),
           },
           timeoutMs,
+          false,
         )) as CreateTabResponse;
         tabId = created.tabId;
         if (!tabId) throw new Error("Camofox did not return a tabId");
@@ -370,9 +394,18 @@ export const camofoxCrawl = action({
           await camofox(
             `/tabs/${encodeURIComponent(tabId)}?userId=${encodeURIComponent(CAMOFOX_USER)}`,
             { method: "DELETE" },
+            5_000,
+            false,
           ).catch(() => undefined);
         }
       }
+    }
+
+    if (queue.length > 0 && Date.now() >= crawlDeadline) {
+      failed.push({
+        url: "[crawl budget]",
+        error: "Batch time budget reached; remaining URLs were not visited.",
+      });
     }
 
     return {

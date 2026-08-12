@@ -24,6 +24,12 @@ Agent skills integrated into this project (standard Agent Skills format: `SKILL.
 | --- | --- | --- |
 | `minimalist-entrepreneur/` | **Business strategy skills** — community discovery, idea validation, MVP scoping, processization, first customers, pricing, marketing, sustainable growth, company values, and decision review (10 skills) | `joopyjiop/skills` |
 
+## Prompt Master — prompt engineering
+
+| Pack | Contents | Source | License |
+| --- | --- | --- | --- |
+| `prompt-master/` | **Prompt engineering** — tool routing, output contracts, coding-agent scope locks, credential stripping, prompt decompilation, failure patterns, and templates | `joopyjiop/prompt-master` | MIT (included) |
+
 ## How these map to this project
 
 - **Lead sourcing (real, verified leads):** `firecrawl-build-scrape` / `firecrawl-build-search` are the pattern for pulling public-record pages (county assessor, sheriff sale, tax sale sites) into the lead pipeline as sourced evidence. `firecrawl-workflows/firecrawl-lead-gen` and `firecrawl-lead-research` generate prospect/lead lists; `firecrawl-cli/firecrawl-scrape` + `firecrawl-search` do live web work when an agent needs current page content.
@@ -34,4 +40,5 @@ Agent skills integrated into this project (standard Agent Skills format: `SKILL.
 
 - Skills are read-only reference; the source-of-truth for behavior stays in `src/convex/` and `src/pages/`.
 - The `minimalist-entrepreneur/` pack is guidance for product and business decisions; it does not replace owner authorization, evidence validation, or fabricated-data safeguards.
+- The `prompt-master/` pack is used only for explicit prompt-engineering requests; it does not override project safety rules or authorize external actions.
 - Anything that runs against live data (scraping, exporting, dialing) goes through the same owner-gate + fabricated-row guards as the rest of the app.

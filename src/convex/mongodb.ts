@@ -10,7 +10,7 @@ import type { SearchableLead } from "./search";
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
 
 // @codebuff-probe
-const LEADS = "leads";
+const LEADS = "leads"; // Mongo collection name
 const HOT_DEALS = "hot_deals";
 const BUYERS = "buyers";
 const MATCHES = "property_matches";
@@ -433,7 +433,10 @@ function serializeValue(value: unknown): unknown {
 }
 
 function serialize<T extends Document>(document: T) {
-  return serializeValue(document) as Record<string, unknown>;
+  // `_id` is always stringified by serializeValue, so declare it as a known
+  // property. Without it, object-literal spreads like `{ ...lead, x }` drop the
+  // index signature and TypeScript loses `_id` on the spread result.
+  return serializeValue(document) as Record<string, unknown> & { _id: string };
 }
 
 function objectId(id: string) {
@@ -443,7 +446,7 @@ function objectId(id: string) {
   return new ObjectId(id);
 }
 
-function calculateEstimatedProfit(value: { mao?: unknown; acquisitionPrice?: unknown }) {
+function calculateEstimatedProfit(value: { mao?: unknown; acquisitionPrice?: unknown } | Record<string, unknown>) {
   return typeof value.mao === "number" && typeof value.acquisitionPrice === "number"
     ? value.mao - value.acquisitionPrice
     : undefined;

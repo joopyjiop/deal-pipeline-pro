@@ -1472,7 +1472,7 @@ function courtConfidence(value: unknown): CourtConfidence {
 }
 
 type CourtModelResult =
-  | { ok: true; value: Record<string, unknown>; provider: "OLLAMA" | "SAMBANOVA"; model: string }
+  | { ok: true; value: Record<string, unknown>; provider: "OLLAMA" | "SAMBANOVA"; model: string; error?: string }
   | { ok: false; error: string };
 
 function parseCourtContent(content: unknown, provider: "OLLAMA" | "SAMBANOVA", model: string): CourtModelResult {
@@ -1541,14 +1541,13 @@ async function callOllamaCourtModel(prompt: string, maxTokens: number): Promise<
 
 async function callCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {
   if (process.env.OLLAMA_API_KEY?.trim()) return callOllamaCourtModel(prompt, maxTokens);
-  const sambaKey = undefined;
   const ollamaKey = process.env.OLLAMA_API_KEY?.trim();
-  const sambaModel = process.env.OLLAMA_COURT_MODEL ?? "gpt-oss:20b";
 
-  if (!sambaKey) {
-    if (!ollamaKey) return { ok: false, error: "No AI consultant provider is configured" };
-    return callOllamaCourtModel(prompt, maxTokens);
-  }
+  if (!ollamaKey) return { ok: false, error: "OLLAMA_API_KEY is not configured" };
+  return callOllamaCourtModel(prompt, maxTokens);
+
+  const sambaKey = process.env.OLLAMA_API_KEY;
+  const sambaModel = process.env.OLLAMA_COURT_MODEL ?? "gpt-oss:20b";
 
   const response = await fetch("https://api.ollama.com/v1/chat/completions", {
     method: "POST",

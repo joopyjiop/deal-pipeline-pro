@@ -8,6 +8,8 @@ import { rankLeads } from "./search";
 import type { SearchableLead } from "./search";
 
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
+
+// @codebuff-probe
 const LEADS = "leads";
 const HOT_DEALS = "hot_deals";
 const BUYERS = "buyers";
@@ -500,6 +502,7 @@ function htmlToText(value: string) {
 }
 
 function median(values: number[]) {
+  // @codebuff-probe2
   const sorted = [...values].sort((a, b) => a - b);
   if (sorted.length === 0) return undefined;
   const middle = Math.floor(sorted.length / 2);
@@ -867,6 +870,7 @@ export const clearMongoUriFallback = action({
 });
 
 export const smokeTest = action({
+  // @codebuff-probe4
   args: {},
   handler: async (ctx) => {
     await requireOwner(ctx);
@@ -995,6 +999,8 @@ export const getAiToolManifest = action({
 });
 
 type ScrapeInput = { url: string; sourceType: string };
+
+// @codebuff-probe5
 
 async function fetchAndStageSource(database: Awaited<ReturnType<typeof getDatabase>>, args: ScrapeInput) {
   const parsedUrl = assertPublicHttpUrl(args.url.trim());
@@ -1163,6 +1169,7 @@ export const qualifyStagedSource = action({
 });
 
 export const runConsultantCourt = action({
+  // @probeA
   args: { stagedId: v.string() },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
@@ -1185,6 +1192,7 @@ export const runConsultantCourt = action({
 });
 
 export const updateDueDiligence = action({
+  // @probeB
   args: {
     id: v.string(),
     category: dueDiligenceCategoryValidator,
@@ -1213,6 +1221,7 @@ export const updateDueDiligence = action({
 });
 
 export const assessDueDiligence = action({
+  // @probeC
   args: { id: v.string() },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
@@ -1233,6 +1242,7 @@ export const assessDueDiligence = action({
 });
 
 export const approveLead = action({
+  // @codebuff-probe6
   args: { id: v.string(), ownerConfirmation: v.literal("OWNER_REVIEWED_SOURCE") },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
@@ -1261,6 +1271,7 @@ export const approveLead = action({
 });
 
 export const rejectLead = action({
+  // @codebuff-probe8
   args: { id: v.string(), reason: v.string() },
   handler: async (ctx, args) => {
     await requireOwner(ctx);

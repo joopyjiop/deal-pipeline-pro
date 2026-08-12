@@ -6,6 +6,8 @@ import {
   verificationStatusValidator,
 } from "./schema";
 import { isPermanentOwner, requirePermanentOwner } from "./owner";
+import { rankLeads } from "./search";
+import type { SearchableLead } from "./search";
 
 const distressSignalArgs = v.array(
   v.object({
@@ -110,31 +112,60 @@ export const approved = query({
       )
       .filter((lead) =>
         args.sourceType === undefined ? true : lead.sourceType === args.sourceType,
-      )
-      .filter((lead) => {
-        if (!normalizedSearch) return true;
-        return [
-          lead.propertyAddress,
-          lead.city,
-          lead.state,
-          lead.zip,
-          lead.county,
-          lead.parcelId,
-          lead.sourceRef,
-        ]
-          .filter(Boolean)
-          .some((value) => value!.toLowerCase().includes(normalizedSearch));
-      })
-      .sort((a, b) => b.distressScore - a.distressScore);
+      );
 
+    if (!normalizedSearch) {
+      filtered.sort((a, b) => b.distressScore - a.distressScore);
+      return {
+        meta: {
+          dataOrigin: "verified" as const,
+          simulated: false,
+          ownerAccess: owner,
+          ownerEmailConfigured: Boolean(viewer),
+        },
+        leads: filtered,
+      };
+    }
+
+    // Candidate gate: cheap substring narrowing first, then re-rank the matches
+    // with the same in-house BM25 scorer the MongoDB path uses (see search.ts).
+    const candidates = filtered.filter((lead) =>
+      [
+        lead.propertyAddress,
+        lead.city,
+        lead.state,
+        lead.zip,
+        lead.county,
+        lead.parcelId,
+        lead.sourceRef,
+      ]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalizedSearch)),
+    );
+    const ranked = rankLeads(candidates as unknown as SearchableLead[], normalizedSearch);
+    const rankedById = new Map(ranked.ranked.map((item) => [item._id, item]));
     return {
       meta: {
         dataOrigin: "verified" as const,
         simulated: false,
         ownerAccess: owner,
         ownerEmailConfigured: Boolean(viewer),
+        search: { query: ranked.query, terms: ranked.terms, total: ranked.total, ranked: true },
       },
-      leads: filtered,
+      leads: ranked.ranked
+        .map((item) => {
+          const lead = candidates.find((candidate) => String(candidate._id) === item._id);
+          return lead
+            ? { ...lead, relevance: { score: item.score, matchedFields: item.matchedFields } }
+            : undefined;
+        })
+        .filter((lead): lead is NonNullable<typeof lead> => Boolean(lead)),
+      // Every substring-matched row, for callers that need matches even when a
+      // term only appears in a low-weight field (mirrors the MongoDB contract).
+      unranked: candidates.map((lead) => ({
+        ...lead,
+        relevance: rankedById.get(String(lead._id)),
+      })),
     };
   },
 });

@@ -1472,10 +1472,10 @@ function courtConfidence(value: unknown): CourtConfidence {
 }
 
 type CourtModelResult =
-  | { ok: true; value: Record<string, unknown>; provider: "SAMBANOVA" | "OLLAMA"; model: string }
+  | { ok: true; value: Record<string, unknown>; provider: "OLLAMA" | "SAMBANOVA"; model: string }
   | { ok: false; error: string };
 
-function parseCourtContent(content: unknown, provider: "SAMBANOVA" | "OLLAMA", model: string): CourtModelResult {
+function parseCourtContent(content: unknown, provider: "OLLAMA" | "SAMBANOVA", model: string): CourtModelResult {
   if (typeof content !== "string" || !content.trim()) return { ok: false, error: "AI consultant returned no content" };
   try {
     return { ok: true, value: JSON.parse(content.trim()) as Record<string, unknown>, provider, model };
@@ -1507,16 +1507,17 @@ async function callOllamaCourtModel(prompt: string, maxTokens: number): Promise<
 }
 
 async function callCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {
-  const sambaKey = process.env.SAMBANOVA_API_KEY?.trim();
+  if (process.env.OLLAMA_API_KEY?.trim()) return callOllamaCourtModel(prompt, maxTokens);
+  const sambaKey = undefined;
   const ollamaKey = process.env.OLLAMA_API_KEY?.trim();
-  const sambaModel = process.env.SAMBANOVA_MODEL ?? "Meta-Llama-3.3-70B-Instruct";
+  const sambaModel = process.env.OLLAMA_COURT_MODEL ?? "gpt-oss:20b";
 
   if (!sambaKey) {
     if (!ollamaKey) return { ok: false, error: "No AI consultant provider is configured" };
     return callOllamaCourtModel(prompt, maxTokens);
   }
 
-  const response = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+  const response = await fetch("https://api.ollama.com/v1/chat/completions", {
     method: "POST",
     headers: { authorization: `Bearer ${sambaKey}`, "content-type": "application/json" },
     body: JSON.stringify({

@@ -184,14 +184,12 @@ When AI access is enabled and the automation mode is `BOTH`, every queued source
 
 The court accepts only exact quotes found in the staged source excerpt and the matching source URL. Its verdict is saved as `aiCourtVerdict` in MongoDB staging and on the candidate lead. A candidate cannot be approved until a completed court verdict exists, but the verdict never approves a deal automatically. The owner remains the final decision-maker.
 
-To activate the court, add at least one of these server-only Convex variables:
+To activate the court, add this server-only Convex variable:
 
-- `SAMBANOVA_API_KEY` — primary consultant and judge provider.
-- `SAMBANOVA_MODEL` — optional; defaults to `Meta-Llama-3.3-70B-Instruct`.
-- `OLLAMA_API_KEY` — secured Ollama Cloud fallback when SambaNova returns HTTP 429, or the primary provider when SambaNova is not configured.
-- `OLLAMA_COURT_MODEL` — optional Ollama Cloud court model; otherwise `OLLAMA_MODEL` or `gpt-oss:20b` is used.
+- `OLLAMA_API_KEY` — required for all consultant and judge calls.
+- `OLLAMA_COURT_MODEL` — optional; otherwise `OLLAMA_MODEL` or `gpt-oss:20b` is used.
 
-The court makes four model calls per reviewed source, in parallel for the three consultants and then one judge call. This does not consume n8n executions; it uses the configured AI provider instead. When both keys are present, Ollama is used automatically for a SambaNova HTTP 429 response. If neither key is configured, the candidate stays unapproved and the Toolkit reports that the court is waiting for setup. Provider agreement is still only a recommendation; source evidence and owner approval remain authoritative.
+The court makes four Ollama Cloud calls per reviewed source, in parallel for the three consultants and then one judge call. This does not consume n8n executions. SambaNova is not used by the court. If the Ollama key is missing or the provider fails, the candidate stays unapproved and the Toolkit reports that the court could not complete. The verdict remains a recommendation; source evidence and owner approval remain authoritative.
 
 ## Odysseus MCP Tool Server
 

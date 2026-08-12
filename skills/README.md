@@ -18,6 +18,12 @@ Agent skills integrated into this project (standard Agent Skills format: `SKILL.
 
 > Skipped from the fork: `.claude/skills/` (playwright-dev/devops/test-results/triage) are contributor skills for developing the Playwright monorepo itself — not applicable to this project, which consumes Playwright rather than building it.
 
+## Minimalist Entrepreneur — business strategy
+
+| Pack | Contents | Source |
+| --- | --- | --- |
+| `minimalist-entrepreneur/` | **Business strategy skills** — community discovery, idea validation, MVP scoping, processization, first customers, pricing, marketing, sustainable growth, company values, and decision review (10 skills) | `joopyjiop/skills` |
+
 ## How these map to this project
 
 - **Lead sourcing (real, verified leads):** `firecrawl-build-scrape` / `firecrawl-build-search` are the pattern for pulling public-record pages (county assessor, sheriff sale, tax sale sites) into the lead pipeline as sourced evidence. `firecrawl-workflows/firecrawl-lead-gen` and `firecrawl-lead-research` generate prospect/lead lists; `firecrawl-cli/firecrawl-scrape` + `firecrawl-search` do live web work when an agent needs current page content.
@@ -27,4 +33,5 @@ Agent skills integrated into this project (standard Agent Skills format: `SKILL.
 ## Conventions
 
 - Skills are read-only reference; the source-of-truth for behavior stays in `src/convex/` and `src/pages/`.
+- The `minimalist-entrepreneur/` pack is guidance for product and business decisions; it does not replace owner authorization, evidence validation, or fabricated-data safeguards.
 - Anything that runs against live data (scraping, exporting, dialing) goes through the same owner-gate + fabricated-row guards as the rest of the app.

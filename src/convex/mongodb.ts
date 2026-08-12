@@ -565,6 +565,58 @@ type StoredAgentTeam = {
   ranAt?: number;
 };
 
+type RunAgentTeamInput = {
+  leadId: string;
+  rental?: RentalUnderwritingInput;
+  compPrices?: number[];
+  repairTier?: "BASE" | "MEDIUM" | "GUT";
+};
+
+async function runAgentTeamImpl(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  args: RunAgentTeamInput,
+) {
+  const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+  if (!document) throw new Error("Lead not found");
+
+  const lead = toAgentLead(document);
+  const purchasePrice =
+    args.rental?.purchasePrice ??
+    leadNumber(document.acquisitionPrice) ??
+    leadNumber(document.mao) ??
+    0;
+  const rentalInput: RentalUnderwritingInput = args.rental ?? { purchasePrice };
+  const model = rentalUnderwriting(rentalInput);
+  const rentalModel = model.dscr !== undefined || model.annualCashFlow !== undefined
+    ? { dscr: model.dscr, annualCashFlow: model.annualCashFlow, monthlyCashFlow: model.monthlyCashFlow }
+    : undefined;
+
+  const reports: AgentReport[] = [
+    sourcingAgent(lead),
+    verificationAgent(lead.dueDiligence),
+    arvRepairsAgent({
+      squareFeet: lead.squareFeet,
+      compPrices: args.compPrices ?? [],
+      repairTier: args.repairTier,
+    }),
+    underwritingAgentFromModel(model),
+  ];
+  const readiness = readinessReport(reports);
+  const ranAt = Date.now();
+  await database.collection(LEADS).updateOne(
+    { _id: document._id },
+    {
+      $set: withoutUndefined({
+        agentTeam: { reports, readiness, ranAt },
+        rentalModel: rentalModel ?? undefined,
+        readinessStatus: readiness.status,
+        updatedAt: ranAt,
+      }),
+    },
+  );
+  return { leadId: args.leadId, reports, readiness, rentalModel };
+}
+
 export const runAgentTeam = action({
   args: {
     leadId: v.string(),
@@ -574,46 +626,7 @@ export const runAgentTeam = action({
   },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
-    const database = await getDatabase();
-    const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
-    if (!document) throw new Error("Lead not found");
-
-    const lead = toAgentLead(document);
-    const purchasePrice =
-      args.rental?.purchasePrice ??
-      leadNumber(document.acquisitionPrice) ??
-      leadNumber(document.mao) ??
-      0;
-    const rentalInput: RentalUnderwritingInput = args.rental ?? { purchasePrice };
-    const model = rentalUnderwriting(rentalInput);
-    const rentalModel = model.dscr !== undefined || model.annualCashFlow !== undefined
-      ? { dscr: model.dscr, annualCashFlow: model.annualCashFlow, monthlyCashFlow: model.monthlyCashFlow }
-      : undefined;
-
-    const reports: AgentReport[] = [
-      sourcingAgent(lead),
-      verificationAgent(lead.dueDiligence),
-      arvRepairsAgent({
-        squareFeet: lead.squareFeet,
-        compPrices: args.compPrices ?? [],
-        repairTier: args.repairTier,
-      }),
-      underwritingAgentFromModel(model),
-    ];
-    const readiness = readinessReport(reports);
-    const ranAt = Date.now();
-    await database.collection(LEADS).updateOne(
-      { _id: document._id },
-      {
-        $set: withoutUndefined({
-          agentTeam: { reports, readiness, ranAt },
-          rentalModel: rentalModel ?? undefined,
-          readinessStatus: readiness.status,
-          updatedAt: ranAt,
-        }),
-      },
-    );
-    return { leadId: args.leadId, reports, readiness, rentalModel };
+    return runAgentTeamImpl(await getDatabase(), args);
   },
 });
 
@@ -675,41 +688,90 @@ export const runBuyerMatches = action({
   },
 });
 
+type PipelineBriefEntry = {
+  _id: string;
+  propertyAddress: string;
+  city: string;
+  state: string;
+  sourceType: string;
+  pipelineStatus: string;
+  verificationStatus: string;
+  readinessStatus: string;
+  ready: boolean;
+  gapCount: number;
+  ranAt?: number;
+};
+
+async function listPipelineBriefImpl(database: Awaited<ReturnType<typeof getDatabase>>) {
+  const documents = await database.collection(LEADS)
+    .find({ fabricated: { $ne: true } })
+    .sort({ updatedAt: -1 })
+    .limit(200)
+    .toArray();
+  const leads: PipelineBriefEntry[] = documents.map((document) => {
+    const lead = toAgentLead(document);
+    const team = document.agentTeam as StoredAgentTeam | undefined;
+    const gaps = team?.readiness?.gaps ?? team?.reports?.flatMap((report) => report.dataGaps) ?? [];
+    return {
+      _id: String(document._id),
+      propertyAddress: lead.propertyAddress ?? "",
+      city: lead.city ?? "",
+      state: lead.state ?? "",
+      sourceType: lead.sourceType ?? "",
+      pipelineStatus: leadText(document.pipelineStatus) ?? "SOURCED",
+      verificationStatus: leadText(document.verificationStatus) ?? "UNVERIFIED",
+      readinessStatus: leadText(document.readinessStatus) ?? "NOT_RUN",
+      ready: team?.readiness?.ready ?? false,
+      gapCount: gaps.filter((gap) => gap.blocksReady).length,
+      ranAt: team?.ranAt ?? undefined,
+    };
+  });
+  const readyCount = leads.filter((lead) => lead.ready).length;
+  return {
+    total: leads.length,
+    readyCount,
+    incompleteCount: leads.length - readyCount,
+    notRunCount: leads.filter((lead) => lead.readinessStatus === "NOT_RUN").length,
+    leads,
+  };
+}
+
 export const listPipelineBrief = action({
   args: {},
   handler: async (ctx) => {
     await requireOwner(ctx);
-    const documents = await (await getDatabase()).collection(LEADS)
-      .find({ fabricated: { $ne: true } })
-      .sort({ updatedAt: -1 })
-      .limit(200)
-      .toArray();
-    const leads = documents.map((document) => {
-      const lead = toAgentLead(document);
-      const team = document.agentTeam as StoredAgentTeam | undefined;
-      const gaps = team?.readiness?.gaps ?? team?.reports?.flatMap((report) => report.dataGaps) ?? [];
-      return {
-        _id: String(document._id),
-        propertyAddress: lead.propertyAddress ?? "",
-        city: lead.city ?? "",
-        state: lead.state ?? "",
-        sourceType: lead.sourceType ?? "",
-        pipelineStatus: leadText(document.pipelineStatus) ?? "SOURCED",
-        verificationStatus: leadText(document.verificationStatus) ?? "UNVERIFIED",
-        readinessStatus: leadText(document.readinessStatus) ?? "NOT_RUN",
-        ready: team?.readiness?.ready ?? false,
-        gapCount: gaps.filter((gap) => gap.blocksReady).length,
-        ranAt: team?.ranAt ?? undefined,
-      };
-    });
-    const readyCount = leads.filter((lead) => lead.ready).length;
-    return {
-      total: leads.length,
-      readyCount,
-      incompleteCount: leads.length - readyCount,
-      notRunCount: leads.filter((lead) => lead.readinessStatus === "NOT_RUN").length,
-      leads,
-    };
+    return listPipelineBriefImpl(await getDatabase());
+  },
+});
+
+// MCP-facing bridges for the agent team. They re-run the shared impls instead
+// of delegating to the public actions because the MCP route authenticates with
+// the server secret — there is no Convex user session, so the owner check on
+// the public actions would always reject. The same requireMcpAiAccess gate used
+// by the other MCP bridges applies.
+
+export const mcpRunAgentTeam = internalAction({
+  args: {
+    leadId: v.string(),
+    rental: v.optional(rentalUnderwritingInputValidator),
+    compPrices: v.optional(v.array(v.number())),
+    repairTier: v.optional(repairTierValidator),
+  },
+  handler: async (_, args) => {
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    return runAgentTeamImpl(database, args);
+  },
+});
+
+export const mcpListPipelineBrief = internalAction({
+  args: { limit: v.optional(v.number()) },
+  handler: async (_, args) => {
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    const limit = Math.max(1, Math.min(200, Math.floor(args.limit ?? 200)));
+    const brief = await listPipelineBriefImpl(database);
+    return { ...brief, leads: brief.leads.slice(0, limit) };
   },
 });
 
@@ -1235,6 +1297,20 @@ export const getAiToolManifest = action({
           description: "Run an evidence-only court with evidence, underwriting, and risk consultants plus a judge. Returns a recommendation; owner approval remains required.",
           permission: "owner",
           input: { stagedId: "string" },
+        },
+        {
+          name: "run_agent_team",
+          enabled: aiEnabled,
+          description: "Run the sourcing, verification, rental underwriting, and ARV/repairs agents over one lead and return the aggregated readiness gate with every blocking data gap. Recommendations only; owner approval remains required.",
+          permission: "owner-service",
+          input: { leadId: "string", rental: "optional rental underwriting inputs", compPrices: "optional number[]", repairTier: "optional BASE | MEDIUM | GUT" },
+        },
+        {
+          name: "list_pipeline_brief",
+          enabled: aiEnabled,
+          description: "Read the readiness gate across every eligible lead: which deals are ready and which are blocked by specific missing underwriting data.",
+          permission: "owner-service",
+          input: { limit: "optional number" },
         },
       ],
     };

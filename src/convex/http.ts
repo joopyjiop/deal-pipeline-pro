@@ -250,6 +250,8 @@ function mcpTools() {
     { name: "list_match_board", description: "Read the website's match board with scores, confidence, status, and buy-box summaries; no buyer contact information is returned.", inputSchema: { type: "object", properties: { status: { type: "string", enum: ["CANDIDATE", "APPROVED", "REJECTED", "CONTACTED", "CLOSED"] }, confidence: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] }, limit: { type: "number", minimum: 1, maximum: 50 } }, additionalProperties: false } },
     { name: "estimate_deal", description: "Calculate ARV scenarios, repair estimate, MAO scenarios, and estimated gross spread from explicit inputs. Missing comps produce NEEDS_APPRAISAL.", inputSchema: { type: "object", properties: { leadId: { type: "string" }, squareFeet: { type: "number", exclusiveMinimum: 0 }, repairTier: { type: "string", enum: ["BASE", "MEDIUM", "GUT"] }, soldComps: { type: "array", items: { type: "number", minimum: 0 } }, compSourceUrl: { type: "string" }, compSourceDate: { type: "string" }, targetPct: { type: "number", exclusiveMinimum: 0, maximum: 100 }, wholesaleFee: { type: "number", minimum: 0 }, closingCosts: { type: "number", minimum: 0 }, holdingCosts: { type: "number", minimum: 0 }, acquisitionPrice: { type: "number", minimum: 0 } }, required: ["squareFeet", "repairTier", "soldComps", "targetPct", "wholesaleFee", "closingCosts", "holdingCosts"], additionalProperties: false } },
     { name: "consultant_court", description: "Run the evidence auditor, underwriting analyst, risk/compliance consultant, and judge on a staged source. Returns a recommendation only; owner approval remains required.", inputSchema: { type: "object", properties: { stagedId: { type: "string" } }, required: ["stagedId"], additionalProperties: false } },
+    { name: "run_agent_team", description: "Run the sourcing, verification, rental underwriting, and ARV/repairs agents over one lead and return the aggregated readiness gate with every blocking data gap. Recommendations only; owner approval remains required.", inputSchema: { type: "object", properties: { leadId: { type: "string", description: "Lead _id to model" }, rental: { type: "object", description: "Rental underwriting inputs. purchasePrice required when provided; rentComps, annualPropertyTax, annualInsurance, loanAmount, interestRatePct, loanTermYears optional. Falls back to the lead's MAO/acquisition price otherwise.", properties: { purchasePrice: { type: "number", minimum: 0 }, rentComps: { type: "array", items: { type: "number", minimum: 0 } }, annualPropertyTax: { type: "number", minimum: 0 }, annualInsurance: { type: "number", minimum: 0 }, loanAmount: { type: "number", minimum: 0 }, interestRatePct: { type: "number", minimum: 0 }, loanTermYears: { type: "number", minimum: 1 } }, additionalProperties: false }, compPrices: { type: "array", items: { type: "number", minimum: 0 }, description: "Sold comparable prices for ARV" }, repairTier: { type: "string", enum: ["BASE", "MEDIUM", "GUT"] } }, required: ["leadId"], additionalProperties: false } },
+    { name: "list_pipeline_brief", description: "Read the readiness gate across every eligible lead: which deals are ready and which are blocked by specific missing underwriting data.", inputSchema: { type: "object", properties: { limit: { type: "number", minimum: 1, maximum: 200 } }, additionalProperties: false } },
   ];
 }
 
@@ -313,6 +315,41 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
   if (name === "consultant_court") {
     if (typeof rawArguments.stagedId !== "string" || !rawArguments.stagedId.trim()) throw new Error("consultant_court requires stagedId");
     return ctx.runAction(internal.mongodb.mcpRunConsultantCourt, { stagedId: rawArguments.stagedId });
+  }
+  if (name === "run_agent_team") {
+    if (typeof rawArguments.leadId !== "string" || !rawArguments.leadId.trim()) throw new Error("run_agent_team requires leadId");
+    const rental = isRecord(rawArguments.rental) ? rawArguments.rental : undefined;
+    if (rawArguments.rental !== undefined && !rental) throw new Error("rental must be an object when provided");
+    const compPrices = rawArguments.compPrices === undefined ? undefined : (Array.isArray(rawArguments.compPrices) ? rawArguments.compPrices : undefined);
+    if (rawArguments.compPrices !== undefined && !compPrices) throw new Error("compPrices must be an array of numbers when provided");
+    const repairTier = optionalString(rawArguments.repairTier);
+    if (repairTier === "__invalid__") throw new Error("repairTier must be a string when provided");
+    if (repairTier !== undefined && repairTier !== "BASE" && repairTier !== "MEDIUM" && repairTier !== "GUT") throw new Error("repairTier must be BASE, MEDIUM, or GUT");
+    return ctx.runAction(internal.mongodb.mcpRunAgentTeam, {
+      leadId: rawArguments.leadId,
+      rental: rental as unknown as {
+        purchasePrice: number;
+        rentComps?: number[];
+        marketRentPerSqFt?: number;
+        squareFeet?: number;
+        annualPropertyTax?: number;
+        annualInsurance?: number;
+        managementPct?: number;
+        vacancyPct?: number;
+        maintenancePct?: number;
+        loanAmount?: number;
+        loanToValuePct?: number;
+        interestRatePct?: number;
+        loanTermYears?: number;
+      } | undefined,
+      compPrices: compPrices as number[] | undefined,
+      repairTier: repairTier as "BASE" | "MEDIUM" | "GUT" | undefined,
+    });
+  }
+  if (name === "list_pipeline_brief") {
+    const limit = optionalNumber(rawArguments.limit);
+    if (Number.isNaN(limit)) throw new Error("limit must be a number when provided");
+    return ctx.runAction(internal.mongodb.mcpListPipelineBrief, { limit });
   }
   throw new Error(`Unknown MCP tool: ${name}`);
 }

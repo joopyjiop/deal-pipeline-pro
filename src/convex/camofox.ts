@@ -296,7 +296,11 @@ export const camofoxCrawl = action({
     // Keep a batch within the Convex action window when a browser worker is
     // unhealthy. A timed-out URL is recorded in `failed` and the next seed
     // still gets its own attempt.
-    const timeoutMs = Math.max(10_000, Math.min(30_000, args.timeoutMs ?? 20_000));
+    // Auction.com can need longer than 20 seconds for the first browser tab
+    // while the Render-hosted Camoufox worker wakes and completes navigation.
+    // Match the Camofox server's 30-second handler ceiling without allowing
+    // an unbounded Convex action.
+    const timeoutMs = Math.max(10_000, Math.min(30_000, args.timeoutMs ?? 30_000));
     const sessionKey = (args.sessionKey ?? DEFAULT_SESSION).trim() || DEFAULT_SESSION;
     const sameOriginOnly = args.sameOriginOnly ?? true;
     const shouldDiscover = args.discoverLinks ?? true;

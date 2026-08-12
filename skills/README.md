@@ -30,6 +30,12 @@ Agent skills integrated into this project (standard Agent Skills format: `SKILL.
 | --- | --- | --- | --- |
 | `prompt-master/` | **Prompt engineering** — tool routing, output contracts, coding-agent scope locks, credential stripping, prompt decompilation, failure patterns, and templates | `joopyjiop/prompt-master` | MIT (included) |
 
+## Perplexity CLI — grounded source research
+
+| Pack | Contents | Source |
+| --- | --- | --- |
+| `perplexity-cli/` | **Research skills** — install and use `pplx search web` and `pplx content snippets` to discover and narrow public source URLs before handing them to the owner-only Camofox crawler | `joopyjiop/perplexity-cli` + upstream Perplexity agent-skill guidance |
+
 ## How these map to this project
 
 - **Lead sourcing (real, verified leads):** `firecrawl-build-scrape` / `firecrawl-build-search` are the pattern for pulling public-record pages (county assessor, sheriff sale, tax sale sites) into the lead pipeline as sourced evidence. `firecrawl-workflows/firecrawl-lead-gen` and `firecrawl-lead-research` generate prospect/lead lists; `firecrawl-cli/firecrawl-scrape` + `firecrawl-search` do live web work when an agent needs current page content.

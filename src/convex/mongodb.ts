@@ -6,6 +6,8 @@ import { internal } from "./_generated/api";
 import { action, ActionCtx, internalAction } from "./_generated/server";
 import { rankLeads } from "./search";
 import { scrapegraphExtract } from "./scrapegraph";
+import { discoverSitemapUrls } from "./sitemap";
+import type { SitemapFetch } from "./sitemap";
 import type { SearchableLead } from "./search";
 import { median, rentalUnderwriting, repairEstimate } from "./underwriting";
 import type { RentalUnderwritingInput, RentalUnderwritingResult } from "./underwriting";
@@ -1320,6 +1322,13 @@ export const getAiToolManifest = action({
           permission: "owner-service",
           input: { url: "string (public http or https)", sourceType: "source type", prompt: "string (10-2000 chars)", schema: "optional JSON-Schema object" },
         },
+        {
+          name: "sitemap_discover",
+          enabled: aiEnabled && scraperEnabled,
+          description: "Expand one public portal seed URL into a bounded batch of real listing URLs via its robots.txt sitemap refs and standard sitemap locations, then stage each page for owner review. Never invents data and never approves a lead.",
+          permission: "owner-service",
+          input: { url: "string (public http or https)", sourceType: "source type", maxUrls: "optional number (1-200)" },
+        },
       ],
     };
   },
@@ -1413,6 +1422,107 @@ export const mcpScrapegraphExtract = internalAction({
     const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
     if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
     return scrapegraphExtractImpl(database, { url: args.url, sourceType: args.sourceType, prompt: args.prompt, schema: args.schema as Record<string, unknown> | undefined });
+  },
+});
+
+// Sitemap-driven discovery: one seed URL (a portal homepage) expands into a
+// bounded batch of real listing URLs via robots.txt sitemap refs and standard
+// sitemap locations. Discovery never invents data and never self-qualifies —
+// every URL still passes the public-URL gates and the owner-review staging
+// queue, exactly like the Firecrawl and ScrapeGraphAI paths.
+async function sitemapDiscoverImpl(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  args: { urls: string[]; sourceType: string; maxUrls?: number },
+) {
+  const seeds = Array.from(new Set(args.urls.map((url) => url.trim()).filter(Boolean)));
+  if (seeds.length === 0) throw new Error("At least one source URL is required");
+  if (seeds.length > 10) throw new Error("You can submit at most 10 starting URLs");
+  const parsedSeeds = seeds.map((url) => assertPublicHttpUrl(url));
+  parsedSeeds.forEach((url) => assertAuctionComSourceUrl(url, args.sourceType));
+  const maxUrls = Math.max(1, Math.min(200, Math.floor(args.maxUrls ?? 60)));
+
+  const fetchWithAppUserAgent: SitemapFetch = async (url) => {
+    const response = await fetch(url, {
+      headers: { "user-agent": "Groundwork-source-review/1.0 (+public-source-review)" },
+      signal: AbortSignal.timeout(15000),
+    });
+    return response;
+  };
+
+  const discovered: Array<{ seed: string; url: string }> = [];
+  const sitemapsUsed: string[] = [];
+  const errors: Array<{ url: string; error: string }> = [];
+  const staged: Array<{ url: string; stagedId: string; qualification: { status: string; reason?: string; leadId?: string } }> = [];
+  const stagingFailed: Array<{ url: string; error: string }> = [];
+  const seen = new Set<string>();
+  let truncated = false;
+
+  for (const seed of parsedSeeds) {
+    const budget = maxUrls - seen.size;
+    if (budget <= 0) break;
+    const result = await discoverSitemapUrls({
+      seedUrl: seed.toString(),
+      fetchFn: fetchWithAppUserAgent,
+      maxSitemaps: 8,
+      maxUrls: budget,
+    });
+    sitemapsUsed.push(...result.sitemapsUsed);
+    errors.push(...result.errors);
+    truncated = truncated || result.truncated;
+    for (const url of result.discovered) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+      discovered.push({ seed: seed.toString(), url });
+      try {
+        const stagedRecord = await fetchAndStageSource(database, { url, sourceType: args.sourceType });
+        const qualification = await qualifyStagedSourceImpl(database, stagedRecord.stagedId);
+        staged.push({ url, stagedId: stagedRecord.stagedId, qualification });
+      } catch (error) {
+        stagingFailed.push({ url, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  }
+
+  return {
+    provider: "sitemap" as const,
+    seeds: parsedSeeds.map((seed) => seed.toString()),
+    maxUrls,
+    truncated,
+    sitemapsUsed,
+    discovered,
+    staged,
+    stagingFailed,
+    errors,
+  };
+}
+
+export const sitemapDiscover = action({
+  args: {
+    urls: v.array(v.string()),
+    sourceType: sourceTypeValidator,
+    maxUrls: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
+    return sitemapDiscoverImpl(database, { urls: args.urls, sourceType: args.sourceType, maxUrls: args.maxUrls });
+  },
+});
+
+export const mcpSitemapDiscover = internalAction({
+  args: {
+    url: v.string(),
+    sourceType: sourceTypeValidator,
+    maxUrls: v.optional(v.number()),
+  },
+  handler: async (_, args) => {
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
+    return sitemapDiscoverImpl(database, { urls: [args.url], sourceType: args.sourceType, maxUrls: args.maxUrls });
   },
 });
 

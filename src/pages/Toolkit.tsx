@@ -90,6 +90,18 @@ type SgResult = {
   piiCreated: boolean;
 };
 
+type SitemapResult = {
+  provider: "sitemap";
+  seeds: string[];
+  maxUrls: number;
+  truncated: boolean;
+  sitemapsUsed: string[];
+  discovered: Array<{ seed: string; url: string }>;
+  staged: Array<{ url: string; stagedId: string; qualification: { status: string; reason?: string; leadId?: string } }>;
+  stagingFailed: Array<{ url: string; error: string }>;
+  errors: Array<{ url: string; error: string }>;
+};
+
 type CrawlResult = {
   provider?: "camofox" | "firecrawl";
   requested: string[];
@@ -248,6 +260,7 @@ export default function Toolkit() {
   const listPipelineBriefAction = useAction(api.mongodb.listPipelineBrief);
   const queueOffMarket = useAction(api.mongodb.queueOffMarketSources);
   const scrapegraphExtractAction = useAction(api.mongodb.scrapegraphExtractSource);
+  const sitemapDiscoverAction = useAction(api.mongodb.sitemapDiscover);
   const listLeadsAction = useAction(api.mongodb.listLeads);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
@@ -275,6 +288,9 @@ export default function Toolkit() {
   const [sgForm, setSgForm] = useState({ url: "", sourceType: "SHERIFF_SALE" as (typeof sourceTypes)[number][0], prompt: "" });
   const [sgRunning, setSgRunning] = useState(false);
   const [sgResult, setSgResult] = useState<SgResult | null>(null);
+  const [smForm, setSmForm] = useState({ url: "", sourceType: "AUCTION_COM" as (typeof sourceTypes)[number][0], maxUrls: "60" });
+  const [smRunning, setSmRunning] = useState(false);
+  const [smResult, setSmResult] = useState<SitemapResult | null>(null);
   const [estimateForm, setEstimateForm] = useState({
     squareFeet: "1500",
     yearBuilt: "",
@@ -612,6 +628,26 @@ export default function Toolkit() {
     }
   };
 
+  const runSitemapDiscover = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSmRunning(true);
+    setSmResult(null);
+    try {
+      const result = await sitemapDiscoverAction({
+        urls: [smForm.url],
+        sourceType: smForm.sourceType,
+        maxUrls: smForm.maxUrls ? Number(smForm.maxUrls) : undefined,
+      }) as SitemapResult;
+      setSmResult(result);
+      const candidates = result.staged.filter((item) => item.qualification.status === "CANDIDATE_CREATED").length;
+      toast.success(`Discovered ${result.discovered.length} URL${result.discovered.length === 1 ? "" : "s"} from ${result.sitemapsUsed.length} sitemap${result.sitemapsUsed.length === 1 ? "" : "s"}, staged ${result.staged.length}${candidates ? `, created ${candidates} sourced candidate${candidates === 1 ? "" : "s"}` : ""}${result.truncated ? " (batch capped)" : ""}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not run sitemap discovery.");
+    } finally {
+      setSmRunning(false);
+    }
+  };
+
   const runScrapegraphExtract = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSgRunning(true);
@@ -818,6 +854,28 @@ export default function Toolkit() {
           {sgResult && <div className="mt-4 rounded-2xl border border-emerald-100/80 bg-emerald-50/45 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">Extraction staged</p><p className="mt-1 text-[0.68rem] leading-4 text-slate-500">Review it in the staging queue (qualify / consultant court). Staged ID: <span className="font-mono text-slate-700">{sgResult.stagedId}</span></p></div><Badge className="border-0 bg-emerald-100/80 text-emerald-800">{sgResult.usage ? `${sgResult.usage.promptTokens + sgResult.usage.completionTokens} tokens` : "No usage data"}</Badge></div>
             {sgResult.json && <pre className="mt-3 max-h-56 overflow-auto rounded-xl border border-white/80 bg-white/60 p-3 text-[0.65rem] leading-4 text-slate-600">{JSON.stringify(sgResult.json, null, 2)}</pre>}
+          </div>}
+        </section>
+
+        <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-teal-100/80 text-teal-700"><FileSearch className="size-5" /></div><div><p className="eyebrow">Sitemap discovery</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">One portal seed → thousands of listing URLs</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Reads the site's robots.txt sitemap refs (or standard sitemap locations), expands them into a bounded batch of real listing pages, and stages each for the same owner review. Auction.com alone publishes 24 sitemaps with up to 5,000 property pages each. Nothing is invented and nothing self-approves.</p></div></div>
+            <Badge className={smResult ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-slate-100/80 text-slate-600"}>{smRunning ? "Discovering…" : smResult ? `${smResult.discovered.length} URLs found` : "Not run"}</Badge>
+          </div>
+          <form onSubmit={runSitemapDiscover} className="mt-4 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <Input required type="url" value={smForm.url} onChange={(event) => setSmForm((current) => ({ ...current, url: event.target.value }))} placeholder="Portal seed URL, e.g. https://www.auction.com/" className="h-10 rounded-xl border-white/85 bg-white/70 text-xs" />
+            <select value={smForm.sourceType} onChange={(event) => setSmForm((current) => ({ ...current, sourceType: event.target.value as typeof current.sourceType }))} className="h-10 rounded-xl border border-white/85 bg-white/70 px-3 text-xs text-slate-700 outline-none">{sourceTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+            <Input type="number" min="1" max="200" value={smForm.maxUrls} onChange={(event) => setSmForm((current) => ({ ...current, maxUrls: event.target.value }))} placeholder="Batch size (default 60)" className="h-10 rounded-xl border-white/85 bg-white/70 text-xs" />
+            <Button type="submit" disabled={smRunning} className="h-10 gap-2 rounded-xl bg-teal-700 text-xs hover:bg-teal-800">{smRunning ? <Loader2 className="size-4 animate-spin" /> : <FileSearch className="size-4" />} {smRunning ? "Discovering…" : "Discover & stage"}</Button>
+          </form>
+          {smResult && <div className="mt-4 rounded-2xl border border-teal-100/80 bg-teal-50/45 p-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="glass-inset rounded-xl p-3"><p className="text-xs font-semibold text-slate-700">Sitemaps used</p><p className="mt-1 text-lg font-semibold text-teal-800">{smResult.sitemapsUsed.length}</p></div>
+              <div className="glass-inset rounded-xl p-3"><p className="text-xs font-semibold text-slate-700">URLs discovered</p><p className="mt-1 text-lg font-semibold text-teal-800">{smResult.discovered.length}{smResult.truncated ? "+" : ""}</p></div>
+              <div className="glass-inset rounded-xl p-3"><p className="text-xs font-semibold text-slate-700">Staged for review</p><p className="mt-1 text-lg font-semibold text-teal-800">{smResult.staged.length}</p></div>
+            </div>
+            {smResult.discovered.length > 0 && <div className="mt-3 max-h-44 overflow-auto rounded-xl border border-white/80 bg-white/60 p-3"><ul className="space-y-1 text-[0.65rem] leading-4 text-slate-600">{smResult.discovered.slice(0, 20).map((item) => <li key={item.url} className="truncate">· {item.url}</li>)}</ul></div>}
+            {(smResult.stagingFailed.length > 0 || smResult.errors.length > 0) && <p className="mt-3 text-[0.68rem] leading-4 text-amber-700">{smResult.stagingFailed.length + smResult.errors.length} fetch or staging issue{smResult.stagingFailed.length + smResult.errors.length === 1 ? "" : "s"} — see below.</p>}
           </div>}
         </section>
 

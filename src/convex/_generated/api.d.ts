@@ -22,6 +22,7 @@ import type * as owner from "../owner.js";
 import type * as scrapegraph from "../scrapegraph.js";
 import type * as search from "../search.js";
 import type * as settings from "../settings.js";
+import type * as sitemap from "../sitemap.js";
 import type * as underwriting from "../underwriting.js";
 import type * as users from "../users.js";
 
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   scrapegraph: typeof scrapegraph;
   search: typeof search;
   settings: typeof settings;
+  sitemap: typeof sitemap;
   underwriting: typeof underwriting;
   users: typeof users;
 }>;

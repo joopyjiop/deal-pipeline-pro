@@ -92,6 +92,14 @@ type CrawlResult = {
   queuedButNotVisited: string[];
 };
 
+type DefaultDealSource = {
+  id: string;
+  name: string;
+  domain: string;
+  description: string;
+  urls: string[];
+};
+
 type EstimateResult = {
   estimateStatus: "READY" | "NEEDS_APPRAISAL";
   compCount: number;
@@ -112,6 +120,19 @@ const sourceTypes = [
   ["RECORDER", "Recorder"],
   ["MANUAL", "Manual source"],
 ] as const;
+
+// Built-in, owner-reviewed starting points. Add another site here only after
+// confirming its public pages and crawl permissions; custom URLs remain
+// available below for sources that are not part of the default registry.
+const defaultDealSources: DefaultDealSource[] = [
+  {
+    id: "auction-com",
+    name: "Auction.com",
+    domain: "auction.com",
+    description: "Public foreclosure and auction catalog",
+    urls: ["https://www.auction.com/", "https://www.auction.com/residential/"],
+  },
+];
 
 const currency = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -169,6 +190,7 @@ export default function Toolkit() {
   const [crawlUrls, setCrawlUrls] = useState("");
   const [crawlMaxPages, setCrawlMaxPages] = useState("8");
   const [crawlDiscoverLinks, setCrawlDiscoverLinks] = useState(true);
+  const [selectedDefaultSourceIds, setSelectedDefaultSourceIds] = useState<string[]>(["auction-com"]);
   const [crawlSameOrigin, setCrawlSameOrigin] = useState(true);
   const [estimateResult, setEstimateResult] = useState<EstimateResult | null>(null);
   const [copiedMcpField, setCopiedMcpField] = useState<string | null>(null);
@@ -353,7 +375,48 @@ export default function Toolkit() {
     }
   };
 
+  const toggleDefaultSource = (sourceId: string) => {
+    setSelectedDefaultSourceIds((current) =>
+      current.includes(sourceId) ? current.filter((id) => id !== sourceId) : [...current, sourceId],
+    );
+  };
+
+  const executeCrawl = async (urls: string[], sourceLabel?: string) => {
+    const uniqueUrls = Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean)));
+    if (uniqueUrls.length === 0) {
+      toast.error("Select at least one default website or add a URL below.");
+      return;
+    }
+    if (uniqueUrls.some((url) => /^(?:https?:\/\/)?(?:www\.)?auction\.co\/?$/i.test(url))) {
+      toast.error("Use https://www.auction.com/ — auction.co is not the Auction.com listing site.");
+      return;
+    }
+    setCrawling(true);
+    try {
+      const result = await crawlWithCamofox({
+        urls: uniqueUrls,
+        maxPages: Number(crawlMaxPages),
+        discoverLinks: crawlDiscoverLinks,
+        sameOriginOnly: crawlSameOrigin,
+      }) as CrawlResult;
+      setCrawlUrls(uniqueUrls.join("\n"));
+      setCrawlResult(result);
+      toast.success(`${sourceLabel ? `${sourceLabel}: ` : ""}found ${result.pages.length} page${result.pages.length === 1 ? "" : "s"}${result.failed.length ? `, ${result.failed.length} failed` : ""}. Review the evidence before qualifying a lead.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not crawl these links.");
+    } finally {
+      setCrawling(false);
+    }
+  };
+
+  const findDealsFromDefaults = async () => {
+    const selectedSources = defaultDealSources.filter((source) => selectedDefaultSourceIds.includes(source.id));
+    const urls = selectedSources.flatMap((source) => source.urls);
+    await executeCrawl(urls, selectedSources.map((source) => source.name).join(" + "));
+  };
+
   const useAuctionCatalogPreset = () => {
+    setSelectedDefaultSourceIds(["auction-com"]);
     setCrawlUrls("https://www.auction.com/\nhttps://www.auction.com/residential/");
     setCrawlMaxPages("12");
     setCrawlDiscoverLinks(true);
@@ -363,30 +426,7 @@ export default function Toolkit() {
 
   const handleCrawl = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const urls = Array.from(new Set(crawlUrls.split(/\r?\n|,/).map((url) => url.trim()).filter(Boolean)));
-    if (urls.length === 0) {
-      toast.error("Add at least one URL to crawl.");
-      return;
-    }
-    if (urls.some((url) => /^(?:https?:\/\/)?(?:www\.)?auction\.co\/?$/i.test(url))) {
-      toast.error("Use https://www.auction.com/ — auction.co is not the Auction.com listing site.");
-      return;
-    }
-    setCrawling(true);
-    try {
-      const result = await crawlWithCamofox({
-        urls,
-        maxPages: Number(crawlMaxPages),
-        discoverLinks: crawlDiscoverLinks,
-        sameOriginOnly: crawlSameOrigin,
-      }) as CrawlResult;
-      setCrawlResult(result);
-      toast.success(`Crawl finished: ${result.pages.length} page${result.pages.length === 1 ? "" : "s"} captured${result.failed.length ? `, ${result.failed.length} failed` : ""}.`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not crawl these links.");
-    } finally {
-      setCrawling(false);
-    }
+    await executeCrawl(crawlUrls.split(/\r?\n|,/));
   };
 
   const handleEstimate = async (event: FormEvent<HTMLFormElement>) => {
@@ -498,8 +538,24 @@ export default function Toolkit() {
             <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-cyan-100/80 text-cyan-700"><Link2 className="size-5" /></div><div><p className="eyebrow">Camofox link crawler</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Scrape the links you send</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Paste one or more public URLs, one per line. The browser captures each page sequentially, optionally follows links it can identify, and closes every tab after capture. Results stay evidence-only until you review and qualify them.</p></div></div>
             <Badge className="border-0 bg-cyan-100/80 text-cyan-800">Owner only</Badge>
           </div>
+          <div className="mt-5 rounded-2xl border border-cyan-100/80 bg-cyan-50/35 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div><p className="text-xs font-semibold text-slate-700">Default deal websites</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Select a saved public source and click <strong>Find deals</strong> whenever you want to run it. No URL entry is needed; the crawler still uses the same bounded, evidence-only review flow.</p></div>
+              <Badge className="border-0 bg-white/75 text-cyan-800">Reusable sources</Badge>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {defaultDealSources.map((source) => {
+                const selected = selectedDefaultSourceIds.includes(source.id);
+                return <label key={source.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${selected ? "border-cyan-300/80 bg-white/75" : "border-white/80 bg-white/40 hover:bg-white/60"}`}>
+                  <input type="checkbox" checked={selected} onChange={() => toggleDefaultSource(source.id)} className="mt-0.5 size-4 accent-cyan-700" />
+                  <span className="min-w-0"><span className="flex items-center gap-2 text-xs font-semibold text-slate-700">{source.name}{selected ? <Check className="size-3.5 text-cyan-700" /> : null}</span><span className="mt-1 block text-[0.68rem] leading-4 text-slate-500">{source.description} · {source.domain}</span></span>
+                </label>;
+              })}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2"><Button type="button" disabled={crawling || selectedDefaultSourceIds.length === 0} onClick={() => void findDealsFromDefaults()} className="h-9 gap-2 rounded-xl bg-cyan-700 text-xs hover:bg-cyan-800"><Play className="size-3.5" /> Find deals from selected</Button><Button type="button" variant="outline" onClick={useAuctionCatalogPreset} className="h-9 rounded-xl border-cyan-200/80 bg-white/65 text-xs text-cyan-800">Load Auction.com into custom links</Button></div>
+          </div>
           <form onSubmit={handleCrawl} className="mt-5 grid gap-3">
-            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span className="flex flex-wrap items-center justify-between gap-2">Starting links<Button type="button" variant="outline" onClick={useAuctionCatalogPreset} className="h-7 rounded-lg border-cyan-200/80 bg-cyan-50/50 px-2.5 text-[0.68rem] text-cyan-800">Use Auction.com catalog</Button></span><Textarea required value={crawlUrls} onChange={(event) => setCrawlUrls(event.target.value)} placeholder={"https://county.gov/sales\nhttps://auction.example/listings"} className="min-h-28 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span className="flex flex-wrap items-center justify-between gap-2">Custom starting links <span className="font-normal text-slate-400">(optional when using defaults)</span></span><Textarea value={crawlUrls} onChange={(event) => setCrawlUrls(event.target.value)} placeholder={"https://county.gov/sales\nhttps://auction.example/listings"} className="min-h-28 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
             <div className="grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)_auto] sm:items-end">
               <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Maximum pages</span><Input required min="1" max="12" type="number" value={crawlMaxPages} onChange={(event) => setCrawlMaxPages(event.target.value)} className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
               <div className="flex flex-wrap gap-4 pb-2 text-xs text-slate-600"><label className="inline-flex items-center gap-2"><input type="checkbox" checked={crawlDiscoverLinks} onChange={(event) => setCrawlDiscoverLinks(event.target.checked)} className="size-4 accent-cyan-700" /> Follow discovered links</label><label className="inline-flex items-center gap-2"><input type="checkbox" checked={crawlSameOrigin} onChange={(event) => setCrawlSameOrigin(event.target.checked)} className="size-4 accent-cyan-700" /> Keep discovered links on seed sites</label></div>

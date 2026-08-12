@@ -13,6 +13,7 @@ const messageValidator = v.object({
   content: v.string(),
 });
 
+// Owner-only proxy: the Ollama Cloud key never reaches the browser.
 async function requireOwner(ctx: ActionCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (identity?.email?.trim().toLowerCase() === OWNER_EMAIL) return;

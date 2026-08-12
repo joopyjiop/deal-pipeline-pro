@@ -1262,10 +1262,10 @@ export const firecrawlCrawl = action({
         const finalUrl = scraped.data?.metadata?.sourceURL ?? url;
         const markdown = scraped.data?.markdown ?? "";
         const excerpt = markdown.slice(0, 8_000);
-        const links: string[] = []; /*/\\]\((https?:\\/\\/[^)]+)\\)/gi))
+        const links: string[] = [...markdown.matchAll(/\[[^\]]*\]\((https?:\/\/[^)]+)\)/gi)]
           .map((match) => match[1])
           .filter((link): link is string => Boolean(link) && samePublicSite(link, seedSites))
-          .slice(0, 100); */
+          .slice(0, 100);
         const page = {
           url,
           finalUrl,
@@ -1472,10 +1472,10 @@ function courtConfidence(value: unknown): CourtConfidence {
 }
 
 type CourtModelResult =
-  | { ok: true; value: Record<string, unknown>; provider: "OLLAMA" | "SAMBANOVA"; model: string; error?: string }
+  | { ok: true; value: Record<string, unknown>; provider: "OLLAMA"; model: string; error?: string }
   | { ok: false; error: string };
 
-function parseCourtContent(content: unknown, provider: "OLLAMA" | "SAMBANOVA", model: string): CourtModelResult {
+function parseCourtContent(content: unknown, provider: "OLLAMA", model: string): CourtModelResult {
   if (typeof content !== "string" || !content.trim()) return { ok: false, error: "AI consultant returned no content" };
 
   const trimmed = content.trim();
@@ -1540,40 +1540,13 @@ async function callOllamaCourtModel(prompt: string, maxTokens: number): Promise<
 }
 
 async function callCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {
-  if (process.env.OLLAMA_API_KEY?.trim()) return callOllamaCourtModel(prompt, maxTokens);
-  const ollamaKey = process.env.OLLAMA_API_KEY?.trim();
-
-  if (!ollamaKey) return { ok: false, error: "OLLAMA_API_KEY is not configured" };
+  if (!process.env.OLLAMA_API_KEY?.trim()) return { ok: false, error: "OLLAMA_API_KEY is not configured" };
   return callOllamaCourtModel(prompt, maxTokens);
-
-  const sambaKey = process.env.OLLAMA_API_KEY;
-  const sambaModel = process.env.OLLAMA_COURT_MODEL ?? "gpt-oss:20b";
-
-  const response = await fetch("https://api.ollama.com/v1/chat/completions", {
-    method: "POST",
-    headers: { authorization: `Bearer ${sambaKey}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      model: sambaModel,
-      temperature: 0,
-      max_tokens: maxTokens,
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt }],
-    }),
-    signal: AbortSignal.timeout(30000),
-  });
-  const payload = await response.json().catch(() => ({})) as { choices?: Array<{ message?: { content?: string } }> };
-  if (response.ok) return parseCourtContent(payload.choices?.[0]?.message?.content, "SAMBANOVA", sambaModel);
-  if (response.status !== 429) return { ok: false, error: `AI consultant request failed (HTTP ${response.status})` };
-  if (!ollamaKey) return { ok: false, error: "SambaNova rate limit reached (HTTP 429); Ollama fallback is not configured" };
-
-  const fallback = await callOllamaCourtModel(prompt, maxTokens);
-  if (fallback.ok) return fallback;
-  return { ok: false, error: `SambaNova rate limit reached (HTTP 429); ${fallback.error}` };
 }
 
 async function runAiConsultantCourt(source: { title: string; excerpt: string; url: string }): Promise<CourtVerdict> {
   const reviewedAt = new Date().toISOString();
-  if (!process.env.SAMBANOVA_API_KEY?.trim() && !process.env.OLLAMA_API_KEY?.trim()) return { status: "SKIPPED_MISSING_KEY", reviewedAt };
+  if (!process.env.OLLAMA_API_KEY?.trim()) return { status: "SKIPPED_MISSING_KEY", reviewedAt };
   const sourcePacket = `SOURCE URL: ${source.url}\nTITLE: ${source.title}\nSOURCE EXCERPT (the only evidence allowed): ${source.excerpt.slice(0, 7000)}`;
   const assignments: Array<{ role: CourtRole; task: string }> = [
     { role: "EVIDENCE_AUDITOR", task: "Audit whether the source contains enough explicit, reliable facts for a real deal review. Separate sourced facts from assumptions." },
@@ -1618,7 +1591,7 @@ async function runAiConsultantCourt(source: { title: string; excerpt: string; ur
     missingEvidence: courtList(judgeValue.missingEvidence),
     consultants,
     judgeNotes: courtString(judgeValue.judgeNotes, "Owner review remains required.", 600),
-    model: process.env.SAMBANOVA_MODEL ?? "Meta-Llama-3.3-70B-Instruct",
+    model: process.env.OLLAMA_COURT_MODEL ?? process.env.OLLAMA_MODEL ?? "gpt-oss:20b",
     reviewedAt,
   };
 }
@@ -1671,7 +1644,7 @@ async function runAutomationCycleImpl() {
     { upsert: true },
   );
   const remaining = await database.collection(AUTOMATION_TASKS).countDocuments({ status: "PENDING" });
-  return { status: "COMPLETED" as const, processed, failed, remaining, ai: settings.mode === "BOTH" ? { completed: aiCompleted, configured: Boolean(process.env.SAMBANOVA_API_KEY && settings.aiEnabled) } : "not-requested" as const };
+  return { status: "COMPLETED" as const, processed, failed, remaining, ai: settings.mode === "BOTH" ? { completed: aiCompleted, configured: Boolean(process.env.OLLAMA_API_KEY && settings.aiEnabled) } : "not-requested" as const };
 }
 
 export const getAutomationConfig = action({
@@ -1682,7 +1655,7 @@ export const getAutomationConfig = action({
     const settings = automationSettings(document);
     return {
       ...settings,
-      providerConfigured: Boolean(process.env.SAMBANOVA_API_KEY),
+      providerConfigured: Boolean(process.env.OLLAMA_API_KEY),
       n8nSecretConfigured: Boolean(process.env.CONVEX_N8N_WEBHOOK_SECRET),
     };
   },
@@ -1784,7 +1757,7 @@ export const setAutomationConfig = action({
     );
     return {
       ...args,
-      providerConfigured: Boolean(process.env.SAMBANOVA_API_KEY),
+      providerConfigured: Boolean(process.env.OLLAMA_API_KEY),
       n8nSecretConfigured: Boolean(process.env.CONVEX_N8N_WEBHOOK_SECRET),
     };
   },

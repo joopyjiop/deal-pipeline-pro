@@ -200,7 +200,7 @@ The app now exposes a protected remote MCP endpoint for an external AI agent suc
 - Authentication: `Authorization: Bearer <MCP_TOOL_SERVER_SECRET>`
 - Convex environment variable: `MCP_TOOL_SERVER_SECRET`
 
-Generate a new long random secret and add it in the Convex Environment vars panel. Do not reuse `MONGODB_URI`, `SAMBANOVA_API_KEY`, or the n8n secret, and do not put any of them in Odysseus.
+Generate a new long random secret and add it in the Convex Environment vars panel. Do not reuse `MONGODB_URI`, `OLLAMA_API_KEY`, or the n8n secret, and do not put any of them in Odysseus.
 
 In Odysseus's **Settings → Integrations → MCP Tool Server** form, enter the endpoint above, choose Streamable HTTP if asked, and set the bearer/API-key secret to the exact value of `MCP_TOOL_SERVER_SECRET`. The server supports `initialize`, `tools/list`, and `tools/call`.
 

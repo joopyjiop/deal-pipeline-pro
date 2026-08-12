@@ -82,16 +82,29 @@ async function camofox(
   init: RequestInit = {},
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<unknown> {
-  const response = await fetch(`${camofoxBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${camofoxApiKey()}`,
-      ...(init.headers as Record<string, string> | undefined),
-    },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const body: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
+  // Render can briefly return a gateway error while the browser worker is
+  // waking. Retry tab creation once, but do not multiply long browser
+  // navigation timeouts or retry reads/deletes.
+  const retryTabCreation = init.method === "POST" && path === "/tabs";
+  const attempts = retryTabCreation ? 2 : 1;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const response = await fetch(`${camofoxBaseUrl()}${path}`, {
+      ...init,
+      headers: {
+        authorization: `Bearer ${camofoxApiKey()}`,
+        ...(init.headers as Record<string, string> | undefined),
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const body: unknown = await response.json().catch(() => null);
+    const transientGatewayError = response.status === 502 || response.status === 503 || response.status === 504;
+    if (response.ok) return body;
+    if (retryTabCreation && transientGatewayError && attempt < attempts) {
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      continue;
+    }
+
     const detail =
       body && typeof body === "object" && "error" in body
         ? String((body as { error: unknown }).error)
@@ -100,7 +113,8 @@ async function camofox(
       `Camofox ${init.method ?? "GET"} ${path} failed (${response.status}): ${detail}`,
     );
   }
-  return body;
+
+  throw new Error(`Camofox ${init.method ?? "GET"} ${path} failed unexpectedly`);
 }
 
 async function isOwner(ctx: ActionCtx): Promise<boolean> {

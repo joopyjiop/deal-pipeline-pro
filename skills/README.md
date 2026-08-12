@@ -48,6 +48,14 @@ Agent skills integrated into this project (standard Agent Skills format: `SKILL.
 - **Prerequisite:** `FIRECRAWL_API_KEY` (hosted) or `FIRECRAWL_API_URL` (self-hosted) in the backend env vars (Convex dashboard for `keen-aardvark-333`). The CLI skills additionally need the Firecrawl CLI (`npx -y firecrawl-cli@latest init --all`).
 - **E2E / component tests:** `playwright` skills cover browser automation (`playwright-cli`), component tests for the React UI (`playwright-component-testing` — story-gallery pattern fits this app's shadcn/ui components), and trace debugging (`playwright-trace`). `@playwright/test` is not yet installed in this project — say the word and I'll add it plus a first smoke test.
 
+## RunPod — client-neutral compatibility
+
+| Pack | Contents | Source |
+| --- | --- | --- |
+| `runpod-official/` | **RunPod routing adapter** — client-neutral routing across MCP, runpodctl, Flash, companion CLIs, usage guidance, credential checks, Ollama defaults, external health verification, and cost guards | `runpod/runpod-plugins-official`, adapted using the client-neutral routing pattern from `reverse-skill` |
+
+The Freebuff handoff and current authentication boundary are documented in `docs/runpod-freebuff-compatibility.md`. This adapter does not claim that RunPod MCP OAuth is connected and does not store `RUNPOD_API_KEY`.
+
 ## nextlevelbuilder — compatible project skills
 
 | Pack | Contents | Source |

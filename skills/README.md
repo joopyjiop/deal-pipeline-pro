@@ -73,6 +73,14 @@ The Freebuff handoff and current authentication boundary are documented in `docs
 
 The full organization inventory and integration decisions are documented in `docs/nextlevelbuilder-repositories.md`. `skillx`, `agentbrain-cli`, `goclaw-mcp`, `goclaw`, `goclaw-cli`, `goclaw-plugin-webchat`, `f2u-cli`, `goclaw-docs`, and `openclaw-event-2026` remain external references because they are standalone tools, services, plugins, or content repositories rather than drop-in skills for this app.
 
+## Build-your-own-X — build it in-house instead of paying
+
+| Pack | Contents | Source | License |
+| --- | --- | --- | --- |
+| `build-your-own-x/` | **From-scratch build playbook** — decision rule for when to implement a capability in-house instead of paying a vendor, workflow that maps the request to a tutorial category, and project-specific mappings (search, queue, scraper, CLI, bot, LLM plumbing); full upstream tutorial index in `references/index.md` (~390 guides across ~30 categories) | `codecrafters-io/build-your-own-x` | none upstream (read-only link index) |
+
+Use this pack when the owner wants a feature for free or from scratch. Building a component in-house never removes the fabricated-data, PII, TCPA, owner-approval, or evidence requirements, and Convex stays the backend/database unless the owner explicitly asks otherwise.
+
 ## Conventions
 
 - Skills are read-only reference; the source-of-truth for behavior stays in `src/convex/` and `src/pages/`.

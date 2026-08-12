@@ -48,6 +48,14 @@ Agent skills integrated into this project (standard Agent Skills format: `SKILL.
 - **Prerequisite:** `FIRECRAWL_API_KEY` (hosted) or `FIRECRAWL_API_URL` (self-hosted) in the backend env vars (Convex dashboard for `keen-aardvark-333`). The CLI skills additionally need the Firecrawl CLI (`npx -y firecrawl-cli@latest init --all`).
 - **E2E / component tests:** `playwright` skills cover browser automation (`playwright-cli`), component tests for the React UI (`playwright-component-testing` — story-gallery pattern fits this app's shadcn/ui components), and trace debugging (`playwright-trace`). `@playwright/test` is not yet installed in this project — say the word and I'll add it plus a first smoke test.
 
+## Ruflo — external multi-agent orchestration
+
+| Pack | Contents | Source |
+| --- | --- | --- |
+| `ruflo-official/` | **Ruflo compatibility guidance** — bounded swarm routing, MCP boundaries, memory/PII safeguards, test/security lanes, cost controls, and the separate operator-workspace rule | `ruvnet/ruflo` |
+
+Ruflo is documented as an external agent harness, not installed as a Vite/React/Convex dependency. See `docs/ruflo-compatibility.md` before connecting it to the protected project MCP endpoint.
+
 ## RunPod — client-neutral compatibility
 
 | Pack | Contents | Source |

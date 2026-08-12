@@ -1118,6 +1118,204 @@ export const stageCamofoxEvidence = action({
   },
 });
 
+type FirecrawlMapResponse = {
+  success?: boolean;
+  links?: string[];
+  error?: string;
+};
+
+type FirecrawlScrapeResponse = {
+  success?: boolean;
+  data?: {
+    markdown?: string;
+    metadata?: {
+      title?: string;
+      sourceURL?: string;
+    };
+  };
+  error?: string;
+};
+
+function firecrawlApiKey() {
+  const key = process.env.FIRECRAWL_API_KEY?.trim();
+  if (!key) {
+    throw new Error("FIRECRAWL_API_KEY is not configured on the Convex deployment");
+  }
+  return key;
+}
+
+async function firecrawlRequest<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`https://api.firecrawl.dev/v1${path}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${firecrawlApiKey()}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const payload = (await response.json().catch(() => null)) as T | { error?: unknown } | null;
+  if (!response.ok) {
+    const detail = payload && typeof payload === "object" && "error" in payload
+      ? String(payload.error)
+      : response.statusText;
+    throw new Error(`Firecrawl ${path} failed (${response.status}): ${detail}`);
+  }
+  return payload as T;
+}
+
+function samePublicSite(url: string, seedSites: Set<string>) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    return seedSites.has(hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Firecrawl fallback for public domain research when the browser provider
+ * cannot create a tab. It maps the supplied site first, then scrapes a small
+ * bounded batch and stages each page for the same owner review workflow.
+ */
+export const firecrawlCrawl = action({
+  args: {
+    urls: v.array(v.string()),
+    sourceType: sourceTypeValidator,
+    maxPages: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
+
+    const seeds = Array.from(new Set(args.urls.map((url) => url.trim()).filter(Boolean)));
+    if (seeds.length === 0) throw new Error("At least one source URL is required");
+    if (seeds.length > 10) throw new Error("You can submit at most 10 Firecrawl starting URLs");
+    const parsedSeeds = seeds.map((url) => assertPublicHttpUrl(url));
+    parsedSeeds.forEach((url) => assertAuctionComSourceUrl(url, args.sourceType));
+    const maxPages = Math.max(1, Math.min(12, Math.floor(args.maxPages ?? 8)));
+    const seedSites = new Set(parsedSeeds.map((url) => url.hostname.toLowerCase().replace(/^www\./, "")));
+    const discovered = new Set<string>();
+    const queue = [...parsedSeeds.map((url) => url.toString())];
+    const queued = new Set(queue);
+    const failed: Array<{ url: string; error: string }> = [];
+    const pages: Array<{
+      url: string;
+      finalUrl: string;
+      snapshot: string;
+      truncated: boolean;
+      refsCount: number;
+      discoveredLinks: string[];
+    }> = [];
+    const staged: Array<{
+      url: string;
+      stagedId: string;
+      qualification: { status: string; reason?: string; leadId?: string };
+    }> = [];
+    const stagingFailed: Array<{ url: string; error: string }> = [];
+
+    // Map each seed to discover rendered/public listing URLs without relying
+    // on Camofox's tab lifecycle. Firecrawl's map response is discovery only;
+    // pages still need to be scraped and staged below.
+    for (const seed of parsedSeeds) {
+      try {
+        const mapped = await firecrawlRequest<FirecrawlMapResponse>("/map", {
+          url: seed.toString(),
+          limit: Math.min(100, maxPages * 8),
+          includeSubdomains: false,
+          ignoreQueryParameters: true,
+        });
+        for (const rawLink of mapped.links ?? []) {
+          let link: string;
+          try {
+            link = new URL(rawLink, seed).toString();
+          } catch {
+            continue;
+          }
+          if (!samePublicSite(link, seedSites)) continue;
+          const normalized = new URL(link);
+          normalized.hash = "";
+          const normalizedLink = normalized.toString();
+          discovered.add(normalizedLink);
+          if (!queued.has(normalizedLink) && queue.length < maxPages * 4) {
+            queue.push(normalizedLink);
+            queued.add(normalizedLink);
+          }
+        }
+      } catch (error) {
+        failed.push({ url: seed.toString(), error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    while (queue.length > 0 && pages.length + failed.length < maxPages) {
+      const url = queue.shift();
+      if (!url) break;
+      try {
+        const scraped = await firecrawlRequest<FirecrawlScrapeResponse>("/scrape", {
+          url,
+          formats: ["markdown"],
+          onlyMainContent: true,
+          removeBase64Images: true,
+        });
+        const finalUrl = scraped.data?.metadata?.sourceURL ?? url;
+        const markdown = scraped.data?.markdown ?? "";
+        const excerpt = markdown.slice(0, 8_000);
+        const links: string[] = []; /*/\\]\((https?:\\/\\/[^)]+)\\)/gi))
+          .map((match) => match[1])
+          .filter((link): link is string => Boolean(link) && samePublicSite(link, seedSites))
+          .slice(0, 100); */
+        const page = {
+          url,
+          finalUrl,
+          snapshot: excerpt,
+          truncated: markdown.length > excerpt.length,
+          refsCount: 0,
+          discoveredLinks: links,
+        };
+        pages.push(page);
+
+        try {
+          const stagedRecord = await database.collection(IMPORT_STAGING).insertOne({
+            sourceType: args.sourceType,
+            rawJson: {
+              url: finalUrl,
+              title: scraped.data?.metadata?.title ?? new URL(finalUrl).hostname,
+              excerpt,
+              links,
+              contentType: "firecrawl-markdown",
+              fetchedAt: new Date().toISOString(),
+              provider: "firecrawl",
+            },
+            status: "NEW",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+          const qualification = await qualifyStagedSourceImpl(database, String(stagedRecord.insertedId));
+          staged.push({ url: finalUrl, stagedId: String(stagedRecord.insertedId), qualification });
+        } catch (error) {
+          stagingFailed.push({ url: finalUrl, error: error instanceof Error ? error.message : String(error) });
+        }
+      } catch (error) {
+        failed.push({ url, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    return {
+      provider: "firecrawl" as const,
+      requested: seeds,
+      maxPages,
+      pages,
+      failed,
+      discoveredLinks: Array.from(discovered).slice(0, 100),
+      queuedButNotVisited: queue.slice(0, 50),
+      staged,
+      stagingFailed,
+    };
+  },
+});
+
 export const scrapeSource = action({
   args: {
     url: v.string(),

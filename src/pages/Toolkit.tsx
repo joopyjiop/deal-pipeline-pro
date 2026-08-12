@@ -77,6 +77,7 @@ type ScrapeResult = {
 };
 
 type CrawlResult = {
+  provider?: "camofox" | "firecrawl";
   requested: string[];
   maxPages: number;
   pages: Array<{
@@ -178,6 +179,7 @@ export default function Toolkit() {
   const scrapeSource = useAction(api.mongodb.scrapeSource);
   const stageCamofoxEvidence = useAction(api.mongodb.stageCamofoxEvidence);
   const crawlWithCamofox = useAction(api.camofox.camofoxCrawl);
+  const crawlWithFirecrawl = useAction(api.mongodb.firecrawlCrawl);
   const qualifyStagedSource = useAction(api.mongodb.qualifyStagedSource);
   const estimateDeal = useAction(api.mongodb.estimateDeal);
 
@@ -400,40 +402,59 @@ export default function Toolkit() {
     }
     setCrawling(true);
     try {
-      const result = await crawlWithCamofox({
+      let result = await crawlWithCamofox({
         urls: uniqueUrls,
         maxPages: Number(crawlMaxPages),
         discoverLinks: crawlDiscoverLinks,
         sameOriginOnly: crawlSameOrigin,
       }) as CrawlResult;
-      const staged: NonNullable<CrawlResult["staged"]> = [];
-      const stagingFailed: NonNullable<CrawlResult["stagingFailed"]> = [];
-      for (const page of result.pages) {
+      let provider: CrawlResult["provider"] = "camofox";
+      let fallbackNotice = "";
+
+      if (result.pages.length === 0 && result.failed.length > 0) {
         try {
-          const captured = await stageCamofoxEvidence({
-            url: page.finalUrl || page.url,
+          result = await crawlWithFirecrawl({
+            urls: uniqueUrls,
             sourceType: "AUCTION_COM",
-            title: page.finalUrl || page.url,
-            excerpt: page.snapshot,
-            links: page.discoveredLinks,
-          }) as NonNullable<CrawlResult["staged"]>[number];
-          staged.push({
-            url: page.finalUrl || page.url,
-            stagedId: captured.stagedId,
-            qualification: captured.qualification,
-          });
-        } catch (error) {
-          stagingFailed.push({
-            url: page.finalUrl || page.url,
-            error: error instanceof Error ? error.message : String(error),
-          });
+            maxPages: Number(crawlMaxPages),
+          }) as CrawlResult;
+          provider = "firecrawl";
+          fallbackNotice = " Camofox returned no pages, so Firecrawl handled this batch.";
+        } catch (fallbackError) {
+          fallbackNotice = ` Firecrawl fallback also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`;
         }
       }
-      const resultWithStaging = { ...result, staged, stagingFailed };
+
+      const staged: NonNullable<CrawlResult["staged"]> = result.staged ?? [];
+      const stagingFailed: NonNullable<CrawlResult["stagingFailed"]> = result.stagingFailed ?? [];
+      if (provider === "camofox") {
+        for (const page of result.pages) {
+          try {
+            const captured = await stageCamofoxEvidence({
+              url: page.finalUrl || page.url,
+              sourceType: "AUCTION_COM",
+              title: page.finalUrl || page.url,
+              excerpt: page.snapshot,
+              links: page.discoveredLinks,
+            }) as NonNullable<CrawlResult["staged"]>[number];
+            staged.push({
+              url: page.finalUrl || page.url,
+              stagedId: captured.stagedId,
+              qualification: captured.qualification,
+            });
+          } catch (error) {
+            stagingFailed.push({
+              url: page.finalUrl || page.url,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+      const resultWithStaging = { ...result, provider, staged, stagingFailed };
       setCrawlUrls(uniqueUrls.join("\n"));
       setCrawlResult(resultWithStaging);
       const candidates = staged.filter((item) => item.qualification.status === "CANDIDATE_CREATED").length;
-      toast.success(`${sourceLabel ? `${sourceLabel}: ` : ""}captured ${result.pages.length} page${result.pages.length === 1 ? "" : "s"}, staged ${staged.length} for review${candidates ? `, created ${candidates} sourced candidate${candidates === 1 ? "" : "s"}` : ""}${result.failed.length ? `, ${result.failed.length} crawl failed` : ""}.`);
+      toast.success(`${sourceLabel ? `${sourceLabel}: ` : ""}captured ${result.pages.length} page${result.pages.length === 1 ? "" : "s"}, staged ${staged.length} for review${candidates ? `, created ${candidates} sourced candidate${candidates === 1 ? "" : "s"}` : ""}${result.failed.length ? `, ${result.failed.length} crawl failed` : ""}.${fallbackNotice}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not crawl these links.");
     } finally {
@@ -595,7 +616,7 @@ export default function Toolkit() {
             <p className="text-[0.68rem] leading-5 text-slate-500">The Auction.com preset starts from the public catalog only. Each pass is capped at 12 pages and does not bypass login, CAPTCHA, paywalls, or access controls. Review the captured evidence before qualifying any record.</p>
           </form>
           {crawlResult && <div className="mt-5 space-y-3">
-<div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><Badge className="border-0 bg-teal-100/80 text-teal-800">{crawlResult.pages.length} captured</Badge><Badge className="border-0 bg-cyan-100/80 text-cyan-800">{crawlResult.staged?.length ?? 0} staged</Badge><Badge className={crawlResult.failed.length ? "border-0 bg-amber-100/80 text-amber-800" : "border-0 bg-slate-100/80 text-slate-600"}>{crawlResult.failed.length} crawl failed</Badge><span>{crawlResult.discoveredLinks.length} links discovered · {crawlResult.queuedButNotVisited.length} left in bound</span></div>{crawlResult.pages.length === 0 && crawlResult.failed.length > 0 ? <div className="rounded-2xl border border-amber-200/80 bg-amber-50/70 p-4 text-xs leading-5 text-amber-900"><strong>No listings were captured.</strong> Every browser request failed before a page was available to stage. Fix the Camofox/Render tab timeout or 502 first; there is no listing data for the app to convert into deals.</div> : null}{crawlResult.pages.map((page) => { const stagedPage = crawlResult.staged?.find((item) => item.url === (page.finalUrl || page.url)); const qualification = stagedPage?.qualification; return <details key={page.url} className="rounded-2xl border border-white/80 bg-white/45 p-4"><summary className="cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-2"><span className="min-w-0 truncate text-xs font-semibold text-slate-700">{page.finalUrl}</span><span className="text-[0.68rem] text-slate-400">{qualification?.status === "CANDIDATE_CREATED" ? "Sourced candidate" : qualification?.status === "REJECTED" ? "Evidence staged · missing required fields" : "Evidence captured"} · {page.discoveredLinks.length} links</span></div></summary><p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-slate-600">{page.snapshot.slice(0, 1400) || "No readable snapshot returned."}{page.truncated ? "\n\n[Snapshot truncated for safety]" : ""}</p>{qualification?.reason ? <p className="mt-3 rounded-xl bg-amber-50/80 p-3 text-[0.68rem] leading-4 text-amber-800">Not converted to a sourced candidate yet: {qualification.reason}</p> : null}</details>; })}{crawlResult.failed.map((failure) => <div key={failure.url} className="rounded-2xl border border-rose-100/80 bg-rose-50/45 p-3 text-xs"><p className="font-semibold text-rose-800">{failure.url}</p><p className="mt-1 text-rose-700">{failure.error}</p></div>)}{crawlResult.stagingFailed?.map((failure) => <div key={`stage-${failure.url}`} className="rounded-2xl border border-amber-100/80 bg-amber-50/45 p-3 text-xs"><p className="font-semibold text-amber-800">Evidence not saved: {failure.url}</p><p className="mt-1 text-amber-700">{failure.error}</p></div>)}</div>}
+<div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><Badge className="border-0 bg-teal-100/80 text-teal-800">{crawlResult.pages.length} captured</Badge><Badge className="border-0 bg-cyan-100/80 text-cyan-800">{crawlResult.staged?.length ?? 0} staged</Badge><Badge className={crawlResult.failed.length ? "border-0 bg-amber-100/80 text-amber-800" : "border-0 bg-slate-100/80 text-slate-600"}>{crawlResult.failed.length} crawl failed</Badge><Badge className="border-0 bg-white/75 text-slate-600">via {crawlResult.provider ?? "camofox"}</Badge><span>{crawlResult.discoveredLinks.length} links discovered · {crawlResult.queuedButNotVisited.length} left in bound</span></div>{crawlResult.pages.length === 0 && crawlResult.failed.length > 0 ? <div className="rounded-2xl border border-amber-200/80 bg-amber-50/70 p-4 text-xs leading-5 text-amber-900"><strong>No listings were captured.</strong> Both public crawlers returned no readable pages. Check the failed entries below and confirm the source permits automated access; there is no listing data for the app to convert into deals.</div> : null}{crawlResult.pages.map((page) => { const stagedPage = crawlResult.staged?.find((item) => item.url === (page.finalUrl || page.url)); const qualification = stagedPage?.qualification; return <details key={page.url} className="rounded-2xl border border-white/80 bg-white/45 p-4"><summary className="cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-2"><span className="min-w-0 truncate text-xs font-semibold text-slate-700">{page.finalUrl}</span><span className="text-[0.68rem] text-slate-400">{qualification?.status === "CANDIDATE_CREATED" ? "Sourced candidate" : qualification?.status === "REJECTED" ? "Evidence staged · missing required fields" : "Evidence captured"} · {page.discoveredLinks.length} links</span></div></summary><p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-slate-600">{page.snapshot.slice(0, 1400) || "No readable snapshot returned."}{page.truncated ? "\n\n[Snapshot truncated for safety]" : ""}</p>{qualification?.reason ? <p className="mt-3 rounded-xl bg-amber-50/80 p-3 text-[0.68rem] leading-4 text-amber-800">Not converted to a sourced candidate yet: {qualification.reason}</p> : null}</details>; })}{crawlResult.failed.map((failure) => <div key={failure.url} className="rounded-2xl border border-rose-100/80 bg-rose-50/45 p-3 text-xs"><p className="font-semibold text-rose-800">{failure.url}</p><p className="mt-1 text-rose-700">{failure.error}</p></div>)}{crawlResult.stagingFailed?.map((failure) => <div key={`stage-${failure.url}`} className="rounded-2xl border border-amber-100/80 bg-amber-50/45 p-3 text-xs"><p className="font-semibold text-amber-800">Evidence not saved: {failure.url}</p><p className="mt-1 text-amber-700">{failure.error}</p></div>)}</div>}
         </section>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">

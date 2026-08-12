@@ -1484,7 +1484,12 @@ async function callCourtModel(prompt: string, maxTokens: number) {
     }),
     signal: AbortSignal.timeout(30000),
   });
-  if (!response.ok) return { ok: false as const, error: "AI consultant request failed" };
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      error: `AI consultant request failed (HTTP ${response.status})`,
+    };
+  }
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
   const content = payload.choices?.[0]?.message?.content?.trim();
   if (!content) return { ok: false as const, error: "AI consultant returned no content" };

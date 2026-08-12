@@ -19,6 +19,7 @@ import Dashboard from "./pages/Dashboard";
 import BuyerIntake from "./pages/BuyerIntake";
 import Operations from "./pages/Operations";
 import Toolkit from "./pages/Toolkit";
+import LocalAgents from "./pages/LocalAgents";
 import NotFound from "./pages/NotFound";
 
 const convex = new ConvexReactClient(CONVEX_URL);
@@ -84,6 +85,14 @@ createRoot(document.getElementById("root")!).render(
               element={
                 <RequireAuth>
                   <Toolkit />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/local-agents"
+              element={
+                <RequireAuth>
+                  <LocalAgents />
                 </RequireAuth>
               }
             />

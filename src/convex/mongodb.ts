@@ -1480,8 +1480,8 @@ function parseCourtContent(content: unknown, provider: "OLLAMA" | "SAMBANOVA", m
 
   const trimmed = content.trim();
   const candidates = [
-    trimmed.replace(/^```(?:json)?\\s*/i, "").replace(/\\s*```$/, "").trim(),
-    trimmed.match(/\\{[\\s\\S]*\\}/)?.[0],
+    trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim(),
+    trimmed.match(/\{[\s\S]*\}/)?.[0],
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   for (const candidate of candidates) {

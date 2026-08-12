@@ -48,3 +48,4 @@ Agent skills integrated into this project (standard Agent Skills format: `SKILL.
 - The `minimalist-entrepreneur/` pack is guidance for product and business decisions; it does not replace owner authorization, evidence validation, or fabricated-data safeguards.
 - The `prompt-master/` pack is used only for explicit prompt-engineering requests; it does not override project safety rules or authorize external actions.
 - Anything that runs against live data (scraping, exporting, dialing) goes through the same owner-gate + fabricated-row guards as the rest of the app.
+- Lead-finding starts from a complete website domain and crawls relevant reachable listing pages in reviewed batches; it does not treat a single listing URL as a site-wide search. Anti-bot, CAPTCHA, robots, login, paywall, and rate-limit controls are respected. Use official APIs, feeds, sitemaps, exports, or maintained compliant connectors before buyer-first fallback; never bypass access controls.

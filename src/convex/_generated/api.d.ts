@@ -19,6 +19,7 @@ import type * as leads from "../leads.js";
 import type * as mongodb from "../mongodb.js";
 import type * as ollama from "../ollama.js";
 import type * as owner from "../owner.js";
+import type * as scrapegraph from "../scrapegraph.js";
 import type * as search from "../search.js";
 import type * as settings from "../settings.js";
 import type * as underwriting from "../underwriting.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   mongodb: typeof mongodb;
   ollama: typeof ollama;
   owner: typeof owner;
+  scrapegraph: typeof scrapegraph;
   search: typeof search;
   settings: typeof settings;
   underwriting: typeof underwriting;

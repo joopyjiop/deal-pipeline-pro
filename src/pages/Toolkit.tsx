@@ -80,6 +80,16 @@ type ScrapeResult = {
   piiCreated: boolean;
 };
 
+type SgResult = {
+  stagedId: string;
+  provider: "scrapegraph";
+  url: string;
+  json: Record<string, unknown> | null;
+  usage?: { promptTokens: number; completionTokens: number };
+  excerpt: string;
+  piiCreated: boolean;
+};
+
 type CrawlResult = {
   provider?: "camofox" | "firecrawl";
   requested: string[];
@@ -237,6 +247,7 @@ export default function Toolkit() {
   const runBuyerMatchesAction = useAction(api.mongodb.runBuyerMatches);
   const listPipelineBriefAction = useAction(api.mongodb.listPipelineBrief);
   const queueOffMarket = useAction(api.mongodb.queueOffMarketSources);
+  const scrapegraphExtractAction = useAction(api.mongodb.scrapegraphExtractSource);
   const listLeadsAction = useAction(api.mongodb.listLeads);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
@@ -261,6 +272,9 @@ export default function Toolkit() {
   const [copiedMcpField, setCopiedMcpField] = useState<string | null>(null);
   const [queueUrl, setQueueUrl] = useState("");
   const [scrapeForm, setScrapeForm] = useState({ url: "", sourceType: "SHERIFF_SALE" as (typeof sourceTypes)[number][0] });
+  const [sgForm, setSgForm] = useState({ url: "", sourceType: "SHERIFF_SALE" as (typeof sourceTypes)[number][0], prompt: "" });
+  const [sgRunning, setSgRunning] = useState(false);
+  const [sgResult, setSgResult] = useState<SgResult | null>(null);
   const [estimateForm, setEstimateForm] = useState({
     squareFeet: "1500",
     yearBuilt: "",
@@ -598,6 +612,25 @@ export default function Toolkit() {
     }
   };
 
+  const runScrapegraphExtract = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSgRunning(true);
+    setSgResult(null);
+    try {
+      const result = await scrapegraphExtractAction({
+        url: sgForm.url,
+        sourceType: sgForm.sourceType,
+        prompt: sgForm.prompt,
+      }) as SgResult;
+      setSgResult(result);
+      toast.success("Facts extracted and staged for owner review.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not run the extraction.");
+    } finally {
+      setSgRunning(false);
+    }
+  };
+
   const loadTeamLeads = async () => {
     setLoadingLeads(true);
     try {
@@ -769,6 +802,23 @@ export default function Toolkit() {
           {teamReadiness && <div className={`mt-4 rounded-2xl border p-4 ${teamReadiness.ready ? "border-teal-100/80 bg-teal-50/45" : "border-amber-200/80 bg-amber-50/55"}`}><div><p className="text-xs font-semibold text-slate-700">{teamReadiness.ready ? "Readiness gate passed" : "Readiness gate: not ready"}</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">{teamReadiness.ready ? "Every blocking category is covered across the team. The owner may still reject the deal after review." : `${teamReadiness.gaps.length} blocking data gap${teamReadiness.gaps.length === 1 ? "" : "s"} must be resolved before this deal can surface as ready.`}</p></div>{teamReadiness.gaps.length > 0 && <div className="mt-3 grid gap-2 sm:grid-cols-2">{teamReadiness.gaps.map((gap) => <div key={`${gap.category}-${gap.detail}`} className="rounded-xl border border-amber-200/70 bg-white/60 p-3"><p className="text-xs font-semibold text-amber-800">{pretty(gap.category)}</p><p className="mt-1 text-[0.68rem] leading-4 text-slate-600">{gap.detail}</p></div>)}</div>}</div>}
           {teamReports && <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{teamReports.map((report) => <div key={report.agent} className={`rounded-2xl border p-3 ${report.status === "COMPLETED" ? "border-teal-100/80 bg-white/50" : "border-amber-200/80 bg-amber-50/45"}`}><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-800">{pretty(report.agent)}</p><Badge className={report.status === "COMPLETED" ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-amber-100/80 text-amber-800"}>{report.status === "COMPLETED" ? "OK" : "Blocked"}</Badge></div><p className="mt-2 text-[0.68rem] leading-4 text-slate-600">{report.summary}</p>{report.findings.length > 0 && <ul className="mt-2 space-y-1 text-[0.65rem] leading-4 text-slate-500">{report.findings.map((finding) => <li key={finding}>· {finding}</li>)}</ul>}</div>)}</div>}
           {teamMatches && <div className="mt-4 rounded-2xl border border-indigo-100/80 bg-indigo-50/40 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">Buyer matches</p><p className="mt-1 text-xs text-slate-500">Ranked recommendations against approved buyers. Save the ones you approve in Operations.</p></div><Badge className="border-0 bg-indigo-100/80 text-indigo-800">{teamMatches.length} match{teamMatches.length === 1 ? "" : "es"}</Badge></div>{teamMatches.length === 0 ? <p className="mt-3 text-xs text-slate-500">No approved buyer cleared the 55-point minimum for this lead.</p> : <div className="mt-3 grid gap-2">{teamMatches.map((match) => <div key={match.buyerId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/80 bg-white/60 p-3"><div className="min-w-0"><div className="flex items-center gap-2"><p className="text-xs font-semibold text-slate-800">{match.buyerId}</p><Badge className={match.confidence === "HIGH" ? "border-0 bg-teal-100/80 text-teal-800" : match.confidence === "MEDIUM" ? "border-0 bg-sky-100/80 text-sky-800" : "border-0 bg-slate-100/80 text-slate-600"}>{match.confidence}</Badge></div><p className="mt-1 text-[0.68rem] leading-4 text-slate-500">{match.summary}</p></div><p className="shrink-0 text-right"><span className="text-lg font-semibold text-indigo-800">{match.matchScore}</span><span className="block text-[0.6rem] text-slate-400">/100</span></p></div>)}</div>}</div>}
+        </section>
+
+        <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100/80 text-emerald-700"><Sparkles className="size-5" /></div><div><p className="eyebrow">ScrapeGraphAI extraction</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Extract structured facts from a public source</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Ask ScrapeGraphAI's extract endpoint for property facts (address, sale date, case/parcel numbers, lien details) from a public probate, tax-sale, or auction page. The result is staged as bounded evidence for the same owner review — nothing is invented and nothing self-approves. Requires the SGAI_API_KEY on the Convex deployment.</p></div></div>
+            <Badge className={sgResult ? "border-0 bg-emerald-100/80 text-emerald-800" : "border-0 bg-slate-100/80 text-slate-600"}>{sgRunning ? "Extracting…" : sgResult ? "Staged for review" : "Not run"}</Badge>
+          </div>
+          <form onSubmit={runScrapegraphExtract} className="mt-4 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,2fr)_auto]">
+            <Input required type="url" value={sgForm.url} onChange={(event) => setSgForm((current) => ({ ...current, url: event.target.value }))} placeholder="Public source URL (probate, tax sale, auction)" className="h-10 rounded-xl border-white/85 bg-white/70 text-xs" />
+            <select value={sgForm.sourceType} onChange={(event) => setSgForm((current) => ({ ...current, sourceType: event.target.value as typeof current.sourceType }))} className="h-10 rounded-xl border border-white/85 bg-white/70 px-3 text-xs text-slate-700 outline-none">{sourceTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+            <Input required minLength={10} maxLength={2000} value={sgForm.prompt} onChange={(event) => setSgForm((current) => ({ ...current, prompt: event.target.value }))} placeholder="Prompt: extract address, sale date, case number, and lien details" className="h-10 rounded-xl border-white/85 bg-white/70 text-xs" />
+            <Button type="submit" disabled={sgRunning} className="h-10 gap-2 rounded-xl bg-emerald-700 text-xs hover:bg-emerald-800">{sgRunning ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {sgRunning ? "Extracting…" : "Extract & stage"}</Button>
+          </form>
+          {sgResult && <div className="mt-4 rounded-2xl border border-emerald-100/80 bg-emerald-50/45 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">Extraction staged</p><p className="mt-1 text-[0.68rem] leading-4 text-slate-500">Review it in the staging queue (qualify / consultant court). Staged ID: <span className="font-mono text-slate-700">{sgResult.stagedId}</span></p></div><Badge className="border-0 bg-emerald-100/80 text-emerald-800">{sgResult.usage ? `${sgResult.usage.promptTokens + sgResult.usage.completionTokens} tokens` : "No usage data"}</Badge></div>
+            {sgResult.json && <pre className="mt-3 max-h-56 overflow-auto rounded-xl border border-white/80 bg-white/60 p-3 text-[0.65rem] leading-4 text-slate-600">{JSON.stringify(sgResult.json, null, 2)}</pre>}
+          </div>}
         </section>
 
         <section className="mt-5 grid gap-3 md:grid-cols-3">

@@ -5,6 +5,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, ActionCtx, internalAction } from "./_generated/server";
 import { rankLeads } from "./search";
+import { scrapegraphExtract } from "./scrapegraph";
 import type { SearchableLead } from "./search";
 import { median, rentalUnderwriting, repairEstimate } from "./underwriting";
 import type { RentalUnderwritingInput, RentalUnderwritingResult } from "./underwriting";
@@ -1312,8 +1313,106 @@ export const getAiToolManifest = action({
           permission: "owner-service",
           input: { limit: "optional number" },
         },
+        {
+          name: "scrapegraph_extract",
+          enabled: aiEnabled && scraperEnabled,
+          description: "Extract structured property facts from a public source URL with ScrapeGraphAI and stage them as bounded evidence for owner review. Never creates or invents PII and never approves a lead.",
+          permission: "owner-service",
+          input: { url: "string (public http or https)", sourceType: "source type", prompt: "string (10-2000 chars)", schema: "optional JSON-Schema object" },
+        },
       ],
     };
+  },
+});
+
+// ScrapeGraphAI extraction: a second, AI-extraction path into the same
+// owner-review staging queue. The extracted JSON is bounded evidence only — it
+// never creates PII and never self-qualifies (qualifyStagedSourceImpl still
+// requires explicit address, county, reference, and date on the page text).
+async function scrapegraphExtractImpl(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  args: { url: string; sourceType: string; prompt: string; schema?: Record<string, unknown> },
+) {
+  const parsedUrl = assertPublicHttpUrl(args.url.trim());
+  assertAuctionComSourceUrl(parsedUrl, args.sourceType);
+  if (args.sourceType === "SEED" || args.sourceType === "MANUAL") {
+    throw new Error("ScrapeGraphAI extraction requires a public, attributable source type");
+  }
+  const prompt = args.prompt.trim();
+  if (prompt.length < 10 || prompt.length > 2000) {
+    throw new Error("Extraction prompt must be between 10 and 2000 characters");
+  }
+  let schema: Record<string, unknown> | undefined;
+  if (args.schema !== undefined) {
+    if (typeof args.schema !== "object" || Array.isArray(args.schema) || args.schema === null) {
+      throw new Error("schema must be a JSON object when provided");
+    }
+    if (JSON.stringify(args.schema).length > 4000) {
+      throw new Error("schema is too large (max 4000 bytes)");
+    }
+    schema = args.schema;
+  }
+  const result = await scrapegraphExtract({ url: parsedUrl.toString(), prompt, mode: "normal", schema });
+  const jsonText = result.json ? JSON.stringify(result.json) : "";
+  const rawText = result.raw ?? "";
+  const excerpt = (jsonText || rawText).slice(0, 8000);
+  const fetchedAt = new Date().toISOString();
+  const staged = await database.collection(IMPORT_STAGING).insertOne({
+    sourceType: args.sourceType,
+    rawJson: {
+      url: parsedUrl.toString(),
+      title: parsedUrl.hostname,
+      excerpt,
+      links: [],
+      contentType: "scrapegraph-extract",
+      fetchedAt,
+      provider: "scrapegraph",
+      extraction: { json: result.json, raw: rawText.slice(0, 8000), usage: result.usage, prompt },
+    },
+    status: "NEW",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  return {
+    stagedId: String(staged.insertedId),
+    provider: "scrapegraph" as const,
+    url: parsedUrl.toString(),
+    json: result.json,
+    usage: result.usage,
+    excerpt: excerpt.slice(0, 2000),
+    piiCreated: false,
+  };
+}
+
+export const scrapegraphExtractSource = action({
+  args: {
+    url: v.string(),
+    sourceType: sourceTypeValidator,
+    prompt: v.string(),
+    schema: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
+    return scrapegraphExtractImpl(database, { url: args.url, sourceType: args.sourceType, prompt: args.prompt, schema: args.schema as Record<string, unknown> | undefined });
+  },
+});
+
+export const mcpScrapegraphExtract = internalAction({
+  args: {
+    url: v.string(),
+    sourceType: sourceTypeValidator,
+    prompt: v.string(),
+    schema: v.optional(v.any()),
+  },
+  handler: async (_, args) => {
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
+    return scrapegraphExtractImpl(database, { url: args.url, sourceType: args.sourceType, prompt: args.prompt, schema: args.schema as Record<string, unknown> | undefined });
   },
 });
 

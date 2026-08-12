@@ -243,6 +243,7 @@ function mcpAuthorized(request: Request) {
 function mcpTools() {
   return [
     { name: "scrape_source", description: "Fetch one public source URL, return bounded evidence, and stage it for owner review. Never invents or creates PII.", inputSchema: { type: "object", properties: { url: { type: "string", description: "Public http(s) source URL" }, sourceType: { type: "string", enum: [...mcpSourceTypes] } }, required: ["url", "sourceType"], additionalProperties: false } },
+    { name: "scrapegraph_extract", description: "Extract structured property facts from a public source URL with ScrapeGraphAI and stage them as bounded evidence for owner review. Never creates or invents PII and never approves a lead.", inputSchema: { type: "object", properties: { url: { type: "string", description: "Public http(s) source URL" }, sourceType: { type: "string", enum: [...mcpSourceTypes] }, prompt: { type: "string", description: "What to extract (10-2000 characters)" }, schema: { type: "object", description: "Optional JSON-Schema object constraining the extraction" } }, required: ["url", "sourceType", "prompt"], additionalProperties: false } },
     { name: "queue_source", description: "Send a public source URL into the same managed automation queue used by the website and n8n. It creates only a pending source task; it never approves a lead.", inputSchema: { type: "object", properties: { url: { type: "string", description: "Public http(s) source URL" }, sourceType: { type: "string", enum: [...mcpSourceTypes] }, idempotencyKey: { type: "string", description: "Optional stable key to make retries safe" } }, required: ["url", "sourceType"], additionalProperties: false } },
     { name: "list_pipeline", description: "Read non-fabricated sourced and approved leads from the website pipeline, including evidence links, distress score, verification, underwriting, and estimated profit.", inputSchema: { type: "object", properties: { pipelineStatus: { type: "string", enum: ["SOURCED", "CRITIQUED", "VERIFIED", "APPROVED", "REJECTED"] }, minDistressScore: { type: "number", minimum: 0, maximum: 100 }, limit: { type: "number", minimum: 1, maximum: 50 } }, additionalProperties: false } },
     { name: "list_staged_sources", description: "Read bounded source evidence and consultant-court results from the website staging queue so the agent can continue a review without direct MongoDB access.", inputSchema: { type: "object", properties: { status: { type: "string", enum: ["NEW", "DUPLICATE", "REJECTED"] }, limit: { type: "number", minimum: 1, maximum: 50 } }, additionalProperties: false } },
@@ -272,6 +273,13 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
   if (name === "scrape_source") {
     if (typeof rawArguments.url !== "string" || !isMcpSourceType(rawArguments.sourceType)) throw new Error("scrape_source requires a public url and supported sourceType");
     return ctx.runAction(internal.mongodb.mcpScrapeSource, { url: rawArguments.url, sourceType: rawArguments.sourceType });
+  }
+  if (name === "scrapegraph_extract") {
+    if (typeof rawArguments.url !== "string" || !isMcpSourceType(rawArguments.sourceType)) throw new Error("scrapegraph_extract requires a public url and supported sourceType");
+    if (typeof rawArguments.prompt !== "string" || !rawArguments.prompt.trim()) throw new Error("scrapegraph_extract requires a prompt");
+    const schema = isRecord(rawArguments.schema) ? rawArguments.schema : undefined;
+    if (rawArguments.schema !== undefined && !schema) throw new Error("schema must be an object when provided");
+    return ctx.runAction(internal.mongodb.mcpScrapegraphExtract, { url: rawArguments.url, sourceType: rawArguments.sourceType, prompt: rawArguments.prompt, schema: schema as Record<string, unknown> | undefined });
   }
   if (name === "queue_source") {
     if (typeof rawArguments.url !== "string" || !isMcpSourceType(rawArguments.sourceType)) throw new Error("queue_source requires a public url and supported sourceType");

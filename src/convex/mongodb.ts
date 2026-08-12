@@ -291,6 +291,34 @@ const importStagingValidator = v.object({
   rejectReason: v.optional(v.string()),
 });
 
+// Due-diligence gate: before a lead-linked ARV/profit estimate is computed, the
+// owner must gather evidence for four categories (title/liens, sale history +
+// comparables, condition, occupancy). Missing categories are recorded explicitly
+// and the estimate is blocked rather than computed blindly.
+const dueDiligenceCategoryValidator = v.union(
+  v.literal("TITLE_AND_LIENS"),
+  v.literal("SALE_HISTORY"),
+  v.literal("CONDITION"),
+  v.literal("OCCUPANCY"),
+);
+
+const dueDiligenceEntryValidator = v.object({
+  status: v.union(v.literal("UNCHECKED"), v.literal("FOUND"), v.literal("MISSING")),
+  sourceUrl: v.optional(v.string()),
+  sourceDate: v.optional(v.string()),
+  summary: v.optional(v.string()),
+  data: v.optional(v.any()),
+  checkedAt: v.optional(v.number()),
+});
+
+const dueDiligenceValidator = v.object({
+  titleAndLiens: dueDiligenceEntryValidator,
+  saleHistory: dueDiligenceEntryValidator,
+  condition: dueDiligenceEntryValidator,
+  occupancy: dueDiligenceEntryValidator,
+  lastAssessedAt: v.optional(v.number()),
+});
+
 function uriHasCredentials(uri: string) {
   // A usable driver URI embeds userinfo (`user:pass@host`). The Atlas SQL
   // endpoint (no credentials) looks similar but contains no `@` and cannot be
@@ -637,6 +665,121 @@ function validateApprovedLead(lead: {
   ) {
     throw new Error("Every distress signal needs verified, dated source evidence");
   }
+}
+
+type DueDiligenceCategory = "TITLE_AND_LIENS" | "SALE_HISTORY" | "CONDITION" | "OCCUPANCY";
+type DueDiligenceEntry = {
+  status: "UNCHECKED" | "FOUND" | "MISSING";
+  sourceUrl?: string;
+  sourceDate?: string;
+  summary?: string;
+  data?: unknown;
+  checkedAt?: number;
+};
+type DueDiligenceRecord = {
+  titleAndLiens: DueDiligenceEntry;
+  saleHistory: DueDiligenceEntry;
+  condition: DueDiligenceEntry;
+  occupancy: DueDiligenceEntry;
+  lastAssessedAt?: number;
+};
+
+const DUE_DILIGENCE_KEYS = {
+  TITLE_AND_LIENS: "titleAndLiens",
+  SALE_HISTORY: "saleHistory",
+  CONDITION: "condition",
+  OCCUPANCY: "occupancy",
+} as const;
+
+const DUE_DILIGENCE_CATEGORIES: Array<{ key: keyof typeof DUE_DILIGENCE_KEYS; label: string }> = [
+  { key: "TITLE_AND_LIENS", label: "Title status & liens" },
+  { key: "SALE_HISTORY", label: "Sale history & comparables" },
+  { key: "CONDITION", label: "Property condition" },
+  { key: "OCCUPANCY", label: "Occupancy status" },
+];
+
+function emptyDueDiligenceEntry(): DueDiligenceEntry {
+  return { status: "UNCHECKED" };
+}
+
+function emptyDueDiligence(): DueDiligenceRecord {
+  return {
+    titleAndLiens: emptyDueDiligenceEntry(),
+    saleHistory: emptyDueDiligenceEntry(),
+    condition: emptyDueDiligenceEntry(),
+    occupancy: emptyDueDiligenceEntry(),
+  };
+}
+
+function dueDiligenceSummary(record: DueDiligenceRecord | undefined) {
+  const missing: string[] = [];
+  const found: string[] = [];
+  for (const category of DUE_DILIGENCE_CATEGORIES) {
+    const entry = record?.[DUE_DILIGENCE_KEYS[category.key]] as DueDiligenceEntry | undefined;
+    if (entry?.status === "FOUND") found.push(category.label);
+    else missing.push(category.label);
+  }
+  return { found, missing, complete: missing.length === 0 };
+}
+
+// Honest automated assessment: derive FOUND/MISSING flags only from evidence the
+// lead already carries (its source packet). It never claims to have browsed the
+// county assessor, Zillow, Redfin, or Realtor.com. Absent evidence is recorded
+// as MISSING with the exact source the owner should check.
+function assessDueDiligenceRecord(input: {
+  sourceType: string;
+  sourceUrl: string;
+  sourceRef?: string;
+  evidenceText?: string;
+}): DueDiligenceRecord {
+  const text = (input.evidenceText ?? "").toLowerCase();
+  const sourceDate = new Date().toISOString().slice(0, 10);
+  const checkedAt = Date.now();
+  const evidenceEntry = (summary: string): DueDiligenceEntry => ({
+    status: "FOUND",
+    sourceUrl: input.sourceUrl,
+    sourceDate,
+    summary,
+    checkedAt,
+  });
+  const missingEntry = (summary: string): DueDiligenceEntry => ({
+    status: "MISSING",
+    summary,
+    checkedAt,
+  });
+
+  const saleSource = input.sourceType === "AUCTION_COM" || input.sourceType === "SHERIFF_SALE" || input.sourceType === "TAX_SALE";
+  const titleEvidence =
+    input.sourceType === "SHERIFF_SALE" || input.sourceType === "TAX_SALE"
+      ? true
+      : /\b(tax|lien|judgment|foreclos|sheriff|deed|title|mortgage|default|delinquent)\b/.test(text);
+  const saleEvidence = /\$\s?\d|(?:opening bid|list price|sale price|market value|estimated value|sold for|comparable|recent sale|last sold)\b/.test(text);
+  const compCount = (text.match(/\$\s?\d{3,}/g) ?? []).length;
+  const conditionEvidence = /\b(condition|bedroom|bathroom|square feet|sq ft|renovat|repair|damage|inspection|year built|photos?|exterior|interior)\b/.test(text);
+  const occupancyEvidence = /\b(vacant|occupied|tenant|renter|owner[- ]occupied|personal use|foreclosure status)\b/.test(text);
+
+  const titleAndLiens = titleEvidence
+    ? evidenceEntry("Source record documents the property's foreclosure/tax/lien status. Owner should confirm current ownership and recorded liens on the county assessor and recorder or clerk's website.")
+    : missingEntry("No title, tax, or lien evidence in the source packet. Check the county assessor and county recorder/clerk website for current ownership, tax status, and recorded liens.");
+  const saleHistory = saleEvidence
+    ? evidenceEntry(`Price history or listing value found in the source packet (${compCount} price mention${compCount === 1 ? "" : "s"}). Owner should confirm 3-5 recent comparable sales nearby on Zillow, Redfin, or Realtor.com before using the ARV.`)
+    : saleSource
+      ? evidenceEntry("Auction/sale source carries an opening bid or sale record; owner should still confirm 3-5 comparable recent sales nearby before relying on ARV.")
+      : missingEntry("No sale price or comparable evidence in the source packet. Pull the property's past sale prices and 3-5 recent comparable sales nearby from Zillow, Redfin, or Realtor.com.");
+  const condition = conditionEvidence
+    ? evidenceEntry("Condition evidence (description, size, photos, or age) appears in the source packet. Owner should confirm from listing photos or an inspection report.")
+    : missingEntry("No condition evidence in the source packet. Check listing photos, descriptions, or inspection/condition reports; if none exist, keep condition flagged as unknown.");
+  const occupancy = occupancyEvidence
+    ? evidenceEntry("Occupancy evidence appears in the source packet. Owner should confirm whether the property is vacant, owner-occupied, or tenant-occupied.")
+    : missingEntry("No occupancy evidence in the source packet. Check the listing description or public records for vacant, owner-occupied, or tenant-occupied status.");
+
+  return {
+    titleAndLiens,
+    saleHistory,
+    condition,
+    occupancy,
+    lastAssessedAt: checkedAt,
+  };
 }
 
 export const healthCheck = action({
@@ -992,9 +1135,17 @@ async function qualifyStagedSourceImpl(database: Awaited<ReturnType<typeof getDa
   }
 
   const now = Date.now();
+  const stagedRaw = staging.rawJson && typeof staging.rawJson === "object" ? staging.rawJson as { excerpt?: unknown } : {};
+  const stagedExcerpt = typeof stagedRaw.excerpt === "string" ? stagedRaw.excerpt : undefined;
   const lead = {
     ...candidate,
     ...(staging.aiCourtVerdict ? { aiCourtVerdict: staging.aiCourtVerdict } : {}),
+    dueDiligence: assessDueDiligenceRecord({
+      sourceType: candidate.sourceType,
+      sourceUrl: candidate.sourceUrl,
+      sourceRef: candidate.sourceRef,
+      evidenceText: stagedExcerpt,
+    }),
     verificationStatus: "UNVERIFIED",
     pipelineStatus: "SOURCED",
     absenteeOwner: false,
@@ -1037,6 +1188,54 @@ export const runConsultantCourt = action({
       await database.collection(LEADS).updateOne({ _id: staging.candidateLeadId }, { $set: { aiCourtVerdict: verdict, updatedAt: Date.now() } });
     }
     return verdict;
+  },
+});
+
+export const updateDueDiligence = action({
+  args: {
+    id: v.string(),
+    category: dueDiligenceCategoryValidator,
+    patch: dueDiligenceEntryValidator,
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const lead = await database.collection(LEADS).findOne({ _id: objectId(args.id), fabricated: { $ne: true } });
+    if (!lead) throw new Error("Lead not found");
+    if (args.patch.status === "FOUND" && !args.patch.sourceUrl?.trim()) {
+      throw new Error("A found due-diligence category requires a source URL");
+    }
+    const key = DUE_DILIGENCE_KEYS[args.category];
+    const current = lead.dueDiligence && typeof lead.dueDiligence === "object"
+      ? lead.dueDiligence as DueDiligenceRecord
+      : emptyDueDiligence();
+    const entry: DueDiligenceEntry = {
+      ...(current[key] ?? {}),
+      ...withoutUndefined({ ...args.patch, checkedAt: Date.now() }),
+    };
+    const next: DueDiligenceRecord = { ...current, [key]: entry, lastAssessedAt: Date.now() };
+    await database.collection(LEADS).updateOne({ _id: lead._id }, { $set: { dueDiligence: next, updatedAt: Date.now() } });
+    return { id: args.id, category: args.category, dueDiligence: next };
+  },
+});
+
+export const assessDueDiligence = action({
+  args: { id: v.string() },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const lead = await database.collection(LEADS).findOne({ _id: objectId(args.id), fabricated: { $ne: true } });
+    if (!lead) throw new Error("Lead not found");
+    const staging = lead.stagingId ? await database.collection(IMPORT_STAGING).findOne({ _id: objectId(String(lead.stagingId)) }) : null;
+    const stagedRaw = staging?.rawJson && typeof staging.rawJson === "object" ? staging.rawJson as { excerpt?: unknown } : {};
+    const record = assessDueDiligenceRecord({
+      sourceType: String(lead.sourceType ?? ""),
+      sourceUrl: String(lead.sourceUrl ?? ""),
+      sourceRef: typeof lead.sourceRef === "string" ? lead.sourceRef : undefined,
+      evidenceText: typeof stagedRaw.excerpt === "string" ? stagedRaw.excerpt : undefined,
+    });
+    await database.collection(LEADS).updateOne({ _id: lead._id }, { $set: { dueDiligence: record, updatedAt: Date.now() } });
+    return { id: args.id, dueDiligence: record };
   },
 });
 
@@ -1356,7 +1555,7 @@ export const mcpEstimateDeal = internalAction({
     await requireMcpAiAccess(database);
     const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
     if (access?.estimatorEnabled === false) throw new Error("The estimator tool is disabled in Tool access settings");
-    return calculateDealEstimate(args);
+    return estimateWithDueDiligence(args);
   },
 });
 
@@ -1962,14 +2161,53 @@ export const runAutomationCycle = internalAction({
   handler: async () => runAutomationCycleImpl(),
 });
 
+type EstimateOutcome =
+  | {
+      estimateStatus: "BLOCKED_DUE_DILIGENCE";
+      dueDiligenceComplete: false;
+      missingDueDiligence: string[];
+      dueDiligence: ReturnType<typeof dueDiligenceSummary>;
+    }
+  | (ReturnType<typeof calculateDealEstimate> & {
+      dueDiligenceComplete: boolean;
+      dueDiligence: ReturnType<typeof dueDiligenceSummary> | null;
+    });
+
+// ARV/profit estimates for a lead are gated on the four due-diligence
+// categories being verified (title/liens, sale history + comps, condition,
+// occupancy). A missing category blocks the estimate and is reported explicitly
+// instead of being estimated blindly. Standalone calculator use (no leadId) is
+// not gated.
+async function estimateWithDueDiligence(args: EstimateInput): Promise<EstimateOutcome> {
+  if (!args.leadId) {
+    return { ...calculateDealEstimate(args), dueDiligenceComplete: false, dueDiligence: null };
+  }
+  const database = await getDatabase();
+  const lead = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+  if (!lead) throw new Error("Lead not found");
+  const record = lead.dueDiligence && typeof lead.dueDiligence === "object"
+    ? lead.dueDiligence as DueDiligenceRecord
+    : emptyDueDiligence();
+  const summary = dueDiligenceSummary(record);
+  if (!summary.complete) {
+    return {
+      estimateStatus: "BLOCKED_DUE_DILIGENCE",
+      dueDiligenceComplete: false,
+      missingDueDiligence: summary.missing,
+      dueDiligence: summary,
+    };
+  }
+  return { ...calculateDealEstimate(args), dueDiligenceComplete: true, dueDiligence: summary };
+}
+
 export const estimateDeal = action({
   args: estimateInputValidator,
   handler: async (ctx, args) => {
     await requireOwner(ctx);
     const access = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
     if (access?.estimatorEnabled === false) throw new Error("The estimator tool is disabled in Tool access settings");
-    const result = calculateDealEstimate(args);
-    if (args.leadId) {
+    const result = await estimateWithDueDiligence(args);
+    if (args.leadId && result.estimateStatus !== "BLOCKED_DUE_DILIGENCE") {
       const database = await getDatabase();
       const lead = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
       if (!lead) throw new Error("Lead not found");

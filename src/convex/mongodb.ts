@@ -1507,17 +1507,36 @@ async function callOllamaCourtModel(prompt: string, maxTokens: number): Promise<
       model,
       stream: false,
       format: "json",
+      // GPT-OSS ignores boolean thinking flags and needs a level. Keeping it
+      // at low leaves enough generation budget for the final JSON response.
+      think: model.toLowerCase().includes("gpt-oss") ? "low" : false,
       options: { temperature: 0, num_predict: maxTokens },
       messages: [{ role: "user", content: prompt }],
     }),
     signal: AbortSignal.timeout(60000),
   });
-  const payload = await response.json().catch(() => ({})) as { error?: string; message?: { content?: string } };
+  const payload = await response.json().catch(() => ({})) as {
+    error?: string;
+    message?: { content?: unknown; thinking?: unknown };
+    choices?: Array<{ message?: { content?: unknown } }>;
+  };
   if (!response.ok) {
     const detail = typeof payload.error === "string" ? `: ${payload.error.slice(0, 240)}` : "";
     return { ok: false, error: `Ollama Cloud request failed (HTTP ${response.status}${detail})` };
   }
-  return parseCourtContent(payload.message?.content, "OLLAMA", model);
+
+  const messageContent = payload.message?.content;
+  const compatibleContent = payload.choices?.[0]?.message?.content;
+  const thinkingContent = payload.message?.thinking;
+  const content = typeof messageContent === "string" && messageContent.trim()
+    ? messageContent
+    : typeof compatibleContent === "string" && compatibleContent.trim()
+      ? compatibleContent
+      : typeof thinkingContent === "string" && thinkingContent.trim()
+        ? thinkingContent
+        : undefined;
+
+  return parseCourtContent(content, "OLLAMA", model);
 }
 
 async function callCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {

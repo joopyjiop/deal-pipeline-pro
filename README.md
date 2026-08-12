@@ -21,6 +21,10 @@ Use bun for the package manager.
 
 This project is set up already and running on a cloud environment, as well as a convex development in the sandbox.
 
+## Product operating plan
+
+The applied MVP and customer-validation plan lives in [`docs/minimalist-mvp-plan.md`](docs/minimalist-mvp-plan.md). It keeps the first customer outcome focused on one public source, one evidence-reviewed lead, and one approved buyer match.
+
 ## Environment Variables
 
 The project is set up with project specific CONVEX_DEPLOYMENT and VITE_CONVEX_URL environment variables on the client side.

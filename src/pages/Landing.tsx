@@ -30,6 +30,12 @@ const principles = [
   },
 ];
 
+const firstWin = [
+  { icon: FileCheck2, title: "Capture one source", description: "Start with one public auction, county, assessor, or recorder page." },
+  { icon: BadgeCheck, title: "Review one record", description: "Keep the evidence, reject gaps, and approve only what you can stand behind." },
+  { icon: ArrowRight, title: "Match one buyer", description: "Turn a verified lead into one clear, owner-reviewed buyer conversation." },
+];
+
 export default function Landing() {
   return (
     <main className="min-h-screen overflow-hidden px-5 py-5 text-foreground sm:px-8 lg:px-10">
@@ -108,6 +114,8 @@ export default function Landing() {
         </section>
 
         <section id="workflow" className="scroll-mt-10 pb-12 lg:pb-16">
+          <div className="mb-10 max-w-2xl"><p className="eyebrow">The first win</p><h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">One source. One reviewed lead. One buyer match.</h2><p className="mt-4 text-base leading-7 text-slate-600">The product starts small on purpose. Prove the evidence loop with real operators before adding more automation or broader crawling.</p></div>
+          <div className="mb-12 grid gap-4 md:grid-cols-3">{firstWin.map((step, index) => { const Icon = step.icon; return <motion.div key={step.title} initial={{ opacity: 0, y: 14 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-30px" }} transition={{ delay: index * 0.08, duration: 0.45 }} className="glass-panel rounded-3xl p-5"><div className="flex items-center gap-3"><span className="flex size-9 items-center justify-center rounded-xl bg-white/75 text-sky-700"><Icon className="size-4" /></span><span className="text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-slate-400">0{index + 1}</span></div><h3 className="mt-5 text-base font-semibold text-slate-800">{step.title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{step.description}</p></motion.div>; })}</div>
           <div className="glass-panel-strong flex flex-col gap-6 rounded-[2rem] p-7 sm:p-10 lg:flex-row lg:items-center lg:justify-between">
             <div><p className="eyebrow">Built for one wholesaler</p><h2 className="mt-3 max-w-2xl text-3xl font-semibold tracking-tight text-slate-900">Start with the records you can stand behind.</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-600">Connect your owner workspace, capture verified public-record leads, and keep the pipeline honest from day one.</p></div>
             <Link to="/auth" className="group inline-flex shrink-0 items-center justify-center gap-2 rounded-full bg-slate-800 px-5 py-3.5 text-sm font-semibold text-white shadow-lg transition-all hover:-translate-y-0.5 hover:bg-slate-900">Get started <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" /></Link>

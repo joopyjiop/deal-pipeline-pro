@@ -353,6 +353,14 @@ export default function Toolkit() {
     }
   };
 
+  const useAuctionCatalogPreset = () => {
+    setCrawlUrls("https://www.auction.com/\nhttps://www.auction.com/residential/");
+    setCrawlMaxPages("12");
+    setCrawlDiscoverLinks(true);
+    setCrawlSameOrigin(true);
+    toast.success("Auction.com public catalog preset loaded. Review the links, then start the crawl.");
+  };
+
   const handleCrawl = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const urls = Array.from(new Set(crawlUrls.split(/\r?\n|,/).map((url) => url.trim()).filter(Boolean)));
@@ -487,14 +495,15 @@ export default function Toolkit() {
             <Badge className="border-0 bg-cyan-100/80 text-cyan-800">Owner only</Badge>
           </div>
           <form onSubmit={handleCrawl} className="mt-5 grid gap-3">
-            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Starting links</span><Textarea required value={crawlUrls} onChange={(event) => setCrawlUrls(event.target.value)} placeholder={"https://county.gov/sales\nhttps://auction.example/listings"} className="min-h-28 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span className="flex flex-wrap items-center justify-between gap-2">Starting links<Button type="button" variant="outline" onClick={useAuctionCatalogPreset} className="h-7 rounded-lg border-cyan-200/80 bg-cyan-50/50 px-2.5 text-[0.68rem] text-cyan-800">Use Auction.com catalog</Button></span><Textarea required value={crawlUrls} onChange={(event) => setCrawlUrls(event.target.value)} placeholder={"https://county.gov/sales\nhttps://auction.example/listings"} className="min-h-28 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
             <div className="grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)_auto] sm:items-end">
               <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Maximum pages</span><Input required min="1" max="12" type="number" value={crawlMaxPages} onChange={(event) => setCrawlMaxPages(event.target.value)} className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
               <div className="flex flex-wrap gap-4 pb-2 text-xs text-slate-600"><label className="inline-flex items-center gap-2"><input type="checkbox" checked={crawlDiscoverLinks} onChange={(event) => setCrawlDiscoverLinks(event.target.checked)} className="size-4 accent-cyan-700" /> Follow discovered links</label><label className="inline-flex items-center gap-2"><input type="checkbox" checked={crawlSameOrigin} onChange={(event) => setCrawlSameOrigin(event.target.checked)} className="size-4 accent-cyan-700" /> Keep discovered links on seed sites</label></div>
-              <Button disabled={crawling} type="submit" className="h-10 gap-2 rounded-xl bg-cyan-700 text-xs hover:bg-cyan-800">{crawling ? <Loader2 className="size-4 animate-spin" /> : <Globe2 className="size-4" />} {crawling ? "Crawling…" : "Start crawl"}</Button>
-            </div>
+              <Button disabled={crawling} type="submit" className="h-10 gap-2 rounded-xl bg-cyan-700 text-xs hover:bg-cyan-800">{crawling ? <Loader2 className="size-4 animate-spin" /> : <Globe2 className="size-4" />} {crawling ? "Crawling…" : "Start crawl"}</Button>            </div>
+            <p className="text-[0.68rem] leading-5 text-slate-500">The Auction.com preset starts from the public catalog only. Each pass is capped at 12 pages and does not bypass login, CAPTCHA, paywalls, or access controls. Review the captured evidence before qualifying any record.</p>
           </form>
-          {crawlResult && <div className="mt-5 space-y-3"><div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><Badge className="border-0 bg-teal-100/80 text-teal-800">{crawlResult.pages.length} captured</Badge><Badge className={crawlResult.failed.length ? "border-0 bg-amber-100/80 text-amber-800" : "border-0 bg-slate-100/80 text-slate-600"}>{crawlResult.failed.length} failed</Badge><span>{crawlResult.discoveredLinks.length} links discovered · {crawlResult.queuedButNotVisited.length} left in bound</span></div>{crawlResult.pages.map((page) => <details key={page.url} className="rounded-2xl border border-white/80 bg-white/45 p-4"><summary className="cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-2"><span className="min-w-0 truncate text-xs font-semibold text-slate-700">{page.finalUrl}</span><span className="text-[0.68rem] text-slate-400">{page.discoveredLinks.length} links · {page.refsCount} refs</span></div></summary><p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-slate-600">{page.snapshot.slice(0, 1400) || "No readable snapshot returned."}{page.truncated ? "\n\n[Snapshot truncated for safety]" : ""}</p></details>)}{crawlResult.failed.map((failure) => <div key={failure.url} className="rounded-2xl border border-rose-100/80 bg-rose-50/45 p-3 text-xs"><p className="font-semibold text-rose-800">{failure.url}</p><p className="mt-1 text-rose-700">{failure.error}</p></div>)}</div>}
+          {crawlResult && <div className="mt-5 space-y-3">
+<div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><Badge className="border-0 bg-teal-100/80 text-teal-800">{crawlResult.pages.length} captured</Badge><Badge className={crawlResult.failed.length ? "border-0 bg-amber-100/80 text-amber-800" : "border-0 bg-slate-100/80 text-slate-600"}>{crawlResult.failed.length} failed</Badge><span>{crawlResult.discoveredLinks.length} links discovered · {crawlResult.queuedButNotVisited.length} left in bound</span></div>{crawlResult.pages.map((page) => <details key={page.url} className="rounded-2xl border border-white/80 bg-white/45 p-4"><summary className="cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-2"><span className="min-w-0 truncate text-xs font-semibold text-slate-700">{page.finalUrl}</span><span className="text-[0.68rem] text-slate-400">{page.discoveredLinks.length} links · {page.refsCount} refs</span></div></summary><p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-slate-600">{page.snapshot.slice(0, 1400) || "No readable snapshot returned."}{page.truncated ? "\n\n[Snapshot truncated for safety]" : ""}</p></details>)}{crawlResult.failed.map((failure) => <div key={failure.url} className="rounded-2xl border border-rose-100/80 bg-rose-50/45 p-3 text-xs"><p className="font-semibold text-rose-800">{failure.url}</p><p className="mt-1 text-rose-700">{failure.error}</p></div>)}</div>}
         </section>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">

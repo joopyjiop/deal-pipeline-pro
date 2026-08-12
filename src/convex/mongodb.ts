@@ -1638,12 +1638,25 @@ function courtList(value: unknown, maxItems = 8) {
 
 function courtEvidence(value: unknown, source: { url: string; excerpt: string }) {
   if (!Array.isArray(value)) return [];
+  // Scraped excerpts keep irregular whitespace (e.g. images stripped to double
+  // spaces), so match quotes on whitespace/case-normalized text. The quote must
+  // still be a real substring of the source excerpt — it is never paraphrased.
+  // The judge may emit decisiveEvidence as either objects ({ claim, quote,
+  // sourceUrl }) or bare quote strings; both are accepted and validated.
+  const normalizedExcerpt = source.excerpt.replace(/\s+/g, " ").trim().toLowerCase();
   return value.flatMap((item) => {
+    if (typeof item === "string") {
+      const quote = item.replace(/^["'`]+|["'`]+$/g, "").trim().slice(0, 600);
+      const normalizedQuote = quote.replace(/\s+/g, " ").trim().toLowerCase();
+      if (normalizedQuote.length < 6 || !normalizedExcerpt.includes(normalizedQuote)) return [];
+      return [{ claim: "Sourced statement", quote, sourceUrl: source.url }];
+    }
     if (!item || typeof item !== "object") return [];
     const record = item as Record<string, unknown>;
     const quote = typeof record.quote === "string" ? record.quote.trim().slice(0, 600) : "";
     const sourceUrl = typeof record.sourceUrl === "string" ? record.sourceUrl.trim() : "";
-    if (!quote || sourceUrl !== source.url || !source.excerpt.includes(quote)) return [];
+    const normalizedQuote = quote.replace(/\s+/g, " ").trim().toLowerCase();
+    if (!quote || sourceUrl !== source.url || normalizedQuote.length < 6 || !normalizedExcerpt.includes(normalizedQuote)) return [];
     return [{
       claim: courtString(record.claim, "Sourced statement", 300),
       quote,
@@ -1773,7 +1786,7 @@ async function runAiConsultantCourt(source: { title: string; excerpt: string; ur
   if (failed && !failed.consultant) return { status: "FAILED", reviewedAt, error: failed.error ?? "AI consultant failed" };
   const consultants: CourtConsultant[] = consultantResults.flatMap((result) => result.consultant ? [result.consultant] : []);
   const judgeInput = JSON.stringify(consultants);
-  const judge = await callCourtModel(`You are the presiding judge of an evidence-only real-estate deal review court. Reconcile three consultant reports. Return JSON only with exactly these keys: verdict (PROCEED|HOLD|PASS), confidence (LOW|MEDIUM|HIGH), score (0-100), summary, decisiveEvidence, risks, missingEvidence, judgeNotes. PROCEED means evidence supports continued owner review, HOLD means more verification is required, and PASS means the evidence is too weak or risks outweigh the opportunity. Use only exact quotes from the source excerpt for decisiveEvidence. Do not approve the lead, mark facts verified, invent PII, invent prices/comps, or give legal advice. If the consultants disagree or there is no valid exact evidence, choose HOLD.\n\n${sourcePacket}\n\nCONSULTANT REPORTS: ${judgeInput}`, 3000);
+  const judge = await callCourtModel(`You are the presiding judge of an evidence-only real-estate deal review court. Reconcile three consultant reports. Return JSON only with exactly these keys: verdict (PROCEED|HOLD|PASS), confidence (LOW|MEDIUM|HIGH), score (0-100), summary, decisiveEvidence, risks, missingEvidence, judgeNotes. PROCEED means the source carries enough concrete facts for continued owner review; HOLD means more verification is required; PASS means the evidence is too weak or risks outweigh the opportunity. A listing with a property address, an opening bid or price, a sale/auction date, and basic listing facts (size, beds/baths, occupancy or lien guidance) is sufficient for PROCEED — this is not approval. Use only exact quotes copied from the source excerpt for decisiveEvidence. Do not approve the lead, mark facts verified, invent PII, invent prices/comps, or give legal advice. If there is no valid exact evidence, choose HOLD.\n\n${sourcePacket}\n\nCONSULTANT REPORTS: ${judgeInput}`, 3000);
   if (!judge.ok) return { status: "FAILED", reviewedAt, error: judge.error, consultants };
   const judgeValue = judge.value;
   const decisiveEvidence = courtEvidence(judgeValue.decisiveEvidence, source);

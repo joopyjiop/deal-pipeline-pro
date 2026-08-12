@@ -13,7 +13,6 @@ const MATCHES = "property_matches";
 const IMPORT_STAGING = "import_staging";
 const TOOL_ACCESS = "tool_access";
 const AUTOMATION_TASKS = "automation_tasks";
-const AUTOMATION_RUNS = "automation_runs";
 
 type AutomationMode = "DETERMINISTIC" | "BOTH";
 

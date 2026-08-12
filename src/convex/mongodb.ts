@@ -1079,6 +1079,45 @@ export const rejectLead = action({
   },
 });
 
+/**
+ * Persist Camofox evidence and run the existing strict qualification checks.
+ * This can create only a SOURCED candidate; it never approves a lead.
+ */
+export const stageCamofoxEvidence = action({
+  args: {
+    url: v.string(),
+    sourceType: sourceTypeValidator,
+    title: v.optional(v.string()),
+    excerpt: v.string(),
+    links: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
+    const parsedUrl = assertPublicHttpUrl(args.url.trim());
+    assertAuctionComSourceUrl(parsedUrl, args.sourceType);
+    const fetchedAt = new Date().toISOString();
+    const staged = await database.collection(IMPORT_STAGING).insertOne({
+      sourceType: args.sourceType,
+      rawJson: {
+        url: parsedUrl.toString(),
+        title: args.title?.trim().slice(0, 300) || parsedUrl.hostname,
+        excerpt: args.excerpt.slice(0, 8000),
+        links: (args.links ?? []).slice(0, 100),
+        contentType: "camofox-accessibility-snapshot",
+        fetchedAt,
+      },
+      status: "NEW",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    const qualification = await qualifyStagedSourceImpl(database, String(staged.insertedId));
+    return { stagedId: String(staged.insertedId), url: parsedUrl.toString(), fetchedAt, qualification };
+  },
+});
+
 export const scrapeSource = action({
   args: {
     url: v.string(),

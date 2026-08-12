@@ -1477,11 +1477,25 @@ type CourtModelResult =
 
 function parseCourtContent(content: unknown, provider: "OLLAMA" | "SAMBANOVA", model: string): CourtModelResult {
   if (typeof content !== "string" || !content.trim()) return { ok: false, error: "AI consultant returned no content" };
-  try {
-    return { ok: true, value: JSON.parse(content.trim()) as Record<string, unknown>, provider, model };
-  } catch {
-    return { ok: false, error: "AI consultant returned invalid JSON" };
+
+  const trimmed = content.trim();
+  const candidates = [
+    trimmed.replace(/^```(?:json)?\\s*/i, "").replace(/\\s*```$/, "").trim(),
+    trimmed.match(/\\{[\\s\\S]*\\}/)?.[0],
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return { ok: true, value: parsed as Record<string, unknown>, provider, model };
+      }
+    } catch {
+      // Try the next safe extraction candidate before reporting a provider error.
+    }
   }
+
+  return { ok: false, error: "AI consultant returned invalid JSON" };
 }
 
 async function callOllamaCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {

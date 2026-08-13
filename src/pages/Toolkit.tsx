@@ -799,12 +799,14 @@ export default function Toolkit() {
         rental,
         compPrices,
         repairTier: teamRental.repairTier,
-      }) as { reports: AgentReport[]; readiness: ReadinessReport };
+        autoData: true,
+      }) as { reports: AgentReport[]; readiness: ReadinessReport; source?: { provider: string; compsUsed: number; rentEstimate?: number } };
       setTeamReports(result.reports);
       setTeamReadiness(result.readiness);
       const blocking = result.readiness.gaps.length;
-      if (result.readiness.ready) toast.success("Agent team complete — this deal is ready for owner review.");
-      else toast.warning(`Agent team flagged ${blocking} blocking gap${blocking === 1 ? "" : "s"} — this deal is not ready.`);
+      const sourced = result.source ? ` (${result.source.compsUsed} RentCast comps, rent $${result.source.rentEstimate ?? "—"}/mo)` : "";
+      if (result.readiness.ready) toast.success(`Agent team complete${sourced} — this deal is ready for owner review.`);
+      else toast.warning(`Agent team flagged ${blocking} blocking gap${blocking === 1 ? "" : "s"}${sourced} — this deal is not ready.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not run the agent team.");
     } finally {

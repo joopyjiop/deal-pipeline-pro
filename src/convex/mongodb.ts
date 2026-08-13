@@ -627,12 +627,73 @@ export const runAgentTeam = action({
     rental: v.optional(rentalUnderwritingInputValidator),
     compPrices: v.optional(v.array(v.number())),
     repairTier: v.optional(repairTierValidator),
+    autoData: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
-    return runAgentTeamImpl(await getDatabase(), args);
+    const database = await getDatabase();
+    let rental = args.rental;
+    let compPrices = args.compPrices;
+    let source: { provider: "rentcast"; address: string; propertyId?: string; compsUsed: number; rentEstimate?: number } | undefined;
+    // autoData: when the owner supplies no rental/comp inputs, pull real
+    // market data (SF, rent, property tax, sold comps) from RentCast so the
+    // readiness gate is evaluated on real data instead of surfacing gaps that
+    // an official source can already fill. Best-effort: any RentCast failure
+    // falls back to the explicit inputs and the gate flags what remains.
+    if (args.autoData === true && rental === undefined && (!compPrices || compPrices.length === 0)) {
+      const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+      if (document) {
+        try {
+          const built = await rentcastInputsForLead(database, document);
+          if (built) {
+            rental = built.rental;
+            compPrices = built.compPrices;
+            source = { provider: "rentcast" as const, address: built.data.address, propertyId: built.data.property?.id, compsUsed: built.compPrices.length, rentEstimate: built.data.rentEstimate?.rent };
+          }
+        } catch {
+          // RentCast unconfigured, no match, or quota exhausted: fall back to
+          // the owner's explicit inputs; the readiness gate flags the gaps.
+        }
+      }
+    }
+    const team = await runAgentTeamImpl(database, { leadId: args.leadId, rental, compPrices, repairTier: args.repairTier });
+    return source ? { ...team, source } : team;
   },
 });
+
+// Shared: builds the rental/comp inputs for a lead from its RentCast data and
+// persists the sourced attributes (square footage, year built) to the lead.
+// Returns null when no property record matches so callers decide how to react.
+async function rentcastInputsForLead(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  document: Document,
+  options?: { radius?: number; saleDateRange?: number },
+): Promise<{ data: Awaited<ReturnType<typeof rentcastFetchImpl>>; rental: RentalUnderwritingInput; compPrices: number[] } | null> {
+  const address = [document.propertyAddress, document.city, document.state, document.zip]
+    .filter((part): part is string => typeof part === "string" && Boolean(part.trim()))
+    .join(", ");
+  const data = await rentcastFetchImpl({ address, radius: options?.radius, saleDateRange: options?.saleDateRange });
+  if (!data.property) return null;
+  const purchasePrice = leadNumber(document.acquisitionPrice) ?? leadNumber(document.mao) ?? 0;
+  const squareFeet = data.property.squareFootage;
+  const rentComps = data.rentEstimate?.rent ? [data.rentEstimate.rent] : [];
+  const annualPropertyTax = data.summary.annualPropertyTax;
+  const rental = {
+    purchasePrice,
+    rentComps,
+    squareFeet,
+    annualPropertyTax,
+    loanToValuePct: 75,
+    interestRatePct: 6.5,
+    loanTermYears: 30,
+  } as RentalUnderwritingInput;
+  const compPrices = data.comps.soldPrices;
+  await database.collection(LEADS).updateOne(
+    { _id: document._id },
+    { $set: withoutUndefined({ squareFeet, yearBuilt: data.property.yearBuilt, updatedAt: Date.now() }) },
+  );
+  return { data, rental, compPrices };
+}
 
 export const getAgentTeam = action({
   args: { leadId: v.string() },

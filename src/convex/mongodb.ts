@@ -710,10 +710,40 @@ async function rentcastInputsForLead(
     loanTermYears: 30,
   } as RentalUnderwritingInput;
   const compPrices = data.comps.soldPrices;
-  await database.collection(LEADS).updateOne(
-    { _id: document._id },
-    { $set: withoutUndefined({ squareFeet, yearBuilt: data.property.yearBuilt, updatedAt: Date.now() }) },
-  );
+  // Record real sale-history evidence from the same RentCast pull that feeds
+  // the ARV/rental model, so the verification agent sees the comps the
+  // pipeline already holds instead of asking the owner to re-find them. Only
+  // fills the category when there is evidence and the owner has not already
+  // recorded county-level evidence for it; the record names the provider and
+  // retrieval date, and approval stays owner-only.
+  const currentDueDiligence: Record<string, unknown> = document.dueDiligence && typeof document.dueDiligence === "object"
+    ? document.dueDiligence as Record<string, unknown>
+    : {};
+  const currentSaleHistory: Record<string, unknown> = currentDueDiligence.saleHistory && typeof currentDueDiligence.saleHistory === "object"
+    ? currentDueDiligence.saleHistory as Record<string, unknown>
+    : {};
+  const evidenceParts: string[] = [];
+  if (compPrices.length > 0) {
+    const sorted = [...compPrices].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    evidenceParts.push(`${compPrices.length} sold comp${compPrices.length === 1 ? "" : "s"} (median $${median.toLocaleString()}) within ${data.comps.radiusMiles} mi, last ${data.comps.saleDateRangeDays} days`);
+  }
+  if (typeof data.property.lastSalePrice === "number" && data.property.lastSalePrice > 0) {
+    evidenceParts.push(`subject last sale $${data.property.lastSalePrice.toLocaleString()}${data.property.lastSaleDate ? ` on ${String(data.property.lastSaleDate).slice(0, 10)}` : ""}`);
+  }
+  if (currentSaleHistory.status !== "FOUND" && evidenceParts.length > 0) {
+    currentDueDiligence.saleHistory = {
+      status: "FOUND",
+      summary: `Sale history from RentCast property records (county-record derived): ${evidenceParts.join("; ")}. Retrieved ${new Date().toISOString().slice(0, 10)}.`,
+      sourceUrl: "https://www.rentcast.io/",
+      checkedAt: Date.now(),
+    };
+  }
+  const setFields: Record<string, unknown> = withoutUndefined({ squareFeet, yearBuilt: data.property.yearBuilt, updatedAt: Date.now() });
+  if (currentDueDiligence.saleHistory) {
+    setFields.dueDiligence = { ...currentDueDiligence };
+  }
+  await database.collection(LEADS).updateOne({ _id: document._id }, { $set: setFields });
   return { data, rental, compPrices };
 }
 
@@ -874,6 +904,9 @@ export const loadPropertyBrief = action({
         pipelineStatus: leadText(document.pipelineStatus) ?? "SOURCED",
         verificationStatus: leadText(document.verificationStatus) ?? "UNVERIFIED",
         distressScore: lead.distressScore,
+        dueDiligence: document.dueDiligence && typeof document.dueDiligence === "object"
+          ? document.dueDiligence as DueDiligenceRecord
+          : undefined,
       },
       rentcast: rentcast
         ? {

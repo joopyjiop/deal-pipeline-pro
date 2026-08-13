@@ -234,6 +234,7 @@ type PropertyBrief = {
     pipelineStatus: string;
     verificationStatus: string;
     distressScore?: number;
+    dueDiligence?: Record<string, { status?: string; sourceUrl?: string; summary?: string; checkedAt?: number }>;
   };
   rentcast: null | {
     address: string;
@@ -254,6 +255,13 @@ type PropertyBrief = {
     compPrices: number[];
   };
 };
+
+const DD_CATEGORIES = [
+  { key: "TITLE_AND_LIENS", label: "Title status & liens", hint: "Assessor/recorder: current ownership, tax status, recorded liens." },
+  { key: "SALE_HISTORY", label: "Sale history & comparables", hint: "Past sales and 3-5 nearby comps. RentCast auto-records this when comps match." },
+  { key: "CONDITION", label: "Property condition", hint: "Listing photos, inspection, or condition report; flag unknown rather than guess." },
+  { key: "OCCUPANCY", label: "Occupancy", hint: "Vacant, owner-occupied, or tenant-occupied. Not blocking." },
+] as const;
 
 const sourceTypes = [
   ["SHERIFF_SALE", "Sheriff sale"],
@@ -330,6 +338,7 @@ export default function Toolkit() {
   const rentcastPropertyDataAction = useAction(api.mongodb.rentcastPropertyData);
   const rentcastUnderwriteAction = useAction(api.mongodb.rentcastUnderwrite);
   const loadPropertyBriefAction = useAction(api.mongodb.loadPropertyBrief);
+  const updateDueDiligenceAction = useAction(api.mongodb.updateDueDiligence);
   const listLeadsAction = useAction(api.mongodb.listLeads);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
@@ -390,6 +399,9 @@ export default function Toolkit() {
   const [loadingBrief, setLoadingBrief] = useState(false);
   const [loadingPropBrief, setLoadingPropBrief] = useState(false);
   const [briefNote, setBriefNote] = useState<string | null>(null);
+  const [propBrief, setPropBrief] = useState<PropertyBrief | null>(null);
+  const [ddDrafts, setDdDrafts] = useState<Record<string, { sourceUrl: string; summary: string }>>({});
+  const [savingDd, setSavingDd] = useState<string | null>(null);
 
   const loadAccess = async () => {
     setLoading(true);
@@ -893,6 +905,7 @@ export default function Toolkit() {
     setBriefNote(null);
     try {
       const result = await loadPropertyBriefAction({ leadId: teamLeadId }) as PropertyBrief;
+      setPropBrief(result);
       setTeamRental((current) => ({
         ...current,
         purchasePrice: result.prefill.purchasePrice ? String(result.prefill.purchasePrice) : current.purchasePrice,
@@ -927,6 +940,46 @@ export default function Toolkit() {
       toast.success(`${result.queued.length} off-market source${result.queued.length === 1 ? "" : "s"} queued for review.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not queue the off-market sources.");
+    }
+  };
+
+  const saveDueDiligence = async (category: typeof DD_CATEGORIES[number]["key"]) => {
+    if (!teamLeadId) {
+      toast.error("Pick a lead first.");
+      return;
+    }
+    const draft = ddDrafts[category];
+    if (!draft?.sourceUrl?.trim()) {
+      toast.error("A source URL is required to record evidence.");
+      return;
+    }
+    setSavingDd(category);
+    try {
+      await updateDueDiligenceAction({
+        id: teamLeadId,
+        category,
+        patch: {
+          status: "FOUND",
+          sourceUrl: draft.sourceUrl.trim(),
+          summary: draft.summary.trim() || undefined,
+        },
+      });
+      toast.success("Evidence recorded — rerun the agent team to re-check the gate.");
+      setDdDrafts((current) => ({ ...current, [category]: { sourceUrl: "", summary: "" } }));
+      setPropBrief((current) => current ? {
+        ...current,
+        stored: {
+          ...current.stored,
+          dueDiligence: {
+            ...current.stored.dueDiligence,
+            [category]: { status: "FOUND", sourceUrl: draft.sourceUrl.trim(), summary: draft.summary.trim() || undefined, checkedAt: Date.now() },
+          },
+        },
+      } : current);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not record evidence.");
+    } finally {
+      setSavingDd(null);
     }
   };
 
@@ -1002,6 +1055,25 @@ export default function Toolkit() {
             <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Loan amount</span><Input type="number" min="0" value={teamRental.loanAmount} onChange={(event) => setTeamRental((current) => ({ ...current, loanAmount: event.target.value }))} placeholder="Defaults to 75% LTV" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
             <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Interest %</span><Input type="number" min="0" step="0.01" value={teamRental.interestRatePct} onChange={(event) => setTeamRental((current) => ({ ...current, interestRatePct: event.target.value }))} placeholder="6.5" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
             <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Term years</span><Input type="number" min="1" value={teamRental.loanTermYears} onChange={(event) => setTeamRental((current) => ({ ...current, loanTermYears: event.target.value }))} placeholder="30" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+          </div>
+          <div className="mt-3 rounded-2xl border border-white/80 bg-white/45 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">Due diligence evidence</p><p className="mt-1 text-[0.68rem] leading-4 text-slate-500">Record the county/public-record evidence the verification agent needs. FOUND requires a source URL; nothing is claimed without a source, and approval stays owner-only.</p></div><p className="text-[0.68rem] text-slate-400">Load brief to see current status</p></div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {DD_CATEGORIES.map((category) => {
+                const entry = propBrief?.stored.dueDiligence?.[category.key];
+                const status = entry?.status ?? "UNCHECKED";
+                const draft = ddDrafts[category.key] ?? { sourceUrl: "", summary: "" };
+                return <div key={category.key} className="rounded-xl border border-white/80 bg-white/60 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-800">{category.label}</p><Badge className={status === "FOUND" ? "border-0 bg-teal-100/80 text-teal-800" : status === "MISSING" ? "border-0 bg-amber-100/80 text-amber-800" : "border-0 bg-slate-100/80 text-slate-600"}>{status === "FOUND" ? "FOUND" : status === "MISSING" ? "MISSING" : "Unchecked"}</Badge></div>
+                  <p className="mt-1 text-[0.65rem] leading-4 text-slate-500">{category.hint}{status === "FOUND" && entry?.sourceUrl ? ` Recorded: ${entry.sourceUrl}` : ""}</p>
+                  <div className="mt-2 flex gap-2">
+                    <Input value={draft.sourceUrl} onChange={(event) => setDdDrafts((current) => ({ ...current, [category.key]: { ...(current[category.key] ?? { sourceUrl: "", summary: "" }), sourceUrl: event.target.value } }))} placeholder="Source URL (assessor, recorder, listing)" className="h-8 flex-1 rounded-xl border-white/85 bg-white/70 text-[0.68rem]" />
+                    <Button type="button" variant="outline" disabled={savingDd === category.key || !teamLeadId} onClick={() => void saveDueDiligence(category.key)} className="h-8 shrink-0 rounded-xl border-teal-200/80 bg-white/65 px-3 text-[0.68rem] text-teal-800">{savingDd === category.key ? <Loader2 className="size-3.5 animate-spin" /> : "Mark found"}</Button>
+                  </div>
+                  <Input value={draft.summary} onChange={(event) => setDdDrafts((current) => ({ ...current, [category.key]: { ...(current[category.key] ?? { sourceUrl: "", summary: "" }), summary: event.target.value } }))} placeholder="What the source shows (optional)" className="mt-2 h-8 rounded-xl border-white/85 bg-white/70 text-[0.68rem]" />
+                </div>;
+              })}
+            </div>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button type="button" disabled={teamRunning || !teamLeadId} onClick={() => void runAgentTeamNow()} className="h-10 gap-2 rounded-xl bg-indigo-700 text-xs hover:bg-indigo-800">{teamRunning ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-4" />} {teamRunning ? "Running team…" : "Run agent team"}</Button>

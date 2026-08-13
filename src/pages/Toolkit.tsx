@@ -220,6 +220,41 @@ type PipelineBrief = {
   }>;
 };
 
+type PropertyBrief = {
+  leadId: string;
+  address: string;
+  stored: {
+    squareFeet?: number;
+    yearBuilt?: number;
+    acquisitionPrice?: number;
+    mao?: number;
+    parcelId?: string;
+    sourceRef?: string;
+    sourceType?: string;
+    pipelineStatus: string;
+    verificationStatus: string;
+    distressScore?: number;
+  };
+  rentcast: null | {
+    address: string;
+    matched: boolean;
+    squareFeet?: number;
+    yearBuilt?: number;
+    rentPerMonth?: number;
+    rentRangeLow?: number;
+    rentRangeHigh?: number;
+    annualPropertyTax?: number;
+    soldCompsCount: number;
+  };
+  prefill: {
+    purchasePrice?: number;
+    rentComps: number[];
+    squareFeet?: number;
+    annualPropertyTax?: number;
+    compPrices: number[];
+  };
+};
+
 const sourceTypes = [
   ["SHERIFF_SALE", "Sheriff sale"],
   ["TAX_SALE", "Tax sale"],
@@ -294,6 +329,7 @@ export default function Toolkit() {
   const sitemapDiscoverAction = useAction(api.mongodb.sitemapDiscover);
   const rentcastPropertyDataAction = useAction(api.mongodb.rentcastPropertyData);
   const rentcastUnderwriteAction = useAction(api.mongodb.rentcastUnderwrite);
+  const loadPropertyBriefAction = useAction(api.mongodb.loadPropertyBrief);
   const listLeadsAction = useAction(api.mongodb.listLeads);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
@@ -352,6 +388,8 @@ export default function Toolkit() {
   const [teamMatches, setTeamMatches] = useState<ScoredBuyerMatch[] | null>(null);
   const [brief, setBrief] = useState<PipelineBrief | null>(null);
   const [loadingBrief, setLoadingBrief] = useState(false);
+  const [loadingPropBrief, setLoadingPropBrief] = useState(false);
+  const [briefNote, setBriefNote] = useState<string | null>(null);
 
   const loadAccess = async () => {
     setLoading(true);
@@ -846,6 +884,42 @@ export default function Toolkit() {
     }
   };
 
+  const loadPropertyBriefNow = async () => {
+    if (!teamLeadId) {
+      toast.error("Pick a lead first.");
+      return;
+    }
+    setLoadingPropBrief(true);
+    setBriefNote(null);
+    try {
+      const result = await loadPropertyBriefAction({ leadId: teamLeadId }) as PropertyBrief;
+      setTeamRental((current) => ({
+        ...current,
+        purchasePrice: result.prefill.purchasePrice ? String(result.prefill.purchasePrice) : current.purchasePrice,
+        rentComps: result.prefill.rentComps.length ? result.prefill.rentComps.join(", ") : current.rentComps,
+        annualPropertyTax: result.prefill.annualPropertyTax ? String(result.prefill.annualPropertyTax) : current.annualPropertyTax,
+        squareFeet: result.prefill.squareFeet ? String(result.prefill.squareFeet) : current.squareFeet,
+        compPrices: result.prefill.compPrices.length ? result.prefill.compPrices.join(", ") : current.compPrices,
+      }));
+      const filled: string[] = [];
+      if (result.prefill.purchasePrice) filled.push("purchase price");
+      if (result.prefill.rentComps.length) filled.push("rent estimate");
+      if (result.prefill.squareFeet) filled.push("square feet");
+      if (result.prefill.annualPropertyTax) filled.push("property tax");
+      if (result.prefill.compPrices.length) filled.push(`${result.prefill.compPrices.length} sold comps`);
+      setBriefNote(filled.length > 0
+        ? `Pre-filled ${filled.join(", ")} from ${result.rentcast ? "RentCast" : "stored lead data"}. Fields with no source value stay blank — enter insurance and loan terms when you have them.`
+        : result.rentcast
+          ? "RentCast returned no record for this address — no market data to pre-fill. Fields stay blank for owner input."
+          : "No connected source returned data for this address — fields stay blank for owner input.");
+      toast.success("Property brief loaded — the agent team will start from it.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not load the property brief.");
+    } finally {
+      setLoadingPropBrief(false);
+    }
+  };
+
   const queueOffMarketSourcesNow = async () => {
     try {
       const result = await queueOffMarket({});
@@ -908,6 +982,8 @@ export default function Toolkit() {
           <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <div className="rounded-2xl border border-white/80 bg-white/45 p-4">
               <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Lead to model</span><div className="flex gap-2"><select value={teamLeadId} onChange={(event) => setTeamLeadId(event.target.value)} className="h-10 min-w-0 flex-1 rounded-xl border border-white/85 bg-white/70 px-3 text-sm text-slate-700 outline-none"><option value="">Choose an eligible lead…</option>{teamLeads.map((lead) => <option key={lead._id} value={lead._id}>{lead.propertyAddress || lead._id} · {lead.city}, {lead.state}</option>)}</select><Button type="button" variant="outline" onClick={() => void loadTeamLeads()} disabled={loadingLeads} className="h-10 shrink-0 rounded-xl border-white/85 bg-white/65 px-3 text-xs" aria-label="Refresh leads">{loadingLeads ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}</Button></div></label>
+              <div className="mt-2 flex flex-wrap items-center gap-2"><Button type="button" variant="outline" disabled={loadingPropBrief || !teamLeadId} onClick={() => void loadPropertyBriefNow()} className="h-8 gap-2 rounded-xl border-indigo-200/80 bg-white/65 text-xs text-indigo-800"><ClipboardList className="size-3.5" /> {loadingPropBrief ? "Loading…" : "Load brief"}</Button><span className="text-[0.68rem] leading-4 text-slate-500">Pre-fills the underwriting inputs below from RentCast + data already on file for this lead.</span></div>
+              {briefNote && <p className="mt-2 rounded-lg border border-indigo-100/80 bg-indigo-50/55 px-2.5 py-1.5 text-[0.68rem] leading-4 text-indigo-800">{briefNote}</p>}
               <p className="mt-2 text-[0.68rem] leading-4 text-slate-500">Only non-fabricated leads are eligible. Rental underwriting falls back to the lead's MAO or acquisition price when no purchase price is entered below.</p>
             </div>
             <div className="rounded-2xl border border-white/80 bg-white/45 p-4">

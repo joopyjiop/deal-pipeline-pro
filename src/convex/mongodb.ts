@@ -831,6 +831,74 @@ export const listPipelineBrief = action({
   },
 });
 
+// Owner-only: assemble a per-property brief from every connected source plus
+// what is already stored on the lead, shaped so the Toolkit can pre-fill the
+// agent-team inputs. Read-only — nothing is persisted and nothing is invented:
+// each field is either on file or came back from a source; fields no source
+// provided are omitted so the caller leaves them blank.
+export const loadPropertyBrief = action({
+  args: { leadId: v.string() },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+    if (!document) throw new Error("Lead not found");
+    const lead = toAgentLead(document);
+    const address = [lead.propertyAddress, lead.city, lead.state, lead.zip]
+      .filter((part): part is string => typeof part === "string" && Boolean(part.trim()))
+      .join(", ");
+    let rentcast: Awaited<ReturnType<typeof rentcastFetchImpl>> | null = null;
+    if (address.trim().length >= 10) {
+      try {
+        rentcast = await rentcastFetchImpl({ address, radius: 5, saleDateRange: 365, compsLimit: 12 });
+      } catch {
+        // Unconfigured key, no property match, or quota exhausted: the brief
+        // still carries everything already stored on the lead.
+      }
+    }
+    const squareFeet = rentcast?.property?.squareFootage ?? lead.squareFeet;
+    const annualPropertyTax = rentcast?.summary.annualPropertyTax;
+    const rentComps = rentcast?.rentEstimate?.rent ? [rentcast.rentEstimate.rent] : [];
+    const compPrices = rentcast?.comps.soldPrices ?? [];
+    return {
+      leadId: args.leadId,
+      address,
+      stored: {
+        squareFeet: lead.squareFeet,
+        yearBuilt: leadNumber(document.yearBuilt),
+        acquisitionPrice: lead.acquisitionPrice,
+        mao: lead.mao,
+        parcelId: lead.parcelId,
+        sourceRef: lead.sourceRef,
+        sourceType: lead.sourceType,
+        pipelineStatus: leadText(document.pipelineStatus) ?? "SOURCED",
+        verificationStatus: leadText(document.verificationStatus) ?? "UNVERIFIED",
+        distressScore: lead.distressScore,
+      },
+      rentcast: rentcast
+        ? {
+            address: rentcast.address,
+            matched: true,
+            squareFeet: rentcast.summary.squareFeet,
+            yearBuilt: rentcast.summary.yearBuilt,
+            rentPerMonth: rentcast.summary.rentPerMonth,
+            rentRangeLow: rentcast.summary.rentRangeLow,
+            rentRangeHigh: rentcast.summary.rentRangeHigh,
+            annualPropertyTax: rentcast.summary.annualPropertyTax,
+            soldCompsCount: rentcast.summary.soldCompsCount,
+          }
+        : null,
+      prefill: {
+        purchasePrice: lead.acquisitionPrice ?? lead.mao ?? undefined,
+        rentComps,
+        squareFeet,
+        annualPropertyTax,
+        compPrices,
+      },
+    };
+  },
+});
+
 // MCP-facing bridges for the agent team. They re-run the shared impls instead
 // of delegating to the public actions because the MCP route authenticates with
 // the server secret — there is no Convex user session, so the owner check on

@@ -397,7 +397,6 @@ export default function Toolkit() {
   const qualifyStagedSource = useAction(api.mongodb.qualifyStagedSource);
   const estimateDeal = useAction(api.mongodb.estimateDeal);
   const runAgentTeamAction = useAction(api.mongodb.runAgentTeam);
-  const getAgentTeamAction = useAction(api.mongodb.getAgentTeam);
   const runBuyerMatchesAction = useAction(api.mongodb.runBuyerMatches);
   const listPipelineBriefAction = useAction(api.mongodb.listPipelineBrief);
   const queueOffMarket = useAction(api.mongodb.queueOffMarketSources);
@@ -1136,6 +1135,24 @@ export default function Toolkit() {
             <button type="button" onClick={handleSignOut} className="flex size-10 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500 hover:text-slate-800" aria-label="Sign out"><LogOut className="size-4" /></button>
           </div>
         </header>
+
+        <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700"><Search className="size-5" /></div><div><p className="eyebrow">Semantic lead search</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Find leads by meaning, not just keywords</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Embeddings run through Ollama Cloud (nomic-embed-text) and rank every indexed lead by cosine similarity against your query. Only non-fabricated leads are indexed; nothing leaves the pipeline except the query text.</p></div></div>
+            <Badge className="border-0 bg-sky-100/80 text-sky-800">Owner only</Badge>
+          </div>
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <Button type="button" disabled={semanticIndexing} onClick={() => void runIndexEmbeddings()} className="h-10 gap-2 rounded-xl bg-sky-700 text-xs hover:bg-sky-800"><RefreshCw className={`size-4 ${semanticIndexing ? "animate-spin" : ""}`} /> {semanticIndexing ? "Indexing…" : "Index embeddings"}</Button>
+            {semanticIndexResult ? <p className="text-[0.68rem] text-slate-500">Indexed {semanticIndexResult.indexed}/{semanticIndexResult.total} leads ({semanticIndexResult.skipped} skipped, {semanticIndexResult.failed} failed) · model {semanticIndexResult.model}</p> : null}
+          </div>
+          <form onSubmit={runSemanticSearch} className="mt-3 flex flex-col gap-2 sm:flex-row"><Input type="text" value={semanticQuery} onChange={(event) => setSemanticQuery(event.target.value)} placeholder="e.g. 3-bed distressed house near Dallas under 200k" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /><Button type="submit" disabled={semanticSearching || !semanticQuery.trim()} className="h-10 gap-2 rounded-xl bg-sky-700 text-xs hover:bg-sky-800"><Search className="size-4" /> {semanticSearching ? "Searching…" : "Search"}</Button></form>
+          {semanticResults ? (
+            <div className="mt-4">
+              <p className="text-[0.68rem] text-slate-500">{semanticResults.totalScored} leads scored for “{semanticResults.query}” · model {semanticResults.model}</p>
+              {semanticResults.leads.length === 0 ? <p className="mt-3 text-xs text-amber-700">No indexed leads to rank — run Index embeddings first.</p> : <div className="mt-2 grid gap-2">{semanticResults.leads.map((lead) => (<div key={lead._id} className="flex items-start justify-between gap-3 rounded-xl border border-white/80 bg-white/60 p-3"><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-800">{lead.propertyAddress}{lead.city ? `, ${lead.city}` : ""}{lead.state ? `, ${lead.state}` : ""}</p><p className="mt-0.5 text-[0.68rem] text-slate-500">{lead.county ? `${lead.county} · ` : ""}{lead.sourceType ?? ""}{typeof lead.distressScore === "number" ? ` · distress ${lead.distressScore}/100` : ""}{typeof lead.arv === "number" ? ` · ARV $${lead.arv.toLocaleString()}` : ""}</p></div><span className="shrink-0 rounded-lg bg-sky-100/70 px-2 py-1 text-[0.68rem] font-bold text-sky-800">{Math.round((lead.relevance?.score ?? 0) * 100)}%</span></div>))}</div>}
+            </div>
+          ) : null}
+        </section>
 
         <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">

@@ -12,7 +12,7 @@ import { fetchPropertyData, latestAnnualPropertyTax } from "./rentcast";
 import type { SearchableLead } from "./search";
 import { arvFromComps, median, rentalUnderwriting, repairEstimate } from "./underwriting";
 import { embeddingPrompt, rankBySimilarity, type EmbeddableLead } from "./embeddings";
-import type { RentalUnderwritingInput, RentalUnderwritingResult } from "./underwriting";
+import type { RentalUnderwritingInput } from "./underwriting";
 import {
   arvRepairsAgent,
   buyerMatchingAgent,

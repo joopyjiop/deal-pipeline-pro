@@ -2,8 +2,9 @@
 
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { action } from "./_generated/server";
+import { action, internalAction } from "./_generated/server";
 import type { ActionCtx } from "./_generated/server";
+import { isFiniteVector } from "./embeddings";
 
 const OLLAMA_API_URL = "https://ollama.com/api";
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
@@ -90,5 +91,35 @@ export const chat = action({
     return {
       choices: [{ message: { content } }],
     };
+  },
+});
+
+export const embedText = internalAction({
+  args: {
+    text: v.string(),
+    model: v.optional(v.string()),
+  },
+  // Access is enforced by the callers (all internal): indexLeadEmbeddings and
+  // semanticSearchLeads require a signed-in owner (or verified-approved lead
+  // visibility) and mcpSemanticSearch requires MCP AI access. An internal
+  // action cannot be invoked directly from the browser.
+  handler: async (_, args) => {
+    const text = args.text.trim();
+    if (!text || text.length > 12_000) throw new Error("Embedding text must be between 1 and 12,000 characters");
+    const model = (args.model?.trim() || "nomic-embed-text").slice(0, 120);
+    // OpenAI-compatible embeddings endpoint on Ollama Cloud. Handles both the
+    // OpenAI response envelope (data[0].embedding) and the native embedding
+    // shape for resilience across Ollama server versions.
+    const payload = (await ollamaRequest("/v1/embeddings", { model, input: text })) as unknown as {
+      data?: Array<{ embedding?: unknown }>;
+      embedding?: unknown;
+    };
+    const embedding = Array.isArray(payload.data)
+      ? payload.data[0]?.embedding
+      : payload.embedding;
+    if (!isFiniteVector(embedding)) {
+      throw new Error(`Ollama Cloud returned no usable embedding vector for model "${model}" — confirm the model exists and is available on your plan`);
+    }
+    return { embedding: embedding as number[], model, dimensions: (embedding as number[]).length };
   },
 });

@@ -26,6 +26,7 @@ import {
   Play,
   Radar,
   RefreshCw,
+  Search,
   ShieldCheck,
   Smartphone,
   Sparkles,
@@ -259,6 +260,25 @@ type PropertyBrief = {
   };
 };
 
+type SemanticIndexResult = { total: number; indexed: number; skipped: number; failed: number; model: string };
+
+type SemanticResult = {
+  query: string;
+  model: string;
+  totalScored: number;
+  leads: Array<{
+    _id: string;
+    propertyAddress?: string;
+    city?: string;
+    state?: string;
+    county?: string;
+    sourceType?: string;
+    distressScore?: number;
+    arv?: number;
+    relevance?: { score: number };
+  }>;
+};
+
 const DD_CATEGORIES = [
   { key: "TITLE_AND_LIENS", label: "Title status & liens", hint: "Assessor/recorder: current owner, tax status, recorded liens. Paste the county assessor/recorder page URL." },
   { key: "CONDITION", label: "Property condition", hint: "Listing photos, inspection, or condition report; flag unknown rather than guess. Paste the listing/inspection URL." },
@@ -387,6 +407,8 @@ export default function Toolkit() {
   const rentcastUnderwriteAction = useAction(api.mongodb.rentcastUnderwrite);
   const loadPropertyBriefAction = useAction(api.mongodb.loadPropertyBrief);
   const updateDueDiligenceAction = useAction(api.mongodb.updateDueDiligence);
+  const indexLeadEmbeddingsAction = useAction(api.mongodb.indexLeadEmbeddings);
+  const semanticSearchAction = useAction(api.mongodb.semanticSearchLeads);
   const listLeadsAction = useAction(api.mongodb.listLeads);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
@@ -450,6 +472,11 @@ export default function Toolkit() {
   const [propBrief, setPropBrief] = useState<PropertyBrief | null>(null);
   const [ddDrafts, setDdDrafts] = useState<Record<string, { ownerName: string; sourceUrl: string; summary: string }>>({});
   const [savingDd, setSavingDd] = useState<string | null>(null);
+  const [semanticQuery, setSemanticQuery] = useState("");
+  const [semanticResults, setSemanticResults] = useState<SemanticResult | null>(null);
+  const [semanticIndexResult, setSemanticIndexResult] = useState<SemanticIndexResult | null>(null);
+  const [semanticIndexing, setSemanticIndexing] = useState(false);
+  const [semanticSearching, setSemanticSearching] = useState(false);
 
   const loadAccess = async () => {
     setLoading(true);
@@ -1031,6 +1058,38 @@ export default function Toolkit() {
       toast.error(error instanceof Error ? error.message : "Could not record evidence.");
     } finally {
       setSavingDd(null);
+    }
+  };
+
+  const runIndexEmbeddings = async () => {
+    setSemanticIndexing(true);
+    setSemanticIndexResult(null);
+    try {
+      const result = await indexLeadEmbeddingsAction({}) as SemanticIndexResult;
+      setSemanticIndexResult(result);
+      toast.success(result.failed > 0
+        ? `Indexed ${result.indexed}/${result.total} leads (${result.failed} failed — check the Ollama key/model).`
+        : `Indexed ${result.indexed} of ${result.total} leads.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not index lead embeddings.");
+    } finally {
+      setSemanticIndexing(false);
+    }
+  };
+
+  const runSemanticSearch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = semanticQuery.trim();
+    if (!query) return;
+    setSemanticSearching(true);
+    try {
+      const result = await semanticSearchAction({ query, limit: 12 }) as SemanticResult;
+      setSemanticResults(result);
+      if (result.leads.length === 0) toast.info("No indexed leads to rank — run Index embeddings first.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not run the semantic search.");
+    } finally {
+      setSemanticSearching(false);
     }
   };
 

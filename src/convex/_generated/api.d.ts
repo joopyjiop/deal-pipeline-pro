@@ -14,6 +14,7 @@ import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
 import type * as camofox from "../camofox.js";
 import type * as crons from "../crons.js";
+import type * as embeddings from "../embeddings.js";
 import type * as http from "../http.js";
 import type * as leads from "../leads.js";
 import type * as mongodb from "../mongodb.js";
@@ -41,6 +42,7 @@ declare const fullApi: ApiFromModules<{
   "auth/emailOtp": typeof auth_emailOtp;
   camofox: typeof camofox;
   crons: typeof crons;
+  embeddings: typeof embeddings;
   http: typeof http;
   leads: typeof leads;
   mongodb: typeof mongodb;

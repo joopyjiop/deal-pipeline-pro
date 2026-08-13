@@ -255,6 +255,7 @@ function mcpTools() {
     { name: "consultant_court", description: "Run the evidence auditor, underwriting analyst, risk/compliance consultant, and judge on a staged source. Returns a recommendation only; owner approval remains required.", inputSchema: { type: "object", properties: { stagedId: { type: "string" } }, required: ["stagedId"], additionalProperties: false } },
     { name: "run_agent_team", description: "Run the sourcing, verification, rental underwriting, and ARV/repairs agents over one lead and return the aggregated readiness gate with every blocking data gap. Recommendations only; owner approval remains required.", inputSchema: { type: "object", properties: { leadId: { type: "string", description: "Lead _id to model" }, rental: { type: "object", description: "Rental underwriting inputs. purchasePrice required when provided; rentComps, annualPropertyTax, annualInsurance, loanAmount, interestRatePct, loanTermYears optional. Falls back to the lead's MAO/acquisition price otherwise.", properties: { purchasePrice: { type: "number", minimum: 0 }, rentComps: { type: "array", items: { type: "number", minimum: 0 } }, annualPropertyTax: { type: "number", minimum: 0 }, annualInsurance: { type: "number", minimum: 0 }, loanAmount: { type: "number", minimum: 0 }, interestRatePct: { type: "number", minimum: 0 }, loanTermYears: { type: "number", minimum: 1 } }, additionalProperties: false }, compPrices: { type: "array", items: { type: "number", minimum: 0 }, description: "Sold comparable prices for ARV" }, repairTier: { type: "string", enum: ["BASE", "MEDIUM", "GUT"] } }, required: ["leadId"], additionalProperties: false } },
     { name: "list_pipeline_brief", description: "Read the readiness gate across every eligible lead: which deals are ready and which are blocked by specific missing underwriting data.", inputSchema: { type: "object", properties: { limit: { type: "number", minimum: 1, maximum: 200 } }, additionalProperties: false } },
+    { name: "semantic_search", description: "Search leads by meaning rather than exact text: the query is embedded and ranked against every indexed lead with cosine similarity. Requires the lead embeddings to be indexed first. Never invents data; fabricated rows are excluded.", inputSchema: { type: "object", properties: { query: { type: "string", description: "Natural-language search, e.g. '3-bed distressed house near Dallas under 200k'" }, limit: { type: "number", minimum: 1, maximum: 50 } }, required: ["query"], additionalProperties: false } },
   ];
 }
 
@@ -374,6 +375,12 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
     const limit = optionalNumber(rawArguments.limit);
     if (Number.isNaN(limit)) throw new Error("limit must be a number when provided");
     return ctx.runAction(internal.mongodb.mcpListPipelineBrief, { limit });
+  }
+  if (name === "semantic_search") {
+    if (typeof rawArguments.query !== "string" || !rawArguments.query.trim()) throw new Error("semantic_search requires a query");
+    const limit = optionalNumber(rawArguments.limit);
+    if (Number.isNaN(limit)) throw new Error("semantic_search limit must be a number when provided");
+    return ctx.runAction(internal.mongodb.mcpSemanticSearch, { query: rawArguments.query, limit });
   }
   throw new Error(`Unknown MCP tool: ${name}`);
 }

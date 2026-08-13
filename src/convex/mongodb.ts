@@ -11,6 +11,7 @@ import type { SitemapFetch } from "./sitemap";
 import { fetchPropertyData, latestAnnualPropertyTax } from "./rentcast";
 import type { SearchableLead } from "./search";
 import { arvFromComps, median, rentalUnderwriting, repairEstimate } from "./underwriting";
+import { embeddingPrompt, rankBySimilarity, type EmbeddableLead } from "./embeddings";
 import type { RentalUnderwritingInput, RentalUnderwritingResult } from "./underwriting";
 import {
   arvRepairsAgent,
@@ -418,7 +419,7 @@ function isOwnerEmail(email: string | undefined) {
   return email?.trim().toLowerCase() === OWNER_EMAIL;
 }
 
-async function isOwnerIdentity(ctx: ActionCtx) {
+async function isOwnerIdentity(ctx: ActionCtx): Promise<boolean> {
   const identity = await ctx.auth.getUserIdentity();
   if (isOwnerEmail(identity?.email)) return true;
   // The identity subject is `<userId>|<sessionId>` (see @convex-dev/auth
@@ -961,6 +962,103 @@ export const loadPropertyBrief = action({
         compPrices,
       },
     };
+  },
+});
+
+// In-house semantic search — the honest in-project version of a vector index:
+// lead text embedded via Ollama Cloud and ranked with plain cosine similarity.
+// Nothing is invented — only text the lead already carries is embedded, and
+// fabricated rows are excluded before ranking.
+
+const EMBEDDING_MODEL = "nomic-embed-text";
+
+type SemanticSearchLead = { relevance: { score: number; semantic: boolean }; _id: string; [key: string]: unknown };
+
+async function semanticSearchImpl(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+  query: string,
+  limit: number,
+  owner: boolean,
+  embedQuery: () => Promise<number[]>,
+): Promise<{ query: string; model: string; totalScored: number; leads: SemanticSearchLead[] }> {
+  const queryVector = await embedQuery();
+  const filter: Document = { fabricated: { $ne: true } };
+  if (!owner) {
+    filter.pipelineStatus = "APPROVED";
+    filter.verificationStatus = "VERIFIED";
+  }
+  const documents = await database.collection(LEADS).find(filter).sort({ updatedAt: -1 }).limit(500).toArray();
+  const rows = documents.map((document) => ({ id: String(document._id), vector: document.embedding }));
+  const ranked = rankBySimilarity(queryVector, rows, limit);
+  const byId = new Map(documents.map((document) => [String(document._id), serialize(document)]));
+  return {
+    query: query.trim(),
+    model: EMBEDDING_MODEL,
+    totalScored: ranked.length,
+    leads: ranked
+      .map((item) => {
+        const lead = byId.get(item.id);
+        return lead ? { ...lead, relevance: { score: item.score, semantic: true } } : undefined;
+      })
+      .filter((lead): lead is SemanticSearchLead => Boolean(lead)),
+  };
+}
+
+export const indexLeadEmbeddings = action({
+  args: { model: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const model = (args.model?.trim() || EMBEDDING_MODEL).slice(0, 120);
+    const documents = await database.collection(LEADS).find({ fabricated: { $ne: true } }).sort({ updatedAt: -1 }).limit(500).toArray();
+    let indexed = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (const document of documents) {
+      const prompt = embeddingPrompt(document as unknown as EmbeddableLead);
+      if (!prompt) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        const result = await ctx.runAction(internal.ollama.embedText, { text: prompt, model });
+        await database.collection(LEADS).updateOne(
+          { _id: document._id },
+          { $set: { embedding: result.embedding, embeddingModel: result.model, embeddedAt: Date.now(), updatedAt: Date.now() } },
+        );
+        indexed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    return { total: documents.length, indexed, skipped, failed, model };
+  },
+});
+
+export const semanticSearchLeads = action({
+  args: { query: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Authentication required");
+    const owner = await isOwnerIdentity(ctx);
+    const query = args.query.trim();
+    if (!query || query.length > 500) throw new Error("Enter a search query (max 500 characters)");
+    const embedQuery: () => Promise<number[]> = () =>
+      ctx.runAction(internal.ollama.embedText, { text: query }).then((result) => result.embedding);
+    return semanticSearchImpl(await getDatabase(), query, args.limit ?? 10, owner, embedQuery);
+  },
+});
+
+export const mcpSemanticSearch = internalAction({
+  args: { query: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    const query = args.query.trim();
+    if (!query || query.length > 500) throw new Error("Enter a search query (max 500 characters)");
+    const embedQuery: () => Promise<number[]> = () =>
+      ctx.runAction(internal.ollama.embedText, { text: query }).then((result) => result.embedding);
+    return semanticSearchImpl(database, query, args.limit ?? 10, true, embedQuery);
   },
 });
 

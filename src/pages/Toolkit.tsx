@@ -260,7 +260,7 @@ type PropertyBrief = {
   };
 };
 
-type SemanticIndexResult = { total: number; indexed: number; skipped: number; failed: number; model: string };
+type SemanticIndexResult = { total: number; indexed: number; skipped: number; failed: number; model: string; firstError?: string };
 
 type SemanticResult = {
   query: string;
@@ -1067,7 +1067,7 @@ export default function Toolkit() {
       const result = await indexLeadEmbeddingsAction({}) as SemanticIndexResult;
       setSemanticIndexResult(result);
       toast.success(result.failed > 0
-        ? `Indexed ${result.indexed}/${result.total} leads (${result.failed} failed — check the Ollama key/model).`
+        ? `Indexed ${result.indexed}/${result.total} leads (${result.failed} failed${result.firstError ? ` — ${result.firstError}` : ""}).`
         : `Indexed ${result.indexed} of ${result.total} leads.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not index lead embeddings.");
@@ -1138,12 +1138,12 @@ export default function Toolkit() {
 
         <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700"><Search className="size-5" /></div><div><p className="eyebrow">Semantic lead search</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Find leads by meaning, not just keywords</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Embeddings run through Ollama Cloud (nomic-embed-text) and rank every indexed lead by cosine similarity against your query. Only non-fabricated leads are indexed; nothing leaves the pipeline except the query text.</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700"><Search className="size-5" /></div><div><p className="eyebrow">Semantic lead search</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Find leads by meaning, not just keywords</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Embeddings run through OpenAI (text-embedding-3-small) and rank every indexed lead by cosine similarity against your query. Only non-fabricated leads are indexed; nothing leaves the pipeline except the query text. Set OPENAI_API_KEY in the Convex Keys panel to enable indexing.</p></div></div>
             <Badge className="border-0 bg-sky-100/80 text-sky-800">Owner only</Badge>
           </div>
           <div className="mt-5 flex flex-wrap items-center gap-2">
             <Button type="button" disabled={semanticIndexing} onClick={() => void runIndexEmbeddings()} className="h-10 gap-2 rounded-xl bg-sky-700 text-xs hover:bg-sky-800"><RefreshCw className={`size-4 ${semanticIndexing ? "animate-spin" : ""}`} /> {semanticIndexing ? "Indexing…" : "Index embeddings"}</Button>
-            {semanticIndexResult ? <p className="text-[0.68rem] text-slate-500">Indexed {semanticIndexResult.indexed}/{semanticIndexResult.total} leads ({semanticIndexResult.skipped} skipped, {semanticIndexResult.failed} failed) · model {semanticIndexResult.model}</p> : null}
+            {semanticIndexResult ? <div className="text-[0.68rem] text-slate-500"><p>Indexed {semanticIndexResult.indexed}/{semanticIndexResult.total} leads ({semanticIndexResult.skipped} skipped, {semanticIndexResult.failed} failed) · model {semanticIndexResult.model}</p>{semanticIndexResult.failed > 0 && semanticIndexResult.firstError ? <p className="mt-1 rounded-lg bg-amber-50/80 px-2 py-1 text-amber-800">{semanticIndexResult.firstError}</p> : null}</div> : null}
           </div>
           <form onSubmit={runSemanticSearch} className="mt-3 flex flex-col gap-2 sm:flex-row"><Input type="text" value={semanticQuery} onChange={(event) => setSemanticQuery(event.target.value)} placeholder="e.g. 3-bed distressed house near Dallas under 200k" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /><Button type="submit" disabled={semanticSearching || !semanticQuery.trim()} className="h-10 gap-2 rounded-xl bg-sky-700 text-xs hover:bg-sky-800"><Search className="size-4" /> {semanticSearching ? "Searching…" : "Search"}</Button></form>
           {semanticResults ? (

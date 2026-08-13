@@ -95,6 +95,13 @@ export const chat = action({
   },
 });
 
+// Embeddings provider note: this action previously called Ollama Cloud, but
+// Ollama Cloud is chat-only — it never serves /api/embed or /v1/embeddings
+// (both return 404), so no model name can make it embed. OpenAI embeddings are
+// used instead so semantic search actually returns vectors. Ollama remains the
+// provider for chat (consultant court / local agents).
+const OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
+
 export const embedText = internalAction({
   args: {
     text: v.string(),
@@ -108,24 +115,29 @@ export const embedText = internalAction({
     if (!text || text.length > 12_000) throw new Error("Embedding text must be between 1 and 12,000 characters");
     // The model is pinned exactly: semantic search only works if the indexed
     // vectors and the query vector come from the same embedding model.
-    const model = "nomic-embed-text";
-    // Ollama Cloud serves the native embeddings endpoint at /api/embed on the
-    // same /api base the API key is registered against. The OpenAI-compatible
-    // /v1/embeddings path does not exist on the cloud and returns 404, so the
-    // native shape (embeddings: number[][]) is used, with the OpenAI envelope
-    // kept as a fallback for other Ollama servers.
-    const payload = (await ollamaRequest("/api/embed", { model, input: text })) as unknown as {
+    const model = OPENAI_EMBEDDING_MODEL;
+    const key = process.env.OPENAI_API_KEY?.trim();
+    if (!key) throw new Error("OPENAI_API_KEY is not configured on the Convex deployment — add it in the Keys panel");
+    const response = await fetch("https://api.openai.com/v1/embeddings", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${key}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ model, input: text }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: { message?: string } | string;
       data?: Array<{ embedding?: unknown }>;
-      embedding?: unknown;
-      embeddings?: Array<Array<number>>;
     };
-    const embedding = Array.isArray(payload.embeddings)
-      ? payload.embeddings[0]
-      : Array.isArray(payload.data)
-        ? payload.data[0]?.embedding
-        : payload.embedding;
+    if (!response.ok) {
+      const detail = typeof payload.error === "string" ? payload.error : payload.error?.message;
+      throw new Error(`OpenAI embeddings returned HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+    }
+    const embedding = Array.isArray(payload.data) ? payload.data[0]?.embedding : undefined;
     if (!isFiniteVector(embedding)) {
-      throw new Error(`Ollama Cloud returned no usable embedding vector for model "${model}" — confirm the model exists and is available on your plan`);
+      throw new Error(`OpenAI returned no usable embedding vector for model "${model}"`);
     }
     return { embedding: embedding as number[], model, dimensions: (embedding as number[]).length };
   },

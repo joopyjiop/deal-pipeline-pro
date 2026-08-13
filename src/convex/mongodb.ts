@@ -970,7 +970,7 @@ export const loadPropertyBrief = action({
 // Nothing is invented — only text the lead already carries is embedded, and
 // fabricated rows are excluded before ranking.
 
-const EMBEDDING_MODEL = "nomic-embed-text";
+const EMBEDDING_MODEL = "text-embedding-3-small";
 
 type SemanticSearchLead = { relevance: { score: number; semantic: boolean }; _id: string; [key: string]: unknown };
 
@@ -1016,6 +1016,7 @@ export const indexLeadEmbeddings = action({
     let indexed = 0;
     let skipped = 0;
     let failed = 0;
+    let firstError: string | undefined;
     for (const document of documents) {
       const prompt = embeddingPrompt(document as unknown as EmbeddableLead);
       if (!prompt) {
@@ -1029,11 +1030,12 @@ export const indexLeadEmbeddings = action({
           { $set: { embedding: result.embedding, embeddingModel: result.model, embeddedAt: Date.now(), updatedAt: Date.now() } },
         );
         indexed += 1;
-      } catch {
+      } catch (error) {
         failed += 1;
+        if (!firstError) firstError = error instanceof Error ? error.message : String(error);
       }
     }
-    return { total: documents.length, indexed, skipped, failed, model };
+    return { total: documents.length, indexed, skipped, failed, model, firstError };
   },
 });
 

@@ -116,13 +116,22 @@ describe("rentalUnderwriting", () => {
     expect(result.rentEstimate).toBeUndefined();
   });
 
-  test("is BLOCKED when property tax or insurance is missing", () => {
+  test("is BLOCKED when property tax is missing; insurance never blocks (wholesaler does not hold)", () => {
     const result = rentalUnderwriting({ purchasePrice: 150000, rentComps: [1500] });
     expect(result.status).toBe("BLOCKED");
     const categories = result.dataGaps.map((item) => item.category);
     expect(categories).toContain("PROPERTY_TAX");
-    expect(categories).toContain("INSURANCE");
+    expect(categories).not.toContain("INSURANCE");
+    expect(result.assumptions.some((assumption) => assumption.toLowerCase().includes("insurance"))).toBe(true);
     expect(result.netOperatingIncome).toBeUndefined();
+  });
+
+  test("computes NOI without insurance when only insurance is absent", () => {
+    const result = rentalUnderwriting({ purchasePrice: 150000, rentComps: [1500], annualPropertyTax: 2400 });
+    expect(result.status).not.toBe("BLOCKED");
+    expect(result.dataGaps.some((gap) => gap.category === "INSURANCE")).toBe(false);
+    expect(result.netOperatingIncome).toBeGreaterThan(0);
+    expect(result.operatingExpenses.insurance).toBe(0);
   });
 
   test("is PARTIAL without loan terms: NOI and cap rate exist but DSCR and cash flow do not", () => {

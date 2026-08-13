@@ -228,13 +228,16 @@ type PropertyBrief = {
     yearBuilt?: number;
     acquisitionPrice?: number;
     mao?: number;
+    arv?: number;
+    repairs?: number;
+    estimatedProfit?: number;
     parcelId?: string;
     sourceRef?: string;
     sourceType?: string;
     pipelineStatus: string;
     verificationStatus: string;
     distressScore?: number;
-    dueDiligence?: Record<string, { status?: string; sourceUrl?: string; summary?: string; checkedAt?: number }>;
+    dueDiligence?: Record<string, { status?: string; sourceUrl?: string; summary?: string; checkedAt?: number; data?: { ownerName?: string } }>;
   };
   rentcast: null | {
     address: string;
@@ -257,11 +260,56 @@ type PropertyBrief = {
 };
 
 const DD_CATEGORIES = [
-  { key: "TITLE_AND_LIENS", label: "Title status & liens", hint: "Assessor/recorder: current ownership, tax status, recorded liens." },
-  { key: "SALE_HISTORY", label: "Sale history & comparables", hint: "Past sales and 3-5 nearby comps. RentCast auto-records this when comps match." },
-  { key: "CONDITION", label: "Property condition", hint: "Listing photos, inspection, or condition report; flag unknown rather than guess." },
+  { key: "TITLE_AND_LIENS", label: "Title status & liens", hint: "Assessor/recorder: current owner, tax status, recorded liens. Paste the county assessor/recorder page URL." },
+  { key: "CONDITION", label: "Property condition", hint: "Listing photos, inspection, or condition report; flag unknown rather than guess. Paste the listing/inspection URL." },
   { key: "OCCUPANCY", label: "Occupancy", hint: "Vacant, owner-occupied, or tenant-occupied. Not blocking." },
+  { key: "SALE_HISTORY", label: "Sale history & comparables", hint: "Past sales and 3-5 nearby comps. RentCast auto-records this when comps match." },
 ] as const;
+
+// Two ready-to-use talking points built from the loaded brief: what to ask the
+// seller when you call, and what to present when you pitch the buyer. Every
+// value is either on file or explicitly marked missing — nothing is guessed.
+function DealBriefSummaries({ brief }: { brief: PropertyBrief | null }) {
+  const stored = brief?.stored;
+  const dd = stored?.dueDiligence;
+  const titleEntry = dd?.TITLE_AND_LIENS;
+  const occupancyEntry = dd?.OCCUPANCY;
+  const ownerName = titleEntry?.data?.ownerName;
+  const repairs = stored?.repairs;
+  const arv = stored?.arv;
+  const profit = stored?.estimatedProfit
+    ?? (arv !== undefined && repairs !== undefined && stored?.acquisitionPrice !== undefined ? arv - repairs - stored.acquisitionPrice : undefined);
+  const fmt = (value: number | undefined) => (value === undefined ? "—" : currency.format(value));
+  const statusText = (entry: { status?: string; summary?: string } | undefined) =>
+    entry?.status === "FOUND"
+      ? (entry.summary ? entry.summary : "On record — see source URL")
+      : entry?.status === "MISSING"
+        ? "Not found (flagged)"
+        : "— (unchecked)";
+  return (
+    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+      <div className="rounded-2xl border border-sky-200/80 bg-sky-50/50 p-4">
+        <p className="text-xs font-semibold text-sky-800">Seller-ready summary</p>
+        <p className="mt-0.5 text-[0.68rem] text-sky-600">What to ask and offer when you call the seller</p>
+        <dl className="mt-3 space-y-2 text-[0.68rem] leading-4">
+          <div className="flex items-baseline justify-between gap-3"><dt className="shrink-0 text-slate-500">Current owner</dt><dd className="text-right font-semibold text-slate-800">{ownerName || "— (record via Title status)"}</dd></div>
+          <div className="flex items-baseline justify-between gap-3"><dt className="shrink-0 text-slate-500">Liens / back taxes</dt><dd className="text-right font-semibold text-slate-800">{statusText(titleEntry)}</dd></div>
+          <div className="flex items-baseline justify-between gap-3"><dt className="shrink-0 text-slate-500">Repair estimate</dt><dd className="text-right font-semibold text-slate-800">{fmt(repairs)}</dd></div>
+          <div className="flex items-baseline justify-between gap-3"><dt className="shrink-0 text-slate-500">Occupancy</dt><dd className="text-right font-semibold text-slate-800">{statusText(occupancyEntry)}</dd></div>
+        </dl>
+      </div>
+      <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/50 p-4">
+        <p className="text-xs font-semibold text-emerald-800">Buyer-ready summary</p>
+        <p className="mt-0.5 text-[0.68rem] text-emerald-600">What to present when you pitch the deal</p>
+        <dl className="mt-3 space-y-2 text-[0.68rem] leading-4">
+          <div className="flex items-baseline justify-between gap-3"><dt className="shrink-0 text-slate-500">ARV (median)</dt><dd className="text-right font-semibold text-slate-800">{fmt(arv)}</dd></div>
+          <div className="flex items-baseline justify-between gap-3"><dt className="shrink-0 text-slate-500">Repair estimate</dt><dd className="text-right font-semibold text-slate-800">{fmt(repairs)}</dd></div>
+          <div className="flex items-baseline justify-between gap-3"><dt className="shrink-0 text-slate-500">Profit after assignment</dt><dd className="text-right font-semibold text-emerald-800">{profit === undefined ? "— (needs acquisition price)" : currency.format(profit)}</dd></div>
+        </dl>
+      </div>
+    </div>
+  );
+}
 
 const sourceTypes = [
   ["SHERIFF_SALE", "Sheriff sale"],
@@ -400,7 +448,7 @@ export default function Toolkit() {
   const [loadingPropBrief, setLoadingPropBrief] = useState(false);
   const [briefNote, setBriefNote] = useState<string | null>(null);
   const [propBrief, setPropBrief] = useState<PropertyBrief | null>(null);
-  const [ddDrafts, setDdDrafts] = useState<Record<string, { sourceUrl: string; summary: string }>>({});
+  const [ddDrafts, setDdDrafts] = useState<Record<string, { ownerName: string; sourceUrl: string; summary: string }>>({});
   const [savingDd, setSavingDd] = useState<string | null>(null);
 
   const loadAccess = async () => {
@@ -943,36 +991,39 @@ export default function Toolkit() {
     }
   };
 
-  const saveDueDiligence = async (category: typeof DD_CATEGORIES[number]["key"]) => {
+  const saveDueDiligence = async (category: typeof DD_CATEGORIES[number]["key"], status: "FOUND" | "MISSING") => {
     if (!teamLeadId) {
       toast.error("Pick a lead first.");
       return;
     }
-    const draft = ddDrafts[category];
-    if (!draft?.sourceUrl?.trim()) {
-      toast.error("A source URL is required to record evidence.");
+    const draft = ddDrafts[category] ?? { ownerName: "", sourceUrl: "", summary: "" };
+    if (status === "FOUND" && !draft.sourceUrl?.trim()) {
+      toast.error("A source URL is required to record found evidence.");
       return;
     }
+    const ownerName = category === "TITLE_AND_LIENS" ? draft.ownerName.trim() : "";
+    const summary = draft.summary.trim() || (status === "MISSING" ? "Not found after a reasonable search — flagged rather than guessed." : undefined);
     setSavingDd(category);
     try {
       await updateDueDiligenceAction({
         id: teamLeadId,
         category,
         patch: {
-          status: "FOUND",
-          sourceUrl: draft.sourceUrl.trim(),
-          summary: draft.summary.trim() || undefined,
+          status,
+          sourceUrl: status === "FOUND" ? draft.sourceUrl.trim() : undefined,
+          summary,
+          ...(ownerName ? { data: { ownerName } } : {}),
         },
       });
-      toast.success("Evidence recorded — rerun the agent team to re-check the gate.");
-      setDdDrafts((current) => ({ ...current, [category]: { sourceUrl: "", summary: "" } }));
+      toast.success(status === "FOUND" ? "Evidence recorded — rerun the agent team to re-check." : "Marked missing — rerun the agent team to re-check.");
+      setDdDrafts((current) => ({ ...current, [category]: { ownerName: "", sourceUrl: "", summary: "" } }));
       setPropBrief((current) => current ? {
         ...current,
         stored: {
           ...current.stored,
           dueDiligence: {
             ...current.stored.dueDiligence,
-            [category]: { status: "FOUND", sourceUrl: draft.sourceUrl.trim(), summary: draft.summary.trim() || undefined, checkedAt: Date.now() },
+            [category]: { status, sourceUrl: status === "FOUND" ? draft.sourceUrl.trim() : undefined, summary, checkedAt: Date.now(), ...(ownerName ? { data: { ownerName } } : {}) },
           },
         },
       } : current);
@@ -1048,7 +1099,7 @@ export default function Toolkit() {
             <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Purchase price</span><Input type="number" min="0" value={teamRental.purchasePrice} onChange={(event) => setTeamRental((current) => ({ ...current, purchasePrice: event.target.value }))} placeholder="Optional" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
             <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Rent comps /mo</span><Input value={teamRental.rentComps} onChange={(event) => setTeamRental((current) => ({ ...current, rentComps: event.target.value }))} placeholder="1400, 1500, 1600" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
             <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Property tax /yr</span><Input type="number" min="0" value={teamRental.annualPropertyTax} onChange={(event) => setTeamRental((current) => ({ ...current, annualPropertyTax: event.target.value }))} placeholder="Required for NOI" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
-            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Insurance /yr</span><Input type="number" min="0" value={teamRental.annualInsurance} onChange={(event) => setTeamRental((current) => ({ ...current, annualInsurance: event.target.value }))} placeholder="Required for NOI" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
+            <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Insurance /yr</span><Input type="number" min="0" value={teamRental.annualInsurance} onChange={(event) => setTeamRental((current) => ({ ...current, annualInsurance: event.target.value }))} placeholder="Optional — not required for wholesale" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
             <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Repair tier</span><select value={teamRental.repairTier} onChange={(event) => setTeamRental((current) => ({ ...current, repairTier: event.target.value as typeof current.repairTier }))} className="h-9 rounded-xl border border-white/85 bg-white/70 px-3 text-xs text-slate-700 outline-none"><option value="BASE">Base · $15/SF</option><option value="MEDIUM">Medium · $30/SF</option><option value="GUT">Gut · $50/SF</option></select></label>
             <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Square feet</span><Input type="number" min="0" value={teamRental.squareFeet} onChange={(event) => setTeamRental((current) => ({ ...current, squareFeet: event.target.value }))} placeholder="For repairs" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
             <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Sold comps</span><Input value={teamRental.compPrices} onChange={(event) => setTeamRental((current) => ({ ...current, compPrices: event.target.value }))} placeholder="145000, 152000" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
@@ -1057,23 +1108,33 @@ export default function Toolkit() {
             <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Term years</span><Input type="number" min="1" value={teamRental.loanTermYears} onChange={(event) => setTeamRental((current) => ({ ...current, loanTermYears: event.target.value }))} placeholder="30" className="h-9 rounded-xl border-white/85 bg-white/70 text-xs" /></label>
           </div>
           <div className="mt-3 rounded-2xl border border-white/80 bg-white/45 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">Due diligence evidence</p><p className="mt-1 text-[0.68rem] leading-4 text-slate-500">Record the county/public-record evidence the verification agent needs. FOUND requires a source URL; nothing is claimed without a source, and approval stays owner-only.</p></div><p className="text-[0.68rem] text-slate-400">Load brief to see current status</p></div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-700">Due diligence — four standalone categories</p><p className="mt-1 max-w-3xl text-[0.68rem] leading-4 text-slate-500">Each category feeds one of two conversations: what to ask the seller, and what to pitch the buyer. FOUND requires a source URL; mark MISSING only after a genuine search found nothing. Load brief pre-fills what RentCast already provides — you only paste the county assessor or listing URLs.</p></div><p className="text-[0.68rem] text-slate-400">Load brief to see current status</p></div>
+            <div className="mt-3 space-y-3">
               {DD_CATEGORIES.map((category) => {
                 const entry = propBrief?.stored.dueDiligence?.[category.key];
                 const status = entry?.status ?? "UNCHECKED";
-                const draft = ddDrafts[category.key] ?? { sourceUrl: "", summary: "" };
-                return <div key={category.key} className="rounded-xl border border-white/80 bg-white/60 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-800">{category.label}</p><Badge className={status === "FOUND" ? "border-0 bg-teal-100/80 text-teal-800" : status === "MISSING" ? "border-0 bg-amber-100/80 text-amber-800" : "border-0 bg-slate-100/80 text-slate-600"}>{status === "FOUND" ? "FOUND" : status === "MISSING" ? "MISSING" : "Unchecked"}</Badge></div>
-                  <p className="mt-1 text-[0.65rem] leading-4 text-slate-500">{category.hint}{status === "FOUND" && entry?.sourceUrl ? ` Recorded: ${entry.sourceUrl}` : ""}</p>
-                  <div className="mt-2 flex gap-2">
-                    <Input value={draft.sourceUrl} onChange={(event) => setDdDrafts((current) => ({ ...current, [category.key]: { ...(current[category.key] ?? { sourceUrl: "", summary: "" }), sourceUrl: event.target.value } }))} placeholder="Source URL (assessor, recorder, listing)" className="h-8 flex-1 rounded-xl border-white/85 bg-white/70 text-[0.68rem]" />
-                    <Button type="button" variant="outline" disabled={savingDd === category.key || !teamLeadId} onClick={() => void saveDueDiligence(category.key)} className="h-8 shrink-0 rounded-xl border-teal-200/80 bg-white/65 px-3 text-[0.68rem] text-teal-800">{savingDd === category.key ? <Loader2 className="size-3.5 animate-spin" /> : "Mark found"}</Button>
+                const draft = ddDrafts[category.key] ?? { ownerName: "", sourceUrl: "", summary: "" };
+                const savedOwner = entry?.data?.ownerName;
+                return <section key={category.key} className="rounded-2xl border border-white/80 bg-white/60 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div><p className="text-xs font-semibold text-slate-800">{category.label}</p><p className="mt-0.5 text-[0.65rem] leading-4 text-slate-500">{category.hint}</p></div>
+                    <Badge className={status === "FOUND" ? "border-0 bg-teal-100/80 text-teal-800" : status === "MISSING" ? "border-0 bg-amber-100/80 text-amber-800" : "border-0 bg-slate-100/80 text-slate-600"}>{status === "FOUND" ? "FOUND" : status === "MISSING" ? "MISSING" : "Unchecked"}</Badge>
                   </div>
-                  <Input value={draft.summary} onChange={(event) => setDdDrafts((current) => ({ ...current, [category.key]: { ...(current[category.key] ?? { sourceUrl: "", summary: "" }), summary: event.target.value } }))} placeholder="What the source shows (optional)" className="mt-2 h-8 rounded-xl border-white/85 bg-white/70 text-[0.68rem]" />
-                </div>;
+                  {status === "FOUND" && entry?.sourceUrl && <p className="mt-2 rounded-lg bg-teal-50/70 px-2.5 py-1.5 text-[0.65rem] leading-4 text-teal-800">Recorded: {entry.sourceUrl}{entry.summary ? ` — ${entry.summary}` : ""}{savedOwner ? ` · Owner: ${savedOwner}` : ""}</p>}
+                  {status === "MISSING" && entry?.summary && <p className="mt-2 rounded-lg bg-amber-50/70 px-2.5 py-1.5 text-[0.65rem] leading-4 text-amber-800">{entry.summary}</p>}
+                  {category.key === "TITLE_AND_LIENS" && <Input value={draft.ownerName} onChange={(event) => setDdDrafts((current) => ({ ...current, [category.key]: { ...(current[category.key] ?? { ownerName: "", sourceUrl: "", summary: "" }), ownerName: event.target.value } }))} placeholder={savedOwner ? `Owner on record: ${savedOwner}` : "Current owner (from the assessor record)"} className="mt-3 h-8 rounded-xl border-white/85 bg-white/70 text-[0.68rem]" />}
+                  <div className="mt-2 flex gap-2">
+                    <Input value={draft.sourceUrl} onChange={(event) => setDdDrafts((current) => ({ ...current, [category.key]: { ...(current[category.key] ?? { ownerName: "", sourceUrl: "", summary: "" }), sourceUrl: event.target.value } }))} placeholder="Source URL (county assessor, recorder, listing)" className="h-8 flex-1 rounded-xl border-white/85 bg-white/70 text-[0.68rem]" />
+                    <Button type="button" variant="outline" disabled={savingDd === category.key || !teamLeadId} onClick={() => void saveDueDiligence(category.key, "FOUND")} className="h-8 shrink-0 rounded-xl border-teal-200/80 bg-white/65 px-3 text-[0.68rem] text-teal-800">{savingDd === category.key ? <Loader2 className="size-3.5 animate-spin" /> : "Mark found"}</Button>
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    <Input value={draft.summary} onChange={(event) => setDdDrafts((current) => ({ ...current, [category.key]: { ...(current[category.key] ?? { ownerName: "", sourceUrl: "", summary: "" }), summary: event.target.value } }))} placeholder="What the source shows (optional)" className="h-8 flex-1 rounded-xl border-white/85 bg-white/70 text-[0.68rem]" />
+                    <Button type="button" variant="ghost" disabled={savingDd === category.key || !teamLeadId} onClick={() => void saveDueDiligence(category.key, "MISSING")} className="h-8 shrink-0 px-2 text-[0.65rem] font-semibold text-amber-700 hover:bg-amber-50">Mark missing</Button>
+                  </div>
+                </section>;
               })}
             </div>
+            <DealBriefSummaries brief={propBrief} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button type="button" disabled={teamRunning || !teamLeadId} onClick={() => void runAgentTeamNow()} className="h-10 gap-2 rounded-xl bg-indigo-700 text-xs hover:bg-indigo-800">{teamRunning ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-4" />} {teamRunning ? "Running team…" : "Run agent team"}</Button>

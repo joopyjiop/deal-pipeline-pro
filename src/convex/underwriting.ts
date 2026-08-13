@@ -152,12 +152,13 @@ export function rentalUnderwriting(input: RentalUnderwritingInput): RentalUnderw
       blocksReady: true,
     });
   }
+  // Insurance is deliberately excluded from wholesale readiness: a wholesaler
+  // assigns the contract and never holds the property, so no premium is carried.
+  // If one is provided it still feeds a more precise NOI; otherwise it is
+  // recorded as an explicit assumption and NOI uses $0.
+  const insuranceAnnual = input.annualInsurance === undefined ? 0 : Math.max(0, input.annualInsurance);
   if (input.annualInsurance === undefined || input.annualInsurance < 0) {
-    dataGaps.push({
-      category: "INSURANCE",
-      detail: "Annual insurance premium is required for an honest net operating income. Get a quote or binder.",
-      blocksReady: true,
-    });
+    assumptions.push("Insurance excluded — a wholesaler does not hold the property.");
   }
 
   const grossAnnualRent = rentEstimate === undefined ? undefined : rentEstimate * 12;
@@ -168,12 +169,12 @@ export function rentalUnderwriting(input: RentalUnderwritingInput): RentalUnderw
   const maintenance = effectiveGrossIncome === undefined ? undefined : Math.round(effectiveGrossIncome * maintenancePct / 100);
   const operatingExpenses = {
     propertyTax: input.annualPropertyTax,
-    insurance: input.annualInsurance,
+    insurance: insuranceAnnual,
     management,
     maintenance,
   };
-  const totalOperatingExpenses = [input.annualPropertyTax, input.annualInsurance, management, maintenance].every((value) => typeof value === "number")
-    ? Math.round((input.annualPropertyTax ?? 0) + (input.annualInsurance ?? 0) + (management ?? 0) + (maintenance ?? 0))
+  const totalOperatingExpenses = [input.annualPropertyTax, insuranceAnnual, management, maintenance].every((value) => typeof value === "number")
+    ? Math.round((input.annualPropertyTax ?? 0) + insuranceAnnual + (management ?? 0) + (maintenance ?? 0))
     : undefined;
   const netOperatingIncome = effectiveGrossIncome === undefined || totalOperatingExpenses === undefined
     ? undefined

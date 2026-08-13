@@ -10,7 +10,7 @@ import { discoverSitemapUrls } from "./sitemap";
 import type { SitemapFetch } from "./sitemap";
 import { fetchPropertyData, latestAnnualPropertyTax } from "./rentcast";
 import type { SearchableLead } from "./search";
-import { median, rentalUnderwriting, repairEstimate } from "./underwriting";
+import { arvFromComps, median, rentalUnderwriting, repairEstimate } from "./underwriting";
 import type { RentalUnderwritingInput, RentalUnderwritingResult } from "./underwriting";
 import {
   arvRepairsAgent,
@@ -606,6 +606,12 @@ async function runAgentTeamImpl(
     underwritingAgentFromModel(model),
   ];
   const readiness = readinessReport(reports);
+  // Persist the ARV and repair numbers the team actually derived so the
+  // buyer-facing summary can present them without re-parsing report text.
+  const arv = arvFromComps((args.compPrices ?? []).filter((value) => value > 0));
+  const repairs = lead.squareFeet !== undefined && lead.squareFeet > 0
+    ? repairEstimate(lead.squareFeet, args.repairTier ?? "MEDIUM", leadNumber(document.yearBuilt))
+    : undefined;
   const ranAt = Date.now();
   await database.collection(LEADS).updateOne(
     { _id: document._id },
@@ -614,6 +620,8 @@ async function runAgentTeamImpl(
         agentTeam: { reports, readiness, ranAt },
         rentalModel: rentalModel ?? undefined,
         readinessStatus: readiness.status,
+        arv: arv?.median,
+        repairs: repairs?.total,
         updatedAt: ranAt,
       }),
     },
@@ -710,41 +718,52 @@ async function rentcastInputsForLead(
     loanTermYears: 30,
   } as RentalUnderwritingInput;
   const compPrices = data.comps.soldPrices;
-  // Record real sale-history evidence from the same RentCast pull that feeds
-  // the ARV/rental model, so the verification agent sees the comps the
-  // pipeline already holds instead of asking the owner to re-find them. Only
-  // fills the category when there is evidence and the owner has not already
-  // recorded county-level evidence for it; the record names the provider and
-  // retrieval date, and approval stays owner-only.
-  const currentDueDiligence: Record<string, unknown> = document.dueDiligence && typeof document.dueDiligence === "object"
-    ? document.dueDiligence as Record<string, unknown>
-    : {};
-  const currentSaleHistory: Record<string, unknown> = currentDueDiligence.saleHistory && typeof currentDueDiligence.saleHistory === "object"
-    ? currentDueDiligence.saleHistory as Record<string, unknown>
-    : {};
+  const dueDiligenceRecord = rentcastSaleHistoryRecord(document, data, compPrices);
+  const setFields: Record<string, unknown> = withoutUndefined({ squareFeet, yearBuilt: data.property.yearBuilt, updatedAt: Date.now() });
+  if (dueDiligenceRecord) {
+    setFields.dueDiligence = dueDiligenceRecord;
+  }
+  await database.collection(LEADS).updateOne({ _id: document._id }, { $set: setFields });
+  return { data, rental, compPrices };
+}
+
+// Builds the sale-history due-diligence entry from a RentCast pull (sold
+// comps + the subject's last sale) so the verification agent sees evidence
+// the pipeline already holds. Returns the record to persist, or undefined when
+// there is nothing to change (no evidence, or the owner already recorded
+// county-level evidence for the category). The record names the provider and
+// retrieval date; approval stays owner-only.
+function rentcastSaleHistoryRecord(
+  document: Document,
+  data: Awaited<ReturnType<typeof rentcastFetchImpl>>,
+  compPrices: number[],
+): DueDiligenceRecord | undefined {
+  const current = document.dueDiligence && typeof document.dueDiligence === "object"
+    ? document.dueDiligence as DueDiligenceRecord
+    : undefined;
+  if (current?.saleHistory?.status === "FOUND") return undefined;
+  const property = data.property;
+  if (!property) return undefined;
   const evidenceParts: string[] = [];
   if (compPrices.length > 0) {
     const sorted = [...compPrices].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    evidenceParts.push(`${compPrices.length} sold comp${compPrices.length === 1 ? "" : "s"} (median $${median.toLocaleString()}) within ${data.comps.radiusMiles} mi, last ${data.comps.saleDateRangeDays} days`);
+    const medianValue = sorted[Math.floor(sorted.length / 2)];
+    evidenceParts.push(`${compPrices.length} sold comp${compPrices.length === 1 ? "" : "s"} (median $${medianValue.toLocaleString()}) within ${data.comps.radiusMiles} mi, last ${data.comps.saleDateRangeDays} days`);
   }
-  if (typeof data.property.lastSalePrice === "number" && data.property.lastSalePrice > 0) {
-    evidenceParts.push(`subject last sale $${data.property.lastSalePrice.toLocaleString()}${data.property.lastSaleDate ? ` on ${String(data.property.lastSaleDate).slice(0, 10)}` : ""}`);
+  if (typeof property.lastSalePrice === "number" && property.lastSalePrice > 0) {
+    evidenceParts.push(`subject last sale $${property.lastSalePrice.toLocaleString()}${property.lastSaleDate ? ` on ${String(property.lastSaleDate).slice(0, 10)}` : ""}`);
   }
-  if (currentSaleHistory.status !== "FOUND" && evidenceParts.length > 0) {
-    currentDueDiligence.saleHistory = {
+  if (evidenceParts.length === 0) return undefined;
+  return {
+    ...emptyDueDiligence(),
+    ...(current ?? {}),
+    saleHistory: {
       status: "FOUND",
       summary: `Sale history from RentCast property records (county-record derived): ${evidenceParts.join("; ")}. Retrieved ${new Date().toISOString().slice(0, 10)}.`,
       sourceUrl: "https://www.rentcast.io/",
       checkedAt: Date.now(),
-    };
-  }
-  const setFields: Record<string, unknown> = withoutUndefined({ squareFeet, yearBuilt: data.property.yearBuilt, updatedAt: Date.now() });
-  if (currentDueDiligence.saleHistory) {
-    setFields.dueDiligence = { ...currentDueDiligence };
-  }
-  await database.collection(LEADS).updateOne({ _id: document._id }, { $set: setFields });
-  return { data, rental, compPrices };
+    },
+  };
 }
 
 export const getAgentTeam = action({
@@ -890,6 +909,16 @@ export const loadPropertyBrief = action({
     const annualPropertyTax = rentcast?.summary.annualPropertyTax;
     const rentComps = rentcast?.rentEstimate?.rent ? [rentcast.rentEstimate.rent] : [];
     const compPrices = rentcast?.comps.soldPrices ?? [];
+    // Pre-fill what connected sources already provide: when RentCast matched,
+    // record the sale-history evidence now so the panel shows it as found
+    // immediately after Load brief (the team run would do the same later).
+    if (rentcast) {
+      const record = rentcastSaleHistoryRecord(document, rentcast, compPrices);
+      if (record) {
+        await database.collection(LEADS).updateOne({ _id: document._id }, { $set: { dueDiligence: record, updatedAt: Date.now() } });
+        document.dueDiligence = record;
+      }
+    }
     return {
       leadId: args.leadId,
       address,
@@ -898,6 +927,9 @@ export const loadPropertyBrief = action({
         yearBuilt: leadNumber(document.yearBuilt),
         acquisitionPrice: lead.acquisitionPrice,
         mao: lead.mao,
+        arv: lead.arv,
+        repairs: lead.repairs,
+        estimatedProfit: lead.estimatedProfit,
         parcelId: lead.parcelId,
         sourceRef: lead.sourceRef,
         sourceType: lead.sourceType,

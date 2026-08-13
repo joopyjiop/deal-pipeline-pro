@@ -634,25 +634,47 @@ export const runAgentTeam = action({
     const database = await getDatabase();
     let rental = args.rental;
     let compPrices = args.compPrices;
-    let source: { provider: "rentcast"; address: string; propertyId?: string; compsUsed: number; rentEstimate?: number } | undefined;
-    // autoData: when the owner supplies no rental/comp inputs, pull real
-    // market data (SF, rent, property tax, sold comps) from RentCast so the
-    // readiness gate is evaluated on real data instead of surfacing gaps that
-    // an official source can already fill. Best-effort: any RentCast failure
-    // falls back to the explicit inputs and the gate flags what remains.
-    if (args.autoData === true && rental === undefined && (!compPrices || compPrices.length === 0)) {
+    let source:
+      | { provider: "rentcast"; address: string; propertyId?: string; compsUsed: number; rentEstimate?: number; status: "OK"; message?: string }
+      | { provider: "rentcast"; address: string; status: "NO_MATCH" | "ERROR"; message: string }
+      | undefined;
+    // autoData: pull real market data (SF, rent, property tax, sold comps)
+    // from RentCast to fill whatever the owner did not supply, so the
+    // readiness gate is evaluated on real data instead of surfacing gaps an
+    // official source can already fill. Explicit owner inputs always win;
+    // RentCast only fills what is missing. If RentCast contributes nothing,
+    // the result carries a status note so the owner sees why the gate still
+    // blocks instead of failing silently.
+    if (args.autoData === true) {
       const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
       if (document) {
         try {
           const built = await rentcastInputsForLead(database, document);
           if (built) {
-            rental = built.rental;
-            compPrices = built.compPrices;
-            source = { provider: "rentcast" as const, address: built.data.address, propertyId: built.data.property?.id, compsUsed: built.compPrices.length, rentEstimate: built.data.rentEstimate?.rent };
+            const user = args.rental;
+            const rc = built.rental;
+            rental = {
+              purchasePrice: user?.purchasePrice ?? rc.purchasePrice,
+              rentComps: user?.rentComps?.length ? user.rentComps : rc.rentComps,
+              marketRentPerSqFt: user?.marketRentPerSqFt ?? rc.marketRentPerSqFt,
+              squareFeet: user?.squareFeet ?? rc.squareFeet,
+              annualPropertyTax: user?.annualPropertyTax ?? rc.annualPropertyTax,
+              annualInsurance: user?.annualInsurance,
+              managementPct: user?.managementPct,
+              vacancyPct: user?.vacancyPct,
+              maintenancePct: user?.maintenancePct,
+              loanAmount: user?.loanAmount,
+              loanToValuePct: user?.loanToValuePct ?? rc.loanToValuePct,
+              interestRatePct: user?.interestRatePct ?? rc.interestRatePct,
+              loanTermYears: user?.loanTermYears ?? rc.loanTermYears,
+            };
+            compPrices = args.compPrices?.length ? args.compPrices : built.compPrices;
+            source = { provider: "rentcast" as const, address: built.data.address, propertyId: built.data.property?.id, compsUsed: built.compPrices.length, rentEstimate: built.data.rentEstimate?.rent, status: "OK" as const };
+          } else {
+            source = { provider: "rentcast" as const, address: "", status: "NO_MATCH" as const, message: "RentCast found no property record for this lead's address — the gate flags the real gaps." };
           }
-        } catch {
-          // RentCast unconfigured, no match, or quota exhausted: fall back to
-          // the owner's explicit inputs; the readiness gate flags the gaps.
+        } catch (error) {
+          source = { provider: "rentcast" as const, address: "", status: "ERROR" as const, message: `RentCast unavailable (${(error as Error).message}) — the gate flags the real gaps.` };
         }
       }
     }

@@ -8,6 +8,7 @@ import { rankLeads } from "./search";
 import { scrapegraphExtract } from "./scrapegraph";
 import { discoverSitemapUrls } from "./sitemap";
 import type { SitemapFetch } from "./sitemap";
+import { fetchPropertyData, latestAnnualPropertyTax } from "./rentcast";
 import type { SearchableLead } from "./search";
 import { median, rentalUnderwriting, repairEstimate } from "./underwriting";
 import type { RentalUnderwritingInput, RentalUnderwritingResult } from "./underwriting";
@@ -1329,6 +1330,13 @@ export const getAiToolManifest = action({
           permission: "owner-service",
           input: { url: "string (public http or https)", sourceType: "source type", maxUrls: "optional number (1-200)" },
         },
+        {
+          name: "property_data",
+          enabled: aiEnabled,
+          description: "Fetch official property attributes, rent estimate, and sold comparable prices for an address from RentCast to feed ARV and rental underwriting. Read-only; never creates or approves a lead.",
+          permission: "owner-service",
+          input: { address: "string (full property address)", radius: "optional number (0.5-25 miles)", saleDateRange: "optional number (days)", compsLimit: "optional number (1-50)" },
+        },
       ],
     };
   },
@@ -1523,6 +1531,102 @@ export const mcpSitemapDiscover = internalAction({
     const access = await database.collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
     if (access?.scraperEnabled === false) throw new Error("The scraper tool is disabled in Tool access settings");
     return sitemapDiscoverImpl(database, { urls: [args.url], sourceType: args.sourceType, maxUrls: args.maxUrls });
+  },
+});
+
+// RentCast property data: official, attributed comps, rent estimates, and
+// property attributes that feed the readiness gate with real market data
+// instead of manual entry. Read-only from the pipeline's perspective — it
+// never creates or approves leads; the underwrite path only persists sourced
+// attributes (square footage, year built) plus the agent-team reports.
+async function rentcastFetchImpl(args: { address: string; radius?: number; saleDateRange?: number; compsLimit?: number }) {
+  const address = args.address.trim();
+  if (address.length < 10 || address.length > 300) {
+    throw new Error("Enter a full property address (street, city, state)");
+  }
+  const data = await fetchPropertyData({ address, radius: args.radius, saleDateRange: args.saleDateRange, compsLimit: args.compsLimit });
+  return {
+    provider: "rentcast" as const,
+    address,
+    property: data.property,
+    rentEstimate: data.rentEstimate,
+    comps: data.comps,
+    summary: {
+      squareFeet: data.property?.squareFootage,
+      yearBuilt: data.property?.yearBuilt,
+      bedrooms: data.property?.bedrooms,
+      bathrooms: data.property?.bathrooms,
+      annualPropertyTax: latestAnnualPropertyTax(data.property),
+      rentPerMonth: data.rentEstimate?.rent,
+      rentRangeLow: data.rentEstimate?.rentRangeLow,
+      rentRangeHigh: data.rentEstimate?.rentRangeHigh,
+      soldCompsCount: data.comps.soldPrices.length,
+      soldComps: data.comps.soldPrices,
+    },
+  };
+}
+
+export const rentcastPropertyData = action({
+  args: {
+    address: v.string(),
+    radius: v.optional(v.number()),
+    saleDateRange: v.optional(v.number()),
+    compsLimit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    return rentcastFetchImpl(args);
+  },
+});
+
+// Runs the agent team with RentCast-sourced attributes, rent, and sold comps
+// so the readiness gate is evaluated on real market data. Sourced attributes
+// are persisted to the lead (square footage, year built); reports stay
+// owner-gated and are recommendations only.
+export const rentcastUnderwrite = action({
+  args: { leadId: v.string(), radius: v.optional(v.number()), saleDateRange: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+    if (!document) throw new Error("Lead not found");
+    const address = [document.propertyAddress, document.city, document.state, document.zip]
+      .filter((part): part is string => typeof part === "string" && Boolean(part.trim()))
+      .join(", ");
+    const data = await rentcastFetchImpl({ address, radius: args.radius, saleDateRange: args.saleDateRange });
+    if (!data.property) throw new Error("RentCast could not find a property record for this lead");
+    const purchasePrice = leadNumber(document.acquisitionPrice) ?? leadNumber(document.mao) ?? 0;
+    const annualPropertyTax = data.summary.annualPropertyTax;
+    const squareFeet = data.property.squareFootage;
+    const rentComps = data.rentEstimate?.rent ? [data.rentEstimate.rent] : [];
+    const compPrices = data.comps.soldPrices;
+    const rental = {
+      purchasePrice,
+      rentComps,
+      squareFeet,
+      annualPropertyTax,
+      loanToValuePct: 75,
+      interestRatePct: 6.5,
+      loanTermYears: 30,
+    } as RentalUnderwritingInput;
+    await database.collection(LEADS).updateOne(
+      { _id: document._id },
+      { $set: withoutUndefined({ squareFeet, yearBuilt: data.property.yearBuilt, updatedAt: Date.now() }) },
+    );
+    const team = await runAgentTeamImpl(database, { leadId: args.leadId, rental, compPrices, repairTier: "MEDIUM" });
+    return {
+      ...team,
+      source: { provider: "rentcast" as const, address, propertyId: data.property.id, compsUsed: compPrices.length, rentEstimate: data.rentEstimate?.rent },
+    };
+  },
+});
+
+export const mcpRentcastPropertyData = internalAction({
+  args: { address: v.string(), radius: v.optional(v.number()), saleDateRange: v.optional(v.number()), compsLimit: v.optional(v.number()) },
+  handler: async (_, args) => {
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    return rentcastFetchImpl(args);
   },
 });
 

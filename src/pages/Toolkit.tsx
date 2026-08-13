@@ -16,7 +16,9 @@ import {
   ExternalLink,
   FileSearch,
   Globe2,
+  Home,
   Link2,
+  MapPin,
   ListChecks,
   Landmark,
   Loader2,
@@ -88,6 +90,35 @@ type SgResult = {
   usage?: { promptTokens: number; completionTokens: number };
   excerpt: string;
   piiCreated: boolean;
+};
+
+type RentcastResult = {
+  provider: "rentcast";
+  address: string;
+  property: {
+    id: string;
+    formattedAddress?: string;
+    propertyType?: string;
+    bedrooms?: number;
+    bathrooms?: number;
+    squareFootage?: number;
+    yearBuilt?: number;
+    county?: string;
+  } | null;
+  rentEstimate: { rent?: number; rentRangeLow?: number; rentRangeHigh?: number } | null;
+  comps: { radiusMiles: number; saleDateRangeDays: number; soldPrices: number[] };
+  summary: {
+    squareFeet?: number;
+    yearBuilt?: number;
+    bedrooms?: number;
+    bathrooms?: number;
+    annualPropertyTax?: number;
+    rentPerMonth?: number;
+    rentRangeLow?: number;
+    rentRangeHigh?: number;
+    soldCompsCount: number;
+    soldComps: number[];
+  };
 };
 
 type SitemapResult = {
@@ -261,6 +292,8 @@ export default function Toolkit() {
   const queueOffMarket = useAction(api.mongodb.queueOffMarketSources);
   const scrapegraphExtractAction = useAction(api.mongodb.scrapegraphExtractSource);
   const sitemapDiscoverAction = useAction(api.mongodb.sitemapDiscover);
+  const rentcastPropertyDataAction = useAction(api.mongodb.rentcastPropertyData);
+  const rentcastUnderwriteAction = useAction(api.mongodb.rentcastUnderwrite);
   const listLeadsAction = useAction(api.mongodb.listLeads);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
@@ -291,6 +324,10 @@ export default function Toolkit() {
   const [smForm, setSmForm] = useState({ url: "", sourceType: "AUCTION_COM" as (typeof sourceTypes)[number][0], maxUrls: "60" });
   const [smRunning, setSmRunning] = useState(false);
   const [smResult, setSmResult] = useState<SitemapResult | null>(null);
+  const [rcForm, setRcForm] = useState({ address: "", radius: "3", saleDateRange: "365" });
+  const [rcRunning, setRcRunning] = useState(false);
+  const [rcResult, setRcResult] = useState<RentcastResult | null>(null);
+  const [rcUnderwriting, setRcUnderwriting] = useState(false);
   const [estimateForm, setEstimateForm] = useState({
     squareFeet: "1500",
     yearBuilt: "",
@@ -628,6 +665,60 @@ export default function Toolkit() {
     }
   };
 
+  const runRentcastFetch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setRcRunning(true);
+    setRcResult(null);
+    try {
+      const result = await rentcastPropertyDataAction({
+        address: rcForm.address,
+        radius: rcForm.radius ? Number(rcForm.radius) : undefined,
+        saleDateRange: rcForm.saleDateRange ? Number(rcForm.saleDateRange) : undefined,
+      }) as RentcastResult;
+      setRcResult(result);
+      if (!result.property) toast.warning("No RentCast property record matched this address.");
+      else toast.success(`RentCast: ${result.summary.squareFeet ?? "?"} SF, rent $${result.summary.rentPerMonth ?? "—"}/mo, ${result.summary.soldCompsCount} sold comps.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not fetch RentCast data.");
+    } finally {
+      setRcRunning(false);
+    }
+  };
+
+  const useLeadAddressForRentcast = () => {
+    const selected = teamLeads.find((lead) => lead._id === teamLeadId);
+    if (!selected) {
+      toast.error("Pick a lead first (Coordinated agent team).");
+      return;
+    }
+    setRcForm((current) => ({ ...current, address: `${selected.propertyAddress}, ${selected.city}, ${selected.state}` }));
+    toast.success("Lead address loaded — pull RentCast data or run the underwrite.");
+  };
+
+  const runRentcastUnderwrite = async () => {
+    if (!teamLeadId) {
+      toast.error("Pick a lead first (Coordinated agent team).");
+      return;
+    }
+    setRcUnderwriting(true);
+    try {
+      const result = await rentcastUnderwriteAction({
+        leadId: teamLeadId,
+        radius: rcForm.radius ? Number(rcForm.radius) : undefined,
+        saleDateRange: rcForm.saleDateRange ? Number(rcForm.saleDateRange) : undefined,
+      }) as { leadId: string; reports: AgentReport[]; readiness: ReadinessReport; source: { provider: string; address: string; propertyId: string; compsUsed: number; rentEstimate?: number } };
+      setTeamReports(result.reports);
+      setTeamReadiness(result.readiness);
+      const blocking = result.readiness.gaps.length;
+      if (result.readiness.ready) toast.success(`RentCast underwrite complete — READY (${result.source.compsUsed} comps, rent $${result.source.rentEstimate ?? "—"}/mo).`);
+      else toast.warning(`RentCast underwrite flagged ${blocking} blocking gap${blocking === 1 ? "" : "s"}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not run the RentCast underwrite.");
+    } finally {
+      setRcUnderwriting(false);
+    }
+  };
+
   const runSitemapDiscover = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSmRunning(true);
@@ -876,6 +967,36 @@ export default function Toolkit() {
             </div>
             {smResult.discovered.length > 0 && <div className="mt-3 max-h-44 overflow-auto rounded-xl border border-white/80 bg-white/60 p-3"><ul className="space-y-1 text-[0.65rem] leading-4 text-slate-600">{smResult.discovered.slice(0, 20).map((item) => <li key={item.url} className="truncate">· {item.url}</li>)}</ul></div>}
             {(smResult.stagingFailed.length > 0 || smResult.errors.length > 0) && <p className="mt-3 text-[0.68rem] leading-4 text-amber-700">{smResult.stagingFailed.length + smResult.errors.length} fetch or staging issue{smResult.stagingFailed.length + smResult.errors.length === 1 ? "" : "s"} — see below.</p>}
+          </div>}
+        </section>
+
+        <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-orange-100/80 text-orange-700"><Home className="size-5" /></div><div><p className="eyebrow">RentCast property data</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Real comps, rent, and attributes for underwriting</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Official property records, rent estimates, and sold comparables feed the agent team's readiness gate with real market data instead of manual entry. One click underwrites the selected lead with RentCast comps, rent, square footage, and property tax — nothing is invented, and approval stays owner-only.</p></div></div>
+            <Badge className={rcResult ? (rcResult.property ? "border-0 bg-orange-100/80 text-orange-800" : "border-0 bg-amber-100/80 text-amber-800") : "border-0 bg-slate-100/80 text-slate-600"}>{rcRunning ? "Fetching…" : rcResult ? (rcResult.property ? "Data matched" : "No record") : "Not run"}</Badge>
+          </div>
+          <form onSubmit={runRentcastFetch} className="mt-4 grid gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <Input required type="text" value={rcForm.address} onChange={(event) => setRcForm((current) => ({ ...current, address: event.target.value }))} placeholder="Full property address, e.g. 5500 Grand Lake Dr, San Antonio, TX" className="h-10 rounded-xl border-white/85 bg-white/70 text-xs" />
+            <Input type="number" min="0.5" max="25" step="0.5" value={rcForm.radius} onChange={(event) => setRcForm((current) => ({ ...current, radius: event.target.value }))} placeholder="Radius mi" className="h-10 rounded-xl border-white/85 bg-white/70 text-xs" aria-label="Comps radius in miles" />
+            <Input type="number" min="30" value={rcForm.saleDateRange} onChange={(event) => setRcForm((current) => ({ ...current, saleDateRange: event.target.value }))} placeholder="Days" className="h-10 rounded-xl border-white/85 bg-white/70 text-xs" aria-label="Comps look-back in days" />
+            <Button type="submit" disabled={rcRunning} className="h-10 gap-2 rounded-xl bg-orange-700 text-xs hover:bg-orange-800">{rcRunning ? <Loader2 className="size-4 animate-spin" /> : <Home className="size-4" />} {rcRunning ? "Fetching…" : "Pull property data"}</Button>
+          </form>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" onClick={useLeadAddressForRentcast} className="h-9 gap-2 rounded-xl border-orange-200/80 bg-white/65 text-xs text-orange-800"><MapPin className="size-3.5" /> Use lead address</Button>
+            <Button type="button" disabled={rcUnderwriting || !teamLeadId} onClick={() => void runRentcastUnderwrite()} className="h-9 gap-2 rounded-xl bg-orange-700 text-xs hover:bg-orange-800">{rcUnderwriting ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-3.5" />} {rcUnderwriting ? "Underwriting…" : "Run agent team with RentCast data"}</Button>
+            <p className="text-[0.68rem] leading-4 text-slate-500">Underwrite uses the lead selected in Coordinated agent team. Free RentCast plan covers 50 requests/month.</p>
+          </div>
+          {rcResult && <div className="mt-4 rounded-2xl border border-orange-100/80 bg-orange-50/45 p-4">
+            {rcResult.property ? <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <div className="glass-inset rounded-xl p-3"><p className="text-[0.65rem] font-semibold text-slate-500">Size</p><p className="mt-0.5 text-sm font-semibold text-slate-800">{rcResult.summary.squareFeet ? `${rcResult.summary.squareFeet.toLocaleString()} SF` : "—"}</p></div>
+              <div className="glass-inset rounded-xl p-3"><p className="text-[0.65rem] font-semibold text-slate-500">Built</p><p className="mt-0.5 text-sm font-semibold text-slate-800">{rcResult.summary.yearBuilt ?? "—"}</p></div>
+              <div className="glass-inset rounded-xl p-3"><p className="text-[0.65rem] font-semibold text-slate-500">Beds / baths</p><p className="mt-0.5 text-sm font-semibold text-slate-800">{rcResult.summary.bedrooms ?? "—"} / {rcResult.summary.bathrooms ?? "—"}</p></div>
+              <div className="glass-inset rounded-xl p-3"><p className="text-[0.65rem] font-semibold text-slate-500">Property tax /yr</p><p className="mt-0.5 text-sm font-semibold text-slate-800">{rcResult.summary.annualPropertyTax ? `$${rcResult.summary.annualPropertyTax.toLocaleString()}` : "—"}</p></div>
+              <div className="glass-inset rounded-xl p-3"><p className="text-[0.65rem] font-semibold text-slate-500">Rent /mo</p><p className="mt-0.5 text-sm font-semibold text-slate-800">{rcResult.summary.rentPerMonth ? `$${rcResult.summary.rentPerMonth.toLocaleString()}` : "—"}</p></div>
+              <div className="glass-inset rounded-xl p-3"><p className="text-[0.65rem] font-semibold text-slate-500">Sold comps</p><p className="mt-0.5 text-sm font-semibold text-slate-800">{rcResult.summary.soldCompsCount}</p></div>
+            </div> : <p className="text-xs text-amber-700">No RentCast property record matched this address — check the address or try the full street, city, state format.</p>}
+            {rcResult.summary.soldComps.length > 0 && <div className="mt-3 rounded-xl border border-white/80 bg-white/60 p-3"><p className="text-[0.65rem] font-semibold text-slate-500">Sold comp prices ({rcResult.summary.soldComps.length}) — {rcResult.comps.radiusMiles} mi, last {rcResult.comps.saleDateRangeDays} days</p><div className="mt-1.5 flex flex-wrap gap-1.5">{rcResult.summary.soldComps.slice(0, 12).map((price) => <span key={price} className="rounded-lg bg-orange-100/70 px-2 py-0.5 text-[0.68rem] font-semibold text-orange-800">${price.toLocaleString()}</span>)}</div></div>}
+            {rcResult.rentEstimate?.rentRangeLow && rcResult.rentEstimate?.rentRangeHigh && <p className="mt-2 text-[0.68rem] leading-4 text-slate-500">Rent range: ${rcResult.rentEstimate.rentRangeLow.toLocaleString()} – ${rcResult.rentEstimate.rentRangeHigh.toLocaleString()}/mo. Source: RentCast property records + AVM.</p>}
           </div>}
         </section>
 

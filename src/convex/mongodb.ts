@@ -1005,11 +1005,13 @@ async function semanticSearchImpl(
 }
 
 export const indexLeadEmbeddings = action({
-  args: { model: v.optional(v.string()) },
-  handler: async (ctx, args) => {
+  args: {},
+  handler: async (ctx) => {
     await requireOwner(ctx);
     const database = await getDatabase();
-    const model = (args.model?.trim() || EMBEDDING_MODEL).slice(0, 120);
+    // Pinned to the shared constant: indexed vectors and query vectors must
+    // come from the same model or cosine similarity is meaningless.
+    const model = EMBEDDING_MODEL;
     const documents = await database.collection(LEADS).find({ fabricated: { $ne: true } }).sort({ updatedAt: -1 }).limit(500).toArray();
     let indexed = 0;
     let skipped = 0;
@@ -1021,7 +1023,7 @@ export const indexLeadEmbeddings = action({
         continue;
       }
       try {
-        const result = await ctx.runAction(internal.ollama.embedText, { text: prompt, model });
+        const result = await ctx.runAction(internal.ollama.embedText, { text: prompt });
         await database.collection(LEADS).updateOne(
           { _id: document._id },
           { $set: { embedding: result.embedding, embeddingModel: result.model, embeddedAt: Date.now(), updatedAt: Date.now() } },

@@ -48,6 +48,7 @@ async function ollamaRequest(path: string, body?: Record<string, unknown>) {
     error?: string;
     message?: { content?: string };
     models?: Array<{ name?: string }>;
+    embeddings?: Array<Array<number>>;
   };
   if (!response.ok) {
     throw new Error(`Ollama Cloud returned HTTP ${response.status}${payload.error ? `: ${payload.error}` : ""}`);
@@ -97,7 +98,6 @@ export const chat = action({
 export const embedText = internalAction({
   args: {
     text: v.string(),
-    model: v.optional(v.string()),
   },
   // Access is enforced by the callers (all internal): indexLeadEmbeddings and
   // semanticSearchLeads require a signed-in owner (or verified-approved lead
@@ -106,17 +106,24 @@ export const embedText = internalAction({
   handler: async (_, args) => {
     const text = args.text.trim();
     if (!text || text.length > 12_000) throw new Error("Embedding text must be between 1 and 12,000 characters");
-    const model = (args.model?.trim() || "nomic-embed-text").slice(0, 120);
-    // OpenAI-compatible embeddings endpoint on Ollama Cloud. Handles both the
-    // OpenAI response envelope (data[0].embedding) and the native embedding
-    // shape for resilience across Ollama server versions.
-    const payload = (await ollamaRequest("/v1/embeddings", { model, input: text })) as unknown as {
+    // The model is pinned exactly: semantic search only works if the indexed
+    // vectors and the query vector come from the same embedding model.
+    const model = "nomic-embed-text";
+    // Ollama Cloud serves the native embeddings endpoint at /api/embed on the
+    // same /api base the API key is registered against. The OpenAI-compatible
+    // /v1/embeddings path does not exist on the cloud and returns 404, so the
+    // native shape (embeddings: number[][]) is used, with the OpenAI envelope
+    // kept as a fallback for other Ollama servers.
+    const payload = (await ollamaRequest("/api/embed", { model, input: text })) as unknown as {
       data?: Array<{ embedding?: unknown }>;
       embedding?: unknown;
+      embeddings?: Array<Array<number>>;
     };
-    const embedding = Array.isArray(payload.data)
-      ? payload.data[0]?.embedding
-      : payload.embedding;
+    const embedding = Array.isArray(payload.embeddings)
+      ? payload.embeddings[0]
+      : Array.isArray(payload.data)
+        ? payload.data[0]?.embedding
+        : payload.embedding;
     if (!isFiniteVector(embedding)) {
       throw new Error(`Ollama Cloud returned no usable embedding vector for model "${model}" — confirm the model exists and is available on your plan`);
     }

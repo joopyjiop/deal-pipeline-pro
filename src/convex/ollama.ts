@@ -1,20 +1,28 @@
 "use node";
 
+import { request as httpsRequest } from "node:https";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 import type { ActionCtx } from "./_generated/server";
 import { isFiniteVector } from "./embeddings";
 
-const OLLAMA_API_URL = "https://ollama.com/api";
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
+
+// AI gateway base URL. Defaults to the local OmniRoute instance
+// (https://localhost:20128/v1) — an OpenAI-compatible endpoint that routes to
+// the providers configured in OmniRoute. Override with AI_BASE_URL in the
+// Convex Keys panel if the gateway lives elsewhere. No API key is sent unless
+// AI_API_KEY is configured (some local gateways expect one).
+const AI_BASE_URL = process.env.AI_BASE_URL?.trim() || "https://localhost:20128/v1";
+const AI_API_KEY = process.env.AI_API_KEY?.trim();
 
 const messageValidator = v.object({
   role: v.union(v.literal("system"), v.literal("user"), v.literal("assistant")),
   content: v.string(),
 });
 
-// Owner-only proxy: the Ollama Cloud key never reaches the browser.
+// Owner-only proxy: the AI gateway key (when used) never reaches the browser.
 async function requireOwner(ctx: ActionCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (identity?.email?.trim().toLowerCase() === OWNER_EMAIL) return;
@@ -28,45 +36,95 @@ async function requireOwner(ctx: ActionCtx) {
   throw new Error("Owner access required");
 }
 
-function apiKey() {
-  const key = process.env.OLLAMA_API_KEY?.trim();
-  if (!key) throw new Error("OLLAMA_API_KEY is not configured on the Convex deployment");
-  return key;
+function isPrivateHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname.startsWith("10.") ||
+    hostname.startsWith("192.168.") ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
+  );
 }
 
-async function ollamaRequest(path: string, body?: Record<string, unknown>) {
-  const response = await fetch(`${OLLAMA_API_URL}${path}`, {
-    method: body ? "POST" : "GET",
-    headers: {
-      authorization: `Bearer ${apiKey()}`,
-      ...(body ? { "content-type": "application/json" } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-    signal: AbortSignal.timeout(120_000),
+// OpenAI-compatible request against the gateway. Local/private hosts (like the
+// default https://localhost:20128) typically serve a self-signed certificate,
+// so TLS verification is relaxed for those hosts only — public hosts keep full
+// verification.
+async function aiRequest(
+  path: string,
+  options: { method?: "GET" | "POST"; body?: Record<string, unknown> } = {},
+): Promise<Record<string, unknown>> {
+  const url = new URL(`${AI_BASE_URL.replace(/\/+$/, "")}${path}`);
+  const payload = options.body ? JSON.stringify(options.body) : undefined;
+  return new Promise((resolve, reject) => {
+    const req = httpsRequest(
+      url,
+      {
+        method: options.method ?? (payload ? "POST" : "GET"),
+        headers: {
+          ...(payload ? { "content-type": "application/json" } : {}),
+          ...(AI_API_KEY ? { authorization: `Bearer ${AI_API_KEY}` } : {}),
+        },
+        rejectUnauthorized: !isPrivateHost(url.hostname),
+        timeout: 120_000,
+      },
+      (res) => {
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("end", () => {
+          let parsed: Record<string, unknown> = {};
+          try {
+            parsed = data ? (JSON.parse(data) as Record<string, unknown>) : {};
+          } catch {
+            parsed = {};
+          }
+          const status = res.statusCode ?? 0;
+          if (status < 200 || status >= 300) {
+            const rawError = parsed.error;
+            const detail =
+              typeof rawError === "string"
+                ? rawError
+                : (rawError as { message?: string } | undefined)?.message ?? "";
+            reject(new Error(`AI gateway returned HTTP ${status}${detail ? `: ${detail}` : ""}`));
+            return;
+          }
+          resolve(parsed);
+        });
+      },
+    );
+    req.on("timeout", () => req.destroy(new Error(`AI gateway request timed out (${url.host})`)));
+    req.on("error", (error) => {
+      reject(
+        new Error(
+          `Could not reach the AI gateway at ${url.host} — is OmniRoute running and reachable from the Convex runtime? (${error.message})`,
+        ),
+      );
+    });
+    if (payload) req.write(payload);
+    req.end();
   });
-  const payload = (await response.json().catch(() => ({}))) as {
-    error?: string;
-    message?: { content?: string };
-    models?: Array<{ name?: string }>;
-    embeddings?: Array<Array<number>>;
-  };
-  if (!response.ok) {
-    throw new Error(`Ollama Cloud returned HTTP ${response.status}${payload.error ? `: ${payload.error}` : ""}`);
-  }
-  return payload;
 }
 
 export const listModels = action({
   args: {},
   handler: async (ctx) => {
     await requireOwner(ctx);
-    const payload = await ollamaRequest("/tags");
-    return {
-      models: (payload.models ?? [])
-        .map((model) => model.name)
-        .filter((name): name is string => Boolean(name))
-        .slice(0, 50),
-    };
+    const payload = await aiRequest("/models", { method: "GET" });
+    // OpenAI shape: { data: [{ id }] }; some gateways use { models: [{ id | name }] }.
+    const data = Array.isArray(payload.data) ? (payload.data as Array<{ id?: unknown }>) : [];
+    const models = Array.isArray(payload.models)
+      ? (payload.models as Array<{ id?: unknown; name?: unknown }>)
+      : [];
+    const names = data
+      .map((model) => model.id)
+      .concat(models.map((model) => model.id ?? model.name))
+      .filter((name): name is string => typeof name === "string" && Boolean(name))
+      .slice(0, 50);
+    return { models: names };
   },
 });
 
@@ -78,29 +136,31 @@ export const chat = action({
   handler: async (ctx, args) => {
     await requireOwner(ctx);
     const model = args.model.trim();
-    if (!model || model.length > 120) throw new Error("A valid Ollama Cloud model is required");
+    if (!model || model.length > 120) throw new Error("A valid AI model is required");
     if (args.messages.length === 0 || args.messages.length > 12) throw new Error("The local agent message list is outside the allowed bound");
     if (args.messages.some((message) => message.content.length > 20_000)) throw new Error("The local agent prompt is too large");
 
-    const payload = await ollamaRequest("/chat", {
-      model,
-      messages: args.messages,
-      stream: false,
+    const payload = await aiRequest("/chat/completions", {
+      body: {
+        model,
+        messages: args.messages,
+        stream: false,
+      },
     });
-    const content = payload.message?.content?.trim();
-    if (!content) throw new Error("Ollama Cloud returned no text");
+    const choices = Array.isArray(payload.choices) ? (payload.choices as Array<{ message?: { content?: unknown } }>) : [];
+    const fallback = payload.message as { content?: unknown } | undefined;
+    const content = (choices[0]?.message?.content ?? fallback?.content) as string | undefined;
+    if (!content?.trim()) throw new Error("AI gateway returned no text");
     return {
-      choices: [{ message: { content } }],
+      choices: [{ message: { content: content.trim() } }],
     };
   },
 });
 
-// Embeddings provider note: this action previously called Ollama Cloud, but
-// Ollama Cloud is chat-only — it never serves /api/embed or /v1/embeddings
-// (both return 404), so no model name can make it embed. OpenAI embeddings are
-// used instead so semantic search actually returns vectors. Ollama remains the
-// provider for chat (consultant court / local agents).
-const OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
+// Embedding model pinned exactly: semantic search only works if the indexed
+// vectors and the query vector come from the same model. The gateway routes
+// this model name to whichever embedding provider is configured in OmniRoute.
+const EMBEDDING_MODEL = "text-embedding-3-small";
 
 export const embedText = internalAction({
   args: {
@@ -113,32 +173,17 @@ export const embedText = internalAction({
   handler: async (_, args) => {
     const text = args.text.trim();
     if (!text || text.length > 12_000) throw new Error("Embedding text must be between 1 and 12,000 characters");
-    // The model is pinned exactly: semantic search only works if the indexed
-    // vectors and the query vector come from the same embedding model.
-    const model = OPENAI_EMBEDDING_MODEL;
-    const key = process.env.OPENAI_API_KEY?.trim();
-    if (!key) throw new Error("OPENAI_API_KEY is not configured on the Convex deployment — add it in the Keys panel");
-    const response = await fetch("https://api.openai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${key}`,
-        "content-type": "application/json",
+    const payload = await aiRequest("/embeddings", {
+      body: {
+        model: EMBEDDING_MODEL,
+        input: text,
       },
-      body: JSON.stringify({ model, input: text }),
-      signal: AbortSignal.timeout(60_000),
     });
-    const payload = (await response.json().catch(() => ({}))) as {
-      error?: { message?: string } | string;
-      data?: Array<{ embedding?: unknown }>;
-    };
-    if (!response.ok) {
-      const detail = typeof payload.error === "string" ? payload.error : payload.error?.message;
-      throw new Error(`OpenAI embeddings returned HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
-    }
-    const embedding = Array.isArray(payload.data) ? payload.data[0]?.embedding : undefined;
+    const data = Array.isArray(payload.data) ? (payload.data as Array<{ embedding?: unknown }>) : [];
+    const embedding = data[0]?.embedding;
     if (!isFiniteVector(embedding)) {
-      throw new Error(`OpenAI returned no usable embedding vector for model "${model}"`);
+      throw new Error(`AI gateway returned no usable embedding vector for model "${EMBEDDING_MODEL}"`);
     }
-    return { embedding: embedding as number[], model, dimensions: (embedding as number[]).length };
+    return { embedding: embedding as number[], model: EMBEDDING_MODEL, dimensions: (embedding as number[]).length };
   },
 });

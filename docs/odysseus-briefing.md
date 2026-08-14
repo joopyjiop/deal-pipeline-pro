@@ -53,7 +53,44 @@ Server-side validation (never bypass it, and never try to disable it):
 
 ## MCP server — review and analysis (no writes)
 
-`POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
+`POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
+
+## Shared conversation — collaborate mid-task with the website
+
+The website and Odysseus share one conversation thread per deal/task in the Convex `sharedConversations` table. This is how you collaborate **mid-task** instead of handing off one-way requests. The website side is owner-gated; you post as `odysseus` — the sender is forced server-side, so you can never be mistaken for the website and vice versa.
+
+### Tools
+
+- `shared_threads_list` — discover open threads (message count, last sender/kind, preview).
+- `shared_thread_read` — read the full thread, oldest first. Args: `threadId`, optional `limit`.
+- `shared_thread_post` — post a message as Odysseus. Args: `threadId`, `content`, optional `kind`, optional `refs[]`. Returns `{ ok, messageId }`.
+
+### Thread naming (both sides must agree)
+
+- `deal:<leadId>` — property pipeline collaboration
+- `task:<stagedId>` — source/staging review
+- `buyer:<buyerId>` — buyer-registry work
+- `ops:<topic>` — general operations
+
+### When to post (the collaboration rule)
+
+Post into the relevant thread the moment you hit something outside your strengths — **do not try to handle everything alone**:
+
+1. **Data you cannot reach** — you need a RentCast pull, staging evidence, or a stored lead/buyer document; the website needs county assessor/recorder checks, comps, or skip-trace you already have.
+2. **Blocked readiness gate** — any due-diligence category (title/liens, sale history + comps, condition, occupancy) you cannot verify: post `ESCALATION` naming the exact gap.
+3. **Unknown or untrusted sources** — never push a deal forward from a source neither side can verify; post `REQUEST` for a second pair of eyes.
+4. **Provider failures** — RentCast/gateway/scraper quota or rate limits: post so the website knows why a stage stalled instead of silently retrying.
+5. **Owner-judgment steps** — approvals, dialing, offers, PII handling: post `REQUEST` for the owner. Threads coordinate and recommend; **they never approve a deal**.
+6. **Ambiguous instructions** — ask instead of guessing. Guessing is how fabricated data starts.
+
+Kinds: `MESSAGE` (note), `REQUEST` (please do X), `ESCALATION` (blocked, need help/owner), `RESOLUTION` (closed — summarize what happened).
+
+### Rules
+
+- Never paste API keys, webhook secrets, or unnecessary PII into a thread — both sides read the full thread.
+- Never claim verification that did not happen. A thread message is not verification; only sourced, dated evidence is.
+- Read the thread before starting work on a deal/task, and post `RESOLUTION` when you close an open item.
+- Example: `shared_thread_post { threadId: "deal:<leadId>", kind: "ESCALATION", content: "SALE_HISTORY cannot be verified from here: no comps in the last 12 months within 3 miles. Can the website pull RentCast comps or do we need a county record?", refs: ["<leadId>"] }`
 
 ## Code changes and redeploy
 

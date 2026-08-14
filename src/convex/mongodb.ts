@@ -1657,6 +1657,27 @@ export const getAiToolManifest = action({
           permission: "owner-service",
           input: { address: "string (full property address)", radius: "optional number (0.5-25 miles)", saleDateRange: "optional number (days)", compsLimit: "optional number (1-50)" },
         },
+        {
+          name: "shared_threads_list",
+          enabled: aiEnabled,
+          description: "List every shared conversation thread between the website and Odysseus with message count, last sender, last kind, and a preview, so the agent can discover the threadId to read or continue.",
+          permission: "owner-service",
+          input: { limit: "optional number (1-100)" },
+        },
+        {
+          name: "shared_thread_read",
+          enabled: aiEnabled,
+          description: "Read the full shared conversation thread (oldest first) between Odysseus and the website. Thread ids follow the convention deal:<leadId>, task:<stagedId>, buyer:<buyerId>, or ops:<topic>.",
+          permission: "owner-service",
+          input: { threadId: "string (e.g. deal:<leadId>)", limit: "optional number (1-500)" },
+        },
+        {
+          name: "shared_thread_post",
+          enabled: aiEnabled,
+          description: "Post a message to a shared conversation thread as Odysseus. Use REQUEST to ask the website or owner for something outside your strengths, ESCALATION when blocked, RESOLUTION when an open item is closed, or MESSAGE for a general note. Never paste secrets or unnecessary PII; never claim verification that did not happen; threads coordinate but never approve a deal.",
+          permission: "owner-service",
+          input: { threadId: "string (e.g. deal:<leadId>)", content: "string (max 8000 chars)", kind: "optional MESSAGE|REQUEST|ESCALATION|RESOLUTION", refs: "optional string[] (lead/staged/buyer ids or URLs)" },
+        },
       ],
     };
   },

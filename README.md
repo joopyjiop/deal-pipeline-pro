@@ -52,6 +52,9 @@ Defined with `defineSchema`; `schemaValidation: false`. Every table has `_id` an
 | `users` | `name?`, `image?`, `email?`, `emailVerificationTime?`, `isAnonymous?`, `role?` (`admin` \| `user` \| `member`) | `email` |
 | `appSettings` | `key`, `value`, `updatedAt` | `by_key` (`key`) |
 | `leads` | `propertyAddress`, `city`, `state`, `zip`, `county`, `parcelId?`, `ownerMailingAddress?`, `sourceType` (enum), `sourceUrl`, `sourceRef`, `sourceDate`, `distressScore` (0–100), `distressSignals[]` (`{type, weight, evidence, verified, sourceUrl, sourceDate}`), `verificationStatus` (`UNVERIFIED`\|`PARTIAL`\|`VERIFIED`), `pipelineStatus` (`SOURCED`\|`CRITIQUED`\|`VERIFIED`\|`APPROVED`\|`REJECTED`), `fabricated`, `absenteeOwner`, `needsSkipTrace`, `listedPhone`, `lastVerifiedAt`, `arv?`, `repairs?`, `mao?`, `notes?`, `createdAt`, `updatedAt` | `by_pipeline_status`, `by_verification_status`, `by_source_type`, `by_parcel_id` |
+| `sharedConversations` | `threadId` (conversation/task ref, e.g. `deal:<leadId>`), `sender` (`website` \| `odysseus`), `kind` (`MESSAGE` \| `REQUEST` \| `ESCALATION` \| `RESOLUTION`), `content`, `refs?[]`, `metadata?`, `sentAt` (ms epoch) | `by_thread` (`threadId`), `by_thread_time` (`threadId`, `sentAt`) |
+
+`sharedConversations` is the mid-task collaboration thread between the website and the external Odysseus harness. The website writes via the owner-gated `postSharedMessage` mutation and reads via `getSharedThread`/`listSharedThreads` (UI: `/shared-conversation`); Odysseus writes/reads via the MCP tools `shared_thread_post` / `shared_thread_read` / `shared_threads_list`. Sender is forced server-side — the website can never impersonate Odysseus and vice versa. Protocol: either side posts `REQUEST`/`ESCALATION` when it hits something outside its strengths (see `src/convex/sharedConversation.ts` and `docs/odysseus-briefing.md`).
 
 `sourceType` enum: `SHERIFF_SALE` \| `TAX_SALE` \| `AUCTION_COM` \| `PROBATE` \| `OFF_MARKET` \| `ASSESSOR` \| `RECORDER` \| `MANUAL` \| `SEED`.
 
@@ -85,7 +88,7 @@ All HTTP routes live on the Convex site URL: `https://keen-aardvark-333.convex.s
 | Route | Method | Auth | Purpose |
 | --- | --- | --- | --- |
 | `/api/admin/...` | GET/POST/PATCH/PUT/DELETE | `Authorization: Bearer ADMIN_API_KEY` | Full CRUD over leads, buyers, matches, hot-deals, import-staging (below) |
-| `/api/mcp` | GET/POST/OPTIONS | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` or `x-mcp-api-key` header | MCP tool server for external AI agents (17 tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, …). Recommendations only — never approves |
+| `/api/mcp` | GET/POST/OPTIONS | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` or `x-mcp-api-key` header | MCP tool server for external AI agents (20 tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, …). Recommendations only — never approves |
 | `/api/n8n/source` | POST | `x-convex-n8n-secret: CONVEX_N8N_WEBHOOK_SECRET` | Queue a public source URL for automated processing (n8n recurring runs) |
 | `/api/auth/*` | — | Convex Auth | Email OTP + anonymous sign-in |
 
@@ -277,6 +280,7 @@ Unit tests live in `tests/` and run with Bun's test runner (they live outside `s
 ## Agent handoff (Odysseus & worker agents)
 
 - **Reviewing deals:** use the MCP server at `POST https://keen-aardvark-333.convex.site/api/mcp` with `MCP_TOOL_SERVER_SECRET` (`tools/list` → `list_pipeline`, `list_pipeline_brief`, `run_agent_team`, `consultant_court`, `semantic_search`, …). The MCP surface is read/recommend only.
+- **Collaborating mid-task:** `shared_thread_post` (post as Odysseus), `shared_thread_read` (full thread), `shared_threads_list` (find threads). Post a `REQUEST`/`ESCALATION` whenever you hit something outside your strengths — missing data, blocked gates, unknown sources, or owner-judgment steps — instead of handling it alone. Threads never approve deals.
 - **Writing data:** use the admin API above with `ADMIN_API_KEY` (create/update leads, buyers, matches, hot-deals, staging). Approvals are owner-only; the API validates every shape server-side.
 - **Code fixes + redeploy:** push to `main` on `github.com/joopyjiop/deal-pipeline-pro`; the Render static site auto-redeploys, and `npx convex deploy` updates the backend. Run `bun tsc -b --noEmit && bun test tests` before pushing.
 - **This README is the source of truth** for the schema, admin API, env vars, and deployment. When you change the live app, update the relevant sections here in the same change.

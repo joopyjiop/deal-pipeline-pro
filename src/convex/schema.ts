@@ -54,6 +54,40 @@ const schema = defineSchema(
   {
     ...authTables,
 
+    // Shared conversation thread between the website and the external Odysseus
+    // AI harness (docs/odysseus-briefing.md → "Shared conversation"). Both
+    // sides insert into the same table and read the full thread so they can
+    // collaborate mid-task instead of handing off one-way requests. Convex
+    // documents also carry `_id` and `_creationTime` automatically; `sentAt`
+    // is the explicit insertion timestamp both sides sort on.
+    sharedConversations: defineTable({
+      // Conversation/task reference, e.g. "deal:<leadId>", "task:<stagedId>",
+      // "buyer:<buyerId>", or "ops:<topic>".
+      threadId: v.string(),
+      // Which side wrote the message. Forced server-side: the website mutation
+      // always writes "website", the MCP tools always write "odysseus".
+      sender: v.union(v.literal("website"), v.literal("odysseus")),
+      // Message kind so readers can route by intent (see the protocol comment
+      // in src/convex/shared-conversation.ts).
+      kind: v.union(
+        v.literal("MESSAGE"),
+        v.literal("REQUEST"),
+        v.literal("ESCALATION"),
+        v.literal("RESOLUTION"),
+      ),
+      content: v.string(),
+      // Optional context: lead/staged/buyer ids, URLs, or keys the message
+      // refers to. Never PII beyond what the thread already discusses.
+      refs: v.optional(v.array(v.string())),
+      // Optional structured payload (e.g. a tool result summary). Never
+      // secrets; treated as display-only JSON.
+      metadata: v.optional(v.any()),
+      // Explicit insertion timestamp (ms epoch).
+      sentAt: v.number(),
+    })
+      .index("by_thread", ["threadId"])
+      .index("by_thread_time", ["threadId", "sentAt"]),
+
     users: defineTable({
       name: v.optional(v.string()),
       image: v.optional(v.string()),

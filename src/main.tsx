@@ -20,6 +20,7 @@ import BuyerIntake from "./pages/BuyerIntake";
 import Operations from "./pages/Operations";
 import Toolkit from "./pages/Toolkit";
 import LocalAgents from "./pages/LocalAgents";
+import SharedConversation from "./pages/SharedConversation";
 import NotFound from "./pages/NotFound";
 
 const convex = new ConvexReactClient(CONVEX_URL);
@@ -93,6 +94,14 @@ createRoot(document.getElementById("root")!).render(
               element={
                 <RequireAuth>
                   <LocalAgents />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/shared-conversation"
+              element={
+                <RequireAuth>
+                  <SharedConversation />
                 </RequireAuth>
               }
             />

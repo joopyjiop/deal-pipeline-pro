@@ -2,6 +2,7 @@ import { httpRouter } from "convex/server";
 import { httpAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { auth } from "./auth";
+import { messageContent, normalizeThreadId, sanitizeRefs } from "./sharedConversation";
 
 const http = httpRouter();
 
@@ -256,6 +257,9 @@ function mcpTools() {
     { name: "run_agent_team", description: "Run the sourcing, verification, rental underwriting, and ARV/repairs agents over one lead and return the aggregated readiness gate with every blocking data gap. Recommendations only; owner approval remains required.", inputSchema: { type: "object", properties: { leadId: { type: "string", description: "Lead _id to model" }, rental: { type: "object", description: "Rental underwriting inputs. purchasePrice required when provided; rentComps, annualPropertyTax, annualInsurance, loanAmount, interestRatePct, loanTermYears optional. Falls back to the lead's MAO/acquisition price otherwise.", properties: { purchasePrice: { type: "number", minimum: 0 }, rentComps: { type: "array", items: { type: "number", minimum: 0 } }, annualPropertyTax: { type: "number", minimum: 0 }, annualInsurance: { type: "number", minimum: 0 }, loanAmount: { type: "number", minimum: 0 }, interestRatePct: { type: "number", minimum: 0 }, loanTermYears: { type: "number", minimum: 1 } }, additionalProperties: false }, compPrices: { type: "array", items: { type: "number", minimum: 0 }, description: "Sold comparable prices for ARV" }, repairTier: { type: "string", enum: ["BASE", "MEDIUM", "GUT"] } }, required: ["leadId"], additionalProperties: false } },
     { name: "list_pipeline_brief", description: "Read the readiness gate across every eligible lead: which deals are ready and which are blocked by specific missing underwriting data.", inputSchema: { type: "object", properties: { limit: { type: "number", minimum: 1, maximum: 200 } }, additionalProperties: false } },
     { name: "semantic_search", description: "Search leads by meaning rather than exact text: the query is embedded and ranked against every indexed lead with cosine similarity. Requires the lead embeddings to be indexed first. Never invents data; fabricated rows are excluded.", inputSchema: { type: "object", properties: { query: { type: "string", description: "Natural-language search, e.g. '3-bed distressed house near Dallas under 200k'" }, limit: { type: "number", minimum: 1, maximum: 50 } }, required: ["query"], additionalProperties: false } },
+    { name: "shared_threads_list", description: "List every shared conversation thread with message count, last sender, last kind, and last content preview. Use it to discover the threadId to read or continue.", inputSchema: { type: "object", properties: { limit: { type: "number", minimum: 1, maximum: 100 } }, additionalProperties: false } },
+    { name: "shared_thread_read", description: "Read the full shared conversation thread (oldest first) between Odysseus and the website. Thread ids follow the convention deal:<leadId>, task:<stagedId>, buyer:<buyerId>, or ops:<topic>.", inputSchema: { type: "object", properties: { threadId: { type: "string", description: "e.g. deal:<leadId> or task:<stagedId>" }, limit: { type: "number", minimum: 1, maximum: 500 } }, required: ["threadId"], additionalProperties: false } },
+    { name: "shared_thread_post", description: "Post a message to a shared conversation thread as Odysseus. Use it when you hit something outside your strengths and need the website or owner (REQUEST), when you are blocked (ESCALATION), when you resolve an open item (RESOLUTION), or for a general note (MESSAGE). Never paste secrets or unnecessary PII; never claim verification that did not happen. Threads recommend and coordinate — they never approve a deal.", inputSchema: { type: "object", properties: { threadId: { type: "string", description: "e.g. deal:<leadId> or task:<stagedId>" }, content: { type: "string", description: "Message body (max 8000 chars)" }, kind: { type: "string", enum: ["MESSAGE", "REQUEST", "ESCALATION", "RESOLUTION"] }, refs: { type: "array", items: { type: "string" }, description: "Optional context: lead/staged/buyer ids or URLs" } }, required: ["threadId", "content"], additionalProperties: false } },
   ];
 }
 
@@ -381,6 +385,39 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
     const limit = optionalNumber(rawArguments.limit);
     if (Number.isNaN(limit)) throw new Error("semantic_search limit must be a number when provided");
     return ctx.runAction(internal.mongodb.mcpSemanticSearch, { query: rawArguments.query, limit });
+  }
+  if (name === "shared_threads_list") {
+    const limit = optionalNumber(rawArguments.limit);
+    if (Number.isNaN(limit)) throw new Error("shared_threads_list limit must be a number when provided");
+    return ctx.runQuery(internal.sharedConversation.threadSummaries, { limit: Math.max(1, Math.min(100, Math.floor(limit ?? 100))) });
+  }
+  if (name === "shared_thread_read") {
+    if (typeof rawArguments.threadId !== "string" || !rawArguments.threadId.trim()) throw new Error("shared_thread_read requires threadId");
+    const limit = optionalNumber(rawArguments.limit);
+    if (Number.isNaN(limit)) throw new Error("shared_thread_read limit must be a number when provided");
+    const messages = await ctx.runQuery(internal.sharedConversation.threadMessages, {
+      threadId: normalizeThreadId(rawArguments.threadId),
+      limit: Math.max(1, Math.min(500, Math.floor(limit ?? 500))),
+    });
+    return { threadId: normalizeThreadId(rawArguments.threadId), count: messages.length, messages };
+  }
+  if (name === "shared_thread_post") {
+    if (typeof rawArguments.threadId !== "string" || !rawArguments.threadId.trim()) throw new Error("shared_thread_post requires threadId");
+    if (typeof rawArguments.content !== "string" || !rawArguments.content.trim()) throw new Error("shared_thread_post requires content");
+    const kind = optionalString(rawArguments.kind);
+    if (kind === "__invalid__") throw new Error("kind must be a string when provided");
+    if (kind !== undefined && kind !== "MESSAGE" && kind !== "REQUEST" && kind !== "ESCALATION" && kind !== "RESOLUTION") throw new Error("kind must be MESSAGE, REQUEST, ESCALATION, or RESOLUTION");
+    const refs = rawArguments.refs === undefined ? undefined : (Array.isArray(rawArguments.refs) && rawArguments.refs.every((ref) => typeof ref === "string") ? rawArguments.refs : undefined);
+    if (rawArguments.refs !== undefined && !refs) throw new Error("refs must be an array of strings when provided");
+    const messageId = await ctx.runMutation(internal.sharedConversation.insertMessage, {
+      threadId: normalizeThreadId(rawArguments.threadId),
+      sender: "odysseus",
+      kind: (kind ?? "MESSAGE") as "MESSAGE" | "REQUEST" | "ESCALATION" | "RESOLUTION",
+      content: messageContent(rawArguments.content),
+      refs: sanitizeRefs(refs as string[] | undefined),
+      sentAt: Date.now(),
+    });
+    return { ok: true, messageId, sender: "odysseus" };
   }
   throw new Error(`Unknown MCP tool: ${name}`);
 }

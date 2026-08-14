@@ -1,261 +1,283 @@
-## Overview
+# Deal Pipeline Pro
 
-This project uses the following tech stack:
-- Vite
-- Typescript
-- React Router v7 (all imports from `react-router` instead of `react-router-dom`)
-- React 19 (for frontend components)
-- Tailwind v4 (for styling)
-- Shadcn UI (for UI components library)
-- Lucide Icons (for icons)
-- Convex (for backend & database)
-- Convex Auth (for authentication)
-- Framer Motion (for animations)
-- Three js (for 3d models)
+Full-stack wholesale real-estate deal-finding and deal-making platform. It sources **real, verified** property leads from public records (sheriff sales, tax sales, auctions, probate, assessor/recorder records), runs full underwriting (rent estimates, cash flow, DSCR, ARV, repairs), matches buyers against approved deals with confidence scoring, and exposes both a human dashboard and machine endpoints (admin REST API + MCP tool server) so external AI agents can review and maintain the pipeline.
 
-All relevant files live in the 'src' directory.
+**Non-negotiables:** no fabricated PII ever reaches export or dial paths. Rows flagged `fabricated: true` (old AI/seed rows) are tombstoned and excluded from every feed, search, export, and match. Every live lead carries a source URL, source reference, and source date. Agent recommendations never approve a lead — the owner does.
 
-Use bun for the package manager.
+---
 
-## Setup
+## Repository & version control
 
-This project is set up already and running on a cloud environment, as well as a convex development in the sandbox.
+- Remote: `https://github.com/joopyjiop/deal-pipeline-pro.git`
+- Branch: `main`
+- The Freebuff/Vly platform manages version control for this project. `git` commands are blocked from the sandbox terminal; pushes are handled by the platform's own sync. When a worker agent needs to push from its own environment, it can use the remote above directly.
 
-## Product operating plan
+---
 
-The applied MVP and customer-validation plan lives in [`docs/minimalist-mvp-plan.md`](docs/minimalist-mvp-plan.md). It keeps the first customer outcome focused on one public source, one evidence-reviewed lead, and one approved buyer match.
+## Tech stack
 
-## Environment Variables
+- **Frontend:** Vite + TypeScript + React 19 + React Router v7 (`react-router`) + Tailwind v4 + shadcn/ui + Lucide icons + Framer Motion
+- **Backend:** Convex (functions, auth, crons) — see `src/convex/`
+- **Primary data store:** MongoDB (leads, buyers, matches, hot deals, staging) — accessed from Convex actions via `MONGODB_URI`
+- **Auth:** Convex Auth (email OTP + anonymous)
+- **Package manager:** Bun (`bun install`, `bun test`, `bun run build`)
+- **AI:** Ollama Cloud (consultant court), OpenAI-compatible AI gateway via `AI_BASE_URL` (default: local OmniRoute at `https://localhost:20128/v1`, embeddings `text-embedding-3-small`)
+- **Data providers:** RentCast (property data/rent/AVM), Firecrawl (crawl), ScrapeGraphAI (extract), Camofox browser proxy (anti-detection fetch), n8n (recurring source runs)
 
-The project is set up with project specific CONVEX_DEPLOYMENT and VITE_CONVEX_URL environment variables on the client side.
+---
 
-The convex server has a separate set of environment variables that are accessible by the convex backend.
+## Architecture
 
-Currently, these variables include auth-specific keys: JWKS, JWT_PRIVATE_KEY, and SITE_URL.
-
-
-# Using Authentication (Important!)
-
-You must follow these conventions when using authentication.
-
-## Auth is already set up.
-
-All convex authentication functions are already set up. The auth currently uses email OTP and anonymous users, but can support more.
-
-The email OTP configuration is defined in `src/convex/auth/emailOtp.ts`. DO NOT MODIFY THIS FILE.
-
-Also, DO NOT MODIFY THESE AUTH FILES: `src/convex/auth.config.ts` and `src/convex/auth.ts`.
-
-## Using Convex Auth on the backend
-
-On the `src/convex/users.ts` file, you can use the `getCurrentUser` function to get the current user's data.
-
-## Using Convex Auth on the frontend
-
-The `/auth` page is already set up to use auth. Navigate to `/auth` for all log in / sign up sequences.
-
-You MUST use this hook to get user data. Never do this yourself without the hook:
-```typescript
-import { useAuth } from "@/hooks/use-auth";
-
-const { isLoading, isAuthenticated, user, signIn, signOut } = useAuth();
+```text
+Browser (React) ── Convex client ──> Convex Cloud (keen-aardvark-333)
+                                      ├── queries/mutations/actions (src/convex/*)
+                                      ├── HTTP routes: /api/admin, /api/mcp, /api/n8n/source, auth
+                                      └── crons (src/convex/crons.ts)
+                                              │
+                                      MongoDB (MONGODB_URI): leads, hot_deals, buyers,
+                                      property_matches, import_staging, tool_access,
+                                      automation_tasks, integration_checks
 ```
 
-## Protected Routes
+The Convex `users`, `appSettings`, and a `leads` table live in Convex itself (see below); the operational pipeline data lives in MongoDB.
 
-When protecting a page, use the auth hooks to check for authentication and redirect to /auth.
+---
 
-## Auth Page
+## Convex schema (`src/convex/schema.ts`)
 
-The auth page is defined in `src/pages/Auth.tsx`. Redirect authenticated pages and sign in / sign up to /auth.
+Defined with `defineSchema`; `schemaValidation: false`. Every table has `_id` and `_creationTime` automatically.
 
-## Authorization
+| Table | Fields | Indexes |
+| --- | --- | --- |
+| `users` | `name?`, `image?`, `email?`, `emailVerificationTime?`, `isAnonymous?`, `role?` (`admin` \| `user` \| `member`) | `email` |
+| `appSettings` | `key`, `value`, `updatedAt` | `by_key` (`key`) |
+| `leads` | `propertyAddress`, `city`, `state`, `zip`, `county`, `parcelId?`, `ownerMailingAddress?`, `sourceType` (enum), `sourceUrl`, `sourceRef`, `sourceDate`, `distressScore` (0–100), `distressSignals[]` (`{type, weight, evidence, verified, sourceUrl, sourceDate}`), `verificationStatus` (`UNVERIFIED`\|`PARTIAL`\|`VERIFIED`), `pipelineStatus` (`SOURCED`\|`CRITIQUED`\|`VERIFIED`\|`APPROVED`\|`REJECTED`), `fabricated`, `absenteeOwner`, `needsSkipTrace`, `listedPhone`, `lastVerifiedAt`, `arv?`, `repairs?`, `mao?`, `notes?`, `createdAt`, `updatedAt` | `by_pipeline_status`, `by_verification_status`, `by_source_type`, `by_parcel_id` |
 
-You can perform authorization checks on the frontend and backend.
+`sourceType` enum: `SHERIFF_SALE` \| `TAX_SALE` \| `AUCTION_COM` \| `PROBATE` \| `OFF_MARKET` \| `ASSESSOR` \| `RECORDER` \| `MANUAL` \| `SEED`.
 
-On the frontend, you can use the `useAuth` hook to get the current user's data and authentication state.
+Plus `authTables` from `@convex-dev/auth/server` (auth accounts/sessions/verification codes — do not edit).
 
-You should also be protecting queries, mutations, and actions at the base level, checking for authorization securely.
+> Note: a `leads` table also exists in MongoDB (`src/convex/mongodb.ts`). The Convex `leads` table predates the MongoDB migration; the live pipeline, admin API, and MCP server operate on the MongoDB `leads` collection.
 
-## Adding a redirect after auth
+---
 
-In `src/main.tsx`, you must add a redirect after auth URL to redirect to the correct dashboard/profile/page that should be created after authentication.
+## MongoDB collections
 
-# Frontend Conventions
+Managed from Convex actions (`src/convex/mongodb.ts`, `src/convex/admin.ts`).
 
-You will be using the Vite frontend with React 19, Tailwind v4, and Shadcn UI.
+| Collection | Contents |
+| --- | --- |
+| `leads` | Source-verified property leads: `propertyAddress`, `city`, `state`, `zip`, `county`, `parcelId?`, `ownerMailingAddress?`, `sourceType`, `sourceUrl`, `sourceRef`, `sourceDate`, `distressScore`, `distressSignals[]`, `verificationStatus`, `pipelineStatus`, `fabricated` (true = tombstoned, never exportable), `absenteeOwner`, `needsSkipTrace`, `listedPhone`, `arv?`, `repairs?`, `mao?`, `acquisitionPrice?`, `estimatedProfit?`, `dueDiligence?` (four evidence categories), `notes?`, `createdAt`, `updatedAt` |
+| `hot_deals` | Paywalled hot-deals feed. Same shape as leads minus pipeline fields. Non-fabricated rows must be `VERIFIED` with `distressScore >= 80` |
+| `buyers` | Buyer registry: `name`, `phone`, `email`, `budgetMin`, `budgetMax`, `targetAreas[]`, `exitType` (`ASSIGN`\|`FLIP`\|`BUY_HOLD`), `proofOfFundsStatus` (`NONE`\|`SELF_REPORTED`\|`VERIFIED`), `pofEvidenceRef?`, `purchaseHistory`, `listSource`, `intakeStatus` (`PENDING`\|`APPROVED`\|`REJECTED`), `verificationStatus`, `createdAt`, `updatedAt` |
+| `property_matches` | Lead↔buyer matches: `leadId`, `buyerId`, `matchScore` (0–100), `buyBoxSummary`, `confidence` (`LOW`\|`MEDIUM`\|`HIGH`), `status` (`CANDIDATE`\|`APPROVED`\|`REJECTED`\|`CONTACTED`\|`CLOSED`), `rejectReason?`, `createdAt`, `updatedAt` |
+| `import_staging` | Pending source/staging queue: `sourceType`, `rawJson`, `status` (`NEW`\|`DUPLICATE`\|`REJECTED`), `rejectReason?`, `aiCourtVerdict?`, `candidateLeadId?`, `createdAt`, `updatedAt`. Public buyer intake also lands here as `listSource: "PUBLIC_INTAKE"` |
+| `tool_access` | Singleton doc `_id: "admin_tools"` — feature toggles (`scraperEnabled`, `estimatorEnabled`, `aiEnabled`, `automationEnabled`, `automationMode`, `dailyRunLimit`, `runsToday`, `usageDay`) |
+| `automation_tasks` | Queued automation runs (`SCRAPE` / `ESTIMATE`, status `PENDING`\|`RUNNING`\|`COMPLETED`\|`FAILED`) |
+| `integration_checks` | Health-check results for connected providers |
 
-Generally, pages should be in the `src/pages` folder, and components should be in the `src/components` folder.
+---
 
-Shadcn primitives are located in the `src/components/ui` folder and should be used by default.
+## HTTP API layer (`src/convex/http.ts`)
 
-## Page routing
+All HTTP routes live on the Convex site URL: `https://keen-aardvark-333.convex.site` (the `.convex.site` host of the deployment).
 
-Your page component should go under the `src/pages` folder.
+| Route | Method | Auth | Purpose |
+| --- | --- | --- | --- |
+| `/api/admin/...` | GET/POST/PATCH/PUT/DELETE | `Authorization: Bearer ADMIN_API_KEY` | Full CRUD over leads, buyers, matches, hot-deals, import-staging (below) |
+| `/api/mcp` | GET/POST/OPTIONS | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` or `x-mcp-api-key` header | MCP tool server for external AI agents (17 tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, …). Recommendations only — never approves |
+| `/api/n8n/source` | POST | `x-convex-n8n-secret: CONVEX_N8N_WEBHOOK_SECRET` | Queue a public source URL for automated processing (n8n recurring runs) |
+| `/api/auth/*` | — | Convex Auth | Email OTP + anonymous sign-in |
 
-When adding a page, update the react router configuration in `src/main.tsx` to include the new route you just added.
+---
 
-## Shad CN conventions
+## Admin API (`/api/admin`)
 
-Follow these conventions when using Shad CN components, which you should use by default.
-- Remember to use "cursor-pointer" to make the element clickable
-- For title text, use the "tracking-tight font-bold" class to make the text more readable
-- Always make apps MOBILE RESPONSIVE. This is important
-- AVOID NESTED CARDS. Try and not to nest cards, borders, components, etc. Nested cards add clutter and make the app look messy.
-- AVOID SHADOWS. Avoid adding any shadows to components. stick with a thin border without the shadow.
-- Avoid skeletons; instead, use the loader2 component to show a spinning loading state when loading data.
+Owner-only write surface for worker agents and integrations. **Every request must send `Authorization: Bearer <ADMIN_API_KEY>`** (constant-time compared server-side). Body limit 512 KB. All mutations are enforced server-side — the UI never bypasses this layer.
 
+### Resources and operations
 
-## Landing Pages
+| Resource | LIST (GET no id) | GET (by id) | CREATE (POST) | UPDATE (PATCH/PUT by id) | DELETE (by id) |
+| --- | --- | --- | --- | --- | --- |
+| `leads` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `buyers` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `matches` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `hot-deals` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `import-staging` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `users` | ✅ | ❌ read-only by design (no role/email edits over HTTP) | ❌ | ❌ | ❌ |
 
-You must always create good-looking designer-level styles to your application. 
-- Make it well animated and fit a certain "theme", ie neo brutalist, retro, neumorphism, glass morphism, etc
+### Endpoint shapes
 
-Use known images and emojis from online.
+- `GET /api/admin/{resource}` — list (max 500 rows, default 200). Query filters:
+  - All: `limit`
+  - `leads`: `status` (pipelineStatus), `verificationStatus`, `minDistressScore`, `maxDistressScore`
+  - `hot-deals`: `status` (verificationStatus), `minDistressScore`
+  - `buyers`: `status` (intakeStatus), `proofOfFundsStatus`
+  - `matches`: `status`, `confidence`, `minMatchScore`
+  - `import-staging`: `status`
+- `GET /api/admin/{resource}/{id}` — one document (`_id` is the MongoDB ObjectId as a string)
+- `POST /api/admin/{resource}` — create; body is the document (without `_id`/`createdAt`/`updatedAt`, which are managed)
+- `PATCH /api/admin/{resource}/{id}` (or `PUT`) — partial merge update; body is the fields to change
+- `DELETE /api/admin/{resource}/{id}` — hard delete
 
-If the user is logged in already, show the get started button to say "Dashboard" or "Profile" instead to take them there.
+### Response shapes
 
-## Responsiveness and formatting
-
-Make sure pages are wrapped in a container to prevent the width stretching out on wide screens. Always make sure they are centered aligned and not off-center.
-
-Always make sure that your designs are mobile responsive. Verify the formatting to ensure it has correct max and min widths as well as mobile responsiveness.
-
-- Always create sidebars for protected dashboard pages and navigate between pages
-- Always create navbars for landing pages
-- On these bars, the created logo should be clickable and redirect to the index page
-
-## Animating with Framer Motion
-
-You must add animations to components using Framer Motion. It is already installed and configured in the project.
-
-To use it, import the `motion` component from `framer-motion` and use it to wrap the component you want to animate.
-
-
-### Other Items to animate
-- Fade in and Fade Out
-- Slide in and Slide Out animations
-- Rendering animations
-- Button clicks and UI elements
-
-Animate for all components, including on landing page and app pages.
-
-## Three JS Graphics
-
-Your app comes with three js by default. You can use it to create 3D graphics for landing pages, games, etc.
-
-
-## Colors
-
-You can override colors in: `src/index.css`
-
-This uses the oklch color format for tailwind v4.
-
-Always use these color variable names.
-
-Make sure all ui components are set up to be mobile responsive and compatible with both light and dark mode.
-
-Set theme using `dark` or `light` variables at the parent className.
-
-## Styling and Theming
-
-When changing the theme, always change the underlying theme of the shad cn components app-wide under `src/components/ui` and the colors in the index.css file.
-
-Avoid hardcoding in colors unless necessary for a use case, and properly implement themes through the underlying shad cn ui components.
-
-When styling, ensure buttons and clickable items have pointer-click on them (don't by default).
-
-Always follow a set theme style and ensure it is tuned to the user's liking.
-
-## Toasts
-
-You should always use toasts to display results to the user, such as confirmations, results, errors, etc.
-
-Use the shad cn Sonner component as the toaster. For example:
-
-```
-import { toast } from "sonner"
-
-import { Button } from "@/components/ui/button"
-export function SonnerDemo() {
-  return (
-    <Button
-      variant="outline"
-      onClick={() =>
-        toast("Event has been created", {
-          description: "Sunday, December 03, 2023 at 9:00 AM",
-          action: {
-            label: "Undo",
-            onClick: () => console.log("Undo"),
-          },
-        })
-      }
-    >
-      Show Toast
-    </Button>
-  )
-}
+```jsonc
+// LIST
+{ "resource": "leads", "count": 2, "data": [ /* docs */ ] }
+// GET / CREATE / UPDATE
+{ "resource": "leads", "id": "64f1…", "data": { /* doc */ } }
+// DELETE
+{ "resource": "leads", "id": "64f1…", "deleted": true }
 ```
 
-Remember to import { toast } from "sonner". Usage: `toast("Event has been created.")`
+Errors: `401` unauthorized · `400` bad filter/body · `404` unknown resource or missing doc · `405` unsupported method/route shape · `413` body too large · `422` validation failure. ObjectIds and Dates are serialized to strings/ISO in responses.
 
-## Dialogs
+### Validation rules (enforced in `src/convex/admin.ts`)
 
-Always ensure your larger dialogs have a scroll in its content to ensure that its content fits the screen size. Make sure that the content is not cut off from the screen.
+- **leads:** required `propertyAddress`, `city`, `state`, `zip`, `county`, `sourceType`, `sourceUrl`, `sourceRef`, `sourceDate`, `distressScore` (0–100), `distressSignals[]` (each with `type`, `weight`, `evidence`, `verified`, `sourceUrl`, `sourceDate`), `verificationStatus`, `pipelineStatus`. `sourceType: "SEED"` forces `fabricated: true`; a row already `fabricated: true` can never be un-tombstoned.
+- **hot-deals:** same base shape; non-fabricated rows must be `verificationStatus: "VERIFIED"` with `distressScore >= 80`.
+- **buyers:** required `name`, `phone`, `email`, `listSource`, `budgetMin <= budgetMax` (both ≥ 0), `targetAreas[]`, `exitType`, `proofOfFundsStatus`, `intakeStatus`, `verificationStatus`. `proofOfFundsStatus: "VERIFIED"` requires `pofEvidenceRef`.
+- **matches:** required `leadId`, `buyerId`, `buyBoxSummary`, `matchScore` (0–100), `confidence`, `status`. The lead must exist, be non-fabricated, `APPROVED` and `VERIFIED`; the buyer must be `intakeStatus: "APPROVED"`. `confidence: "HIGH"` requires the buyer to have verified proof of funds.
+- **import-staging:** required `sourceType` + `rawJson` (any), `status` in `NEW`/`DUPLICATE`/`REJECTED`.
 
-Ideally, instead of using a new page, use a Dialog instead. 
+### Examples
 
-# Using the Convex backend
+```bash
+# Create a lead (worker agent)
+curl -X POST https://keen-aardvark-333.convex.site/api/admin/leads \
+  -H "Authorization: Bearer $ADMIN_API_KEY" -H "content-type: application/json" \
+  -d '{
+    "propertyAddress": "5500 Grand Lake Dr", "city": "San Antonio", "state": "TX",
+    "zip": "78244", "county": "Bexar", "sourceType": "SHERIFF_SALE",
+    "sourceUrl": "https://www.bexar.org/sheriff-sales/", "sourceRef": "2026-CF-00123",
+    "sourceDate": "2026-08-01", "distressScore": 72,
+    "distressSignals": [{ "type": "PRE_FORECLOSURE", "weight": 72, "evidence": "Listed in official sheriff sale schedule.", "verified": true, "sourceUrl": "https://www.bexar.org/sheriff-sales/", "sourceDate": "2026-08-01" }],
+    "verificationStatus": "PARTIAL", "pipelineStatus": "SOURCED",
+    "absenteeOwner": false, "needsSkipTrace": true, "listedPhone": false
+  }'
 
-You will be implementing the convex backend. Follow your knowledge of convex and the documentation to implement the backend.
+# Approve a buyer's intake
+curl -X PATCH https://keen-aardvark-333.convex.site/api/admin/buyers/<id> \
+  -H "Authorization: Bearer $ADMIN_API_KEY" -H "content-type: application/json" \
+  -d '{ "intakeStatus": "APPROVED" }'
 
-## The Convex Schema
-
-You must correctly follow the convex schema implementation.
-
-The schema is defined in `src/convex/schema.ts`.
-
-Do not include the `_id` and `_creationTime` fields in your queries (it is included by default for each table).
-Do not index `_creationTime` as it is indexed for you. Never have duplicate indexes.
-
-
-## Convex Actions: Using CRUD operations
-
-When running anything that involves external connections, you must use a convex action with "use node" at the top of the file.
-
-You cannot have queries or mutations in the same file as a "use node" action file. Thus, you must use pre-built queries and mutations in other files.
-
-You can also use the pre-installed internal crud functions for the database:
-
-```ts
-// in convex/users.ts
-import { crud } from "convex-helpers/server/crud";
-import schema from "./schema.ts";
-
-export const { create, read, update, destroy } = crud(schema, "users");
-
-// in some file, in an action:
-const user = await ctx.runQuery(internal.users.read, { id: userId });
-
-await ctx.runMutation(internal.users.update, {
-  id: userId,
-  patch: {
-    status: "inactive",
-  },
-});
+# List verified, approved leads
+curl "https://keen-aardvark-333.convex.site/api/admin/leads?status=APPROVED&verificationStatus=VERIFIED&limit=50" \
+  -H "Authorization: Bearer $ADMIN_API_KEY"
 ```
 
+---
 
-## Common Convex Mistakes To Avoid
+## Environment variables
 
-When using convex, make sure:
-- Document IDs are referenced as `_id` field, not `id`.
-- Document ID types are referenced as `Id<"TableName">`, not `string`.
-- Document object types are referenced as `Doc<"TableName">`.
-- Keep schemaValidation to false in the schema file.
-- You must correctly type your code so that it passes the type checker.
-- You must handle null / undefined cases of your convex queries for both frontend and backend, or else it will throw an error that your data could be null or undefined.
-- Always use the `@/folder` path, with `@/convex/folder/file.ts` syntax for importing convex files.
-- This includes importing generated files like `@/convex/_generated/server`, `@/convex/_generated/api`
-- Remember to import functions like useQuery, useMutation, useAction, etc. from `convex/react`
-- NEVER have return type validators.
+### Client / build-time (`src/lib/convex-url.ts`)
+
+| Variable | Purpose |
+| --- | --- |
+| `VITE_CONVEX_URL` | Convex URL injected by the Freebuff platform for its sandbox deployment. **Not used at runtime** — the app hardcodes the owner deployment. |
+| `VITE_CONVEX_URL_OVERRIDE` | Escape hatch for self-hosted builds (Render/Vercel/etc.). When set, the browser talks to this Convex deployment instead of the default. |
+
+### Server-side (Convex Keys panel / environment)
+
+Set in the Convex dashboard (or `npx convex env set`). Never in the browser bundle.
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `MONGODB_URI` | ✅ | MongoDB connection string for the primary data store. A Convex-stored fallback (`mongoUri` setting) is used when the env var is absent/unreachable |
+| `ADMIN_API_KEY` | ✅ (if using admin API) | Bearer key for `/api/admin/*` |
+| `MCP_TOOL_SERVER_SECRET` | ✅ (if using MCP) | Bearer / `x-mcp-api-key` for `/api/mcp` |
+| `CONVEX_N8N_WEBHOOK_SECRET` | n8n only | `x-convex-n8n-secret` for `/api/n8n/source` |
+| `JWKS` | auth | Auth JSON Web Key Set |
+| `JWT_PRIVATE_KEY` | auth | Auth JWT signing key |
+| `SITE_URL` | auth | Canonical app URL used by Convex Auth |
+| `VLY_EMAIL_API_KEY` | optional | Freebuff email-OTP relay key (has a built-in fallback; env var wins) |
+| `VLY_APP_NAME` | optional | App name shown in OTP emails |
+| `RENTCAST_API_KEY` | RentCast features | RentCast property/rent/AVM data |
+| `CAMOFOX_BASE_URL` | Camofox features | Base URL of the camofox browser proxy (default `https://camofox-browser-h1ib.onrender.com`) |
+| `CAMOFOX_API_KEY` | Camofox features | Bearer key for the camofox proxy |
+| `SGAI_API_KEY` | ScrapeGraphAI | `SGAI-APIKEY` header for `v2-api.scrapegraphai.com` |
+| `FIRECRAWL_API_KEY` | Firecrawl | Firecrawl API key |
+| `OLLAMA_API_KEY` | consultant court | Ollama Cloud key (`https://ollama.com/api`) for the AI consultant court |
+| `OLLAMA_MODEL` | optional | Chat model override (default `gpt-oss:20b`) |
+| `OLLAMA_COURT_MODEL` | optional | Court model override (wins over `OLLAMA_MODEL`) |
+| `AI_BASE_URL` | optional | OpenAI-compatible AI gateway base for chat + embeddings. Default `https://localhost:20128/v1` (local OmniRoute) |
+| `AI_API_KEY` | optional | Bearer key sent to the AI gateway (some local gateways expect one) |
+
+---
+
+## Deployment
+
+### Current hosting
+
+The app currently runs on the Freebuff platform, which manages the dev server and the Convex dev process (`keen-aardvark-333`). The Convex deployment is the production backend; its env vars live in the Convex dashboard's Environment Variables panel.
+
+### Self-hosted: Render (end-to-end)
+
+The stack has two deployable parts: the Convex backend (Convex Cloud, not Render) and the static Vite frontend (Render). A companion camofox browser proxy is an optional third service.
+
+**1. Backend — Convex Cloud**
+- Push backend changes: `npx convex deploy` (from a machine with Convex auth) or wire it into CI with `CONVEX_DEPLOYMENT` + a deploy token.
+- Set every server-side env var above in **Convex dashboard → Settings → Environment Variables** (`npx convex env set KEY value` also works).
+- HTTP routes are served automatically at `https://keen-aardvark-333.convex.site`.
+
+**2. Frontend — Render Static Site**
+- In Render: **New → Static Site** → connect `github.com/joopyjiop/deal-pipeline-pro`.
+- **Build command:** `bun install && bun run build` (fallback: `npm ci && npm run build` — the build script is `tsc -b && vite build`).
+- **Publish directory:** `dist`.
+- **Environment:** set `VITE_CONVEX_URL_OVERRIDE=https://keen-aardvark-333.convex.cloud` so the deployed bundle talks to the production Convex deployment.
+- **Auto-deploy:** enable auto-deploy on `main` — every push to the repo rebuilds and redeploys the site (this is the redeploy path for worker agents).
+
+**3. Optional — Camofox browser proxy (Render Web Service)**
+- The camofox-browser service (`https://camofox-browser-h1ib.onrender.com`) is a separate Render web service. Point `CAMOFOX_BASE_URL` and `CAMOFOX_API_KEY` at it from the Convex deployment.
+
+**Post-deploy verification**
+1. `GET https://{your-site}.onrender.com` loads the landing page.
+2. `GET https://keen-aardvark-333.convex.site/api/admin/leads?limit=1` with `Authorization: Bearer $ADMIN_API_KEY` returns 200 (or 401 without the key).
+3. `POST /api/mcp` with `{ "jsonrpc": "2.0", "method": "tools/list", "id": 1 }` returns the tool manifest.
+4. Sign in with email OTP on the deployed site.
+
+---
+
+## Local development
+
+```bash
+bun install        # install dependencies
+bun convex dev     # run the Convex dev backend (generates src/convex/_generated)
+bun run dev        # run the Vite dev server
+```
+
+Verification commands (run before finishing any change):
+
+```bash
+bun tsc -b --noEmit   # typecheck
+bun test tests        # unit tests (Bun test runner)
+bun run lint          # ESLint
+```
+
+After touching anything under `src/convex/`, regenerate types first: `bun convex dev --once`, then typecheck. Never hand-edit `src/convex/_generated/*`.
+
+---
+
+## Testing
+
+Unit tests live in `tests/` and run with Bun's test runner (they live outside `src/convex/` so the Convex bundle never sees `bun:test`). Coverage includes: coordinated agent team, embeddings/cosine ranking, RentCast client, ScrapeGraphAI, sitemap discovery, search ranking, underwriting, and reference extraction.
+
+---
+
+## Code conventions (keep these)
+
+- **Auth:** use the `useAuth()` hook from `@/hooks/use-auth` on the frontend; `getCurrentUser` from `@/convex/users.ts` on the backend. Never modify `src/convex/auth.ts`, `src/convex/auth.config.ts`, or `src/convex/auth/emailOtp.ts`.
+- **Owner gate:** every write action requires the permanent owner — `requirePermanentOwner` (`src/convex/owner.ts`) for Convex tables, `requireOwner`/`isOwnerIdentity` (`src/convex/mongodb.ts`) for MongoDB actions. The owner check is server-side, never just UI.
+- **Convex:** `_id` for document IDs, `Id<"Table">` for their types, `Doc<"Table">` for documents. Imports use `@/convex/...`. No return-type validators. External network calls must be actions with `"use node"` at the top; queries/mutations live in separate files.
+- **Frontend:** pages in `src/pages`, shadcn primitives in `src/components/ui`, mobile-responsive, `cursor-pointer` on clickables, no nested cards/shadows, toasts via `sonner`, Framer Motion for animation.
+- **Data honesty:** never invent PII, never fabricate evidence, never set `fabricated: false` on a tombstoned row, and never bypass the owner-approval step. Missing data is flagged as missing, never guessed.
+
+---
+
+## Agent handoff (Odysseus & worker agents)
+
+- **Reviewing deals:** use the MCP server at `POST https://keen-aardvark-333.convex.site/api/mcp` with `MCP_TOOL_SERVER_SECRET` (`tools/list` → `list_pipeline`, `list_pipeline_brief`, `run_agent_team`, `consultant_court`, `semantic_search`, …). The MCP surface is read/recommend only.
+- **Writing data:** use the admin API above with `ADMIN_API_KEY` (create/update leads, buyers, matches, hot-deals, staging). Approvals are owner-only; the API validates every shape server-side.
+- **Code fixes + redeploy:** push to `main` on `github.com/joopyjiop/deal-pipeline-pro`; the Render static site auto-redeploys, and `npx convex deploy` updates the backend. Run `bun tsc -b --noEmit && bun test tests` before pushing.
+- **This README is the source of truth** for the schema, admin API, env vars, and deployment. When you change the live app, update the relevant sections here in the same change.

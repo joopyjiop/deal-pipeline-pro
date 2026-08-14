@@ -181,6 +181,75 @@ const adminApi = httpAction(async (ctx, request) => {
   }
 });
 
+// Shared conversation REST API for external agents (Odysseus). Authenticated
+// with the same MCP_TOOL_SERVER_SECRET Odysseus uses for /api/mcp. Messages
+// posted here are forced to sender "odysseus" server-side — a website client
+// can never spoof the agent and vice versa.
+//
+//   GET  /api/shared-threads?limit=100  → list thread summaries
+//   GET  /api/shared-thread?threadId=...&limit=500 → read one thread
+//   POST /api/shared-thread            → { threadId, content, kind?, refs? }
+const sharedThreadApi = httpAction(async (ctx, request) => {
+  if (!mcpAuthorized(request)) return json({ error: "Unauthorized" }, 401, { "cache-control": "no-store" });
+
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > 32_768) return json({ error: "Request body is too large" }, 413, { "cache-control": "no-store" });
+
+  const url = new URL(request.url);
+  const method = request.method;
+
+  if (method === "GET" && url.pathname === "/api/shared-threads") {
+    const limit = Number(url.searchParams.get("limit") ?? 100);
+    if (!Number.isFinite(limit)) return json({ error: "limit must be a number" }, 400, { "cache-control": "no-store" });
+    const result = await ctx.runQuery(internal.sharedConversation.threadSummaries, {
+      limit: Math.max(1, Math.min(100, Math.floor(limit))),
+    });
+    return json(result, 200, { "cache-control": "no-store" });
+  }
+
+  if (method === "GET" && url.pathname === "/api/shared-thread") {
+    const threadId = url.searchParams.get("threadId");
+    if (!threadId || !threadId.trim()) return json({ error: "threadId query parameter is required" }, 400, { "cache-control": "no-store" });
+    const limit = Number(url.searchParams.get("limit") ?? 500);
+    if (!Number.isFinite(limit)) return json({ error: "limit must be a number" }, 400, { "cache-control": "no-store" });
+    const messages = await ctx.runQuery(internal.sharedConversation.threadMessages, {
+      threadId: normalizeThreadId(threadId),
+      limit: Math.max(1, Math.min(500, Math.floor(limit))),
+    });
+    return json({ threadId: normalizeThreadId(threadId), count: messages.length, messages }, 200, { "cache-control": "no-store" });
+  }
+
+  if (method === "POST" && url.pathname === "/api/shared-thread") {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "Request body must be valid JSON" }, 400, { "cache-control": "no-store" });
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Request body must be an object" }, 400, { "cache-control": "no-store" });
+    const payload = body as { threadId?: unknown; content?: unknown; kind?: unknown; refs?: unknown };
+    if (typeof payload.threadId !== "string" || !payload.threadId.trim()) return json({ error: "threadId is required" }, 400, { "cache-control": "no-store" });
+    if (typeof payload.content !== "string" || !payload.content.trim()) return json({ error: "content is required" }, 400, { "cache-control": "no-store" });
+    const kind = payload.kind;
+    if (kind !== undefined && kind !== "MESSAGE" && kind !== "REQUEST" && kind !== "ESCALATION" && kind !== "RESOLUTION") {
+      return json({ error: "kind must be MESSAGE, REQUEST, ESCALATION, or RESOLUTION" }, 400, { "cache-control": "no-store" });
+    }
+    const refs = payload.refs === undefined ? undefined : (Array.isArray(payload.refs) && payload.refs.every((ref) => typeof ref === "string") ? payload.refs : undefined);
+    if (payload.refs !== undefined && !refs) return json({ error: "refs must be an array of strings" }, 400, { "cache-control": "no-store" });
+    const messageId = await ctx.runMutation(internal.sharedConversation.insertMessage, {
+      threadId: normalizeThreadId(payload.threadId),
+      sender: "odysseus",
+      kind: (kind ?? "MESSAGE") as "MESSAGE" | "REQUEST" | "ESCALATION" | "RESOLUTION",
+      content: messageContent(payload.content),
+      refs: sanitizeRefs(refs as string[] | undefined),
+      sentAt: Date.now(),
+    });
+    return json({ ok: true, messageId, sender: "odysseus" }, 201, { "cache-control": "no-store" });
+  }
+
+  return json({ error: "Not found" }, 404, { "cache-control": "no-store" });
+});
+
 const mcpHeaders = {
   "cache-control": "no-store",
   "access-control-allow-origin": "*",
@@ -468,5 +537,9 @@ for (const method of ["GET", "POST", "PATCH", "PUT", "DELETE"] as const) {
 http.route({ path: "/api/mcp", method: "GET", handler: mcpGet });
 http.route({ path: "/api/mcp", method: "POST", handler: mcpToolServer });
 http.route({ path: "/api/mcp", method: "OPTIONS", handler: mcpOptions });
+
+http.route({ path: "/api/shared-thread", method: "GET", handler: sharedThreadApi });
+http.route({ path: "/api/shared-thread", method: "POST", handler: sharedThreadApi });
+http.route({ path: "/api/shared-threads", method: "GET", handler: sharedThreadApi });
 
 export default http;

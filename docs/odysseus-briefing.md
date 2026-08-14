@@ -29,6 +29,7 @@ Verify access before doing anything else: `GET https://keen-aardvark-333.convex.
 | --- | --- | --- |
 | Admin REST API | `https://keen-aardvark-333.convex.site/api/admin/...` | `Authorization: Bearer $ADMIN_API_KEY` |
 | MCP tool server (review only) | `https://keen-aardvark-333.convex.site/api/mcp` | `Authorization: Bearer $MCP_TOOL_SERVER_SECRET` or header `x-mcp-api-key` |
+| Shared conversation REST API | `https://keen-aardvark-333.convex.site/api/shared-thread` (+ `/api/shared-threads`) | `Authorization: Bearer $MCP_TOOL_SERVER_SECRET` |
 | n8n source queue | `https://keen-aardvark-333.convex.site/api/n8n/source` | header `x-convex-n8n-secret: $CONVEX_N8N_WEBHOOK_SECRET` |
 | Code repo | `https://github.com/joopyjiop/deal-pipeline-pro` (branch `main`) | GitHub credentials |
 
@@ -59,11 +60,25 @@ Server-side validation (never bypass it, and never try to disable it):
 
 The website and Odysseus share one conversation thread per deal/task in the Convex `sharedConversations` table. This is how you collaborate **mid-task** instead of handing off one-way requests. The website side is owner-gated; you post as `odysseus` — the sender is forced server-side, so you can never be mistaken for the website and vice versa.
 
-### Tools
+### Tools (MCP)
 
 - `shared_threads_list` — discover open threads (message count, last sender/kind, preview).
 - `shared_thread_read` — read the full thread, oldest first. Args: `threadId`, optional `limit`.
 - `shared_thread_post` — post a message as Odysseus. Args: `threadId`, `content`, optional `kind`, optional `refs[]`. Returns `{ ok, messageId }`.
+
+### Direct REST (no MCP client needed)
+
+Same secret and server-side sender rule — every message is stored with `sender: "odysseus"`. Handy for shell scripts and worker agents that are not MCP clients:
+
+- `GET /api/shared-thread?threadId=deal:<leadId>&limit=50` — read one thread, oldest first.
+- `GET /api/shared-threads?limit=100` — list thread summaries.
+- `POST /api/shared-thread` — body `{ "threadId": string, "content": string, "kind"?: "MESSAGE"|"REQUEST"|"ESCALATION"|"RESOLUTION", "refs"?: string[] }`; returns `201 { ok, messageId, sender: "odysseus" }`.
+
+```bash
+curl -X POST https://keen-aardvark-333.convex.site/api/shared-thread \
+  -H "Authorization: Bearer $MCP_TOOL_SERVER_SECRET" -H "content-type: application/json" \
+  -d '{ "threadId": "deal:<leadId>", "kind": "ESCALATION", "content": "SALE_HISTORY cannot be verified from here: no comps in the last 12 months within 3 miles. Can the website pull RentCast comps or do we need a county record?", "refs": ["<leadId>"] }'
+```
 
 ### Thread naming (both sides must agree)
 
@@ -90,7 +105,7 @@ Kinds: `MESSAGE` (note), `REQUEST` (please do X), `ESCALATION` (blocked, need he
 - Never paste API keys, webhook secrets, or unnecessary PII into a thread — both sides read the full thread.
 - Never claim verification that did not happen. A thread message is not verification; only sourced, dated evidence is.
 - Read the thread before starting work on a deal/task, and post `RESOLUTION` when you close an open item.
-- Example: `shared_thread_post { threadId: "deal:<leadId>", kind: "ESCALATION", content: "SALE_HISTORY cannot be verified from here: no comps in the last 12 months within 3 miles. Can the website pull RentCast comps or do we need a county record?", refs: ["<leadId>"] }`
+- Example (MCP): `shared_thread_post { threadId: "deal:<leadId>", kind: "ESCALATION", content: "SALE_HISTORY cannot be verified from here: no comps in the last 12 months within 3 miles. Can the website pull RentCast comps or do we need a county record?", refs: ["<leadId>"] }` — or the REST equivalent above.
 
 ## Code changes and redeploy
 

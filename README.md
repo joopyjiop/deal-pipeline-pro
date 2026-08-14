@@ -31,7 +31,8 @@ Full-stack wholesale real-estate deal-finding and deal-making platform. It sourc
 ```text
 Browser (React) ── Convex client ──> Convex Cloud (keen-aardvark-333)
                                       ├── queries/mutations/actions (src/convex/*)
-                                      ├── HTTP routes: /api/admin, /api/mcp, /api/n8n/source, auth
+                                      ├── HTTP routes: /api/admin, /api/mcp, /api/n8n/source,
+                                      │   /api/shared-thread(s), auth
                                       └── crons (src/convex/crons.ts)
                                               │
                                       MongoDB (MONGODB_URI): leads, hot_deals, buyers,
@@ -89,6 +90,8 @@ All HTTP routes live on the Convex site URL: `https://keen-aardvark-333.convex.s
 | --- | --- | --- | --- |
 | `/api/admin/...` | GET/POST/PATCH/PUT/DELETE | `Authorization: Bearer ADMIN_API_KEY` | Full CRUD over leads, buyers, matches, hot-deals, import-staging (below) |
 | `/api/mcp` | GET/POST/OPTIONS | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` or `x-mcp-api-key` header | MCP tool server for external AI agents (20 tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, …). Recommendations only — never approves |
+| `/api/shared-thread` | GET/POST | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` | Shared-conversation REST API for Odysseus (below): read a thread, post as `odysseus` |
+| `/api/shared-threads` | GET | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` | List shared-conversation thread summaries |
 | `/api/n8n/source` | POST | `x-convex-n8n-secret: CONVEX_N8N_WEBHOOK_SECRET` | Queue a public source URL for automated processing (n8n recurring runs) |
 | `/api/auth/*` | — | Convex Auth | Email OTP + anonymous sign-in |
 
@@ -172,6 +175,35 @@ curl "https://keen-aardvark-333.convex.site/api/admin/leads?status=APPROVED&veri
 
 ---
 
+## Shared conversation REST API (`/api/shared-thread`)
+
+Plain REST alternative to the MCP `shared_thread_*` tools so Odysseus (or a worker agent script) can join a thread with a simple HTTP call — no MCP client needed. Same secret and server-side sender rule as the MCP tools: `Authorization: Bearer <MCP_TOOL_SERVER_SECRET>`, and messages are always stored with `sender: "odysseus"` — the website can never spoof the agent. Body limit 32 KB.
+
+### Endpoints
+
+- `GET /api/shared-thread?threadId=deal:<leadId>&limit=50` — read one thread, oldest first (`limit` 1–500, default 500).
+- `GET /api/shared-threads?limit=100` — list thread summaries (message count, last sender/kind, preview; `limit` 1–100, default 100).
+- `POST /api/shared-thread` — post as Odysseus. Body: `{ "threadId": string, "content": string, "kind"?: "MESSAGE"|"REQUEST"|"ESCALATION"|"RESOLUTION", "refs"?: string[] }`. Returns `201 { "ok": true, "messageId": "…", "sender": "odysseus" }`.
+
+Thread ids follow the shared convention: `deal:<leadId>`, `task:<stagedId>`, `buyer:<buyerId>`, `ops:<topic>`. Never post secrets or unnecessary PII — both sides read the full thread.
+
+```bash
+# Read a thread
+curl "https://keen-aardvark-333.convex.site/api/shared-thread?threadId=deal:abc123&limit=50" \
+  -H "Authorization: Bearer $MCP_TOOL_SERVER_SECRET"
+
+# List open threads
+curl "https://keen-aardvark-333.convex.site/api/shared-threads?limit=100" \
+  -H "Authorization: Bearer $MCP_TOOL_SERVER_SECRET"
+
+# Escalate a blocked due-diligence gate as Odysseus
+curl -X POST https://keen-aardvark-333.convex.site/api/shared-thread \
+  -H "Authorization: Bearer $MCP_TOOL_SERVER_SECRET" -H "content-type: application/json" \
+  -d '{ "threadId": "deal:abc123", "kind": "ESCALATION", "content": "SALE_HISTORY cannot be verified from here: no comps in 12 months within 3 miles. Can the website pull RentCast comps?", "refs": ["abc123"] }'
+```
+
+---
+
 ## Environment variables
 
 ### Client / build-time (`src/lib/convex-url.ts`)
@@ -189,7 +221,7 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 | --- | --- | --- |
 | `MONGODB_URI` | ✅ | MongoDB connection string for the primary data store. A Convex-stored fallback (`mongoUri` setting) is used when the env var is absent/unreachable |
 | `ADMIN_API_KEY` | ✅ (if using admin API) | Bearer key for `/api/admin/*` |
-| `MCP_TOOL_SERVER_SECRET` | ✅ (if using MCP) | Bearer / `x-mcp-api-key` for `/api/mcp` |
+| `MCP_TOOL_SERVER_SECRET` | ✅ (if using MCP or shared thread API) | Bearer / `x-mcp-api-key` for `/api/mcp` and `/api/shared-thread(s)` |
 | `CONVEX_N8N_WEBHOOK_SECRET` | n8n only | `x-convex-n8n-secret` for `/api/n8n/source` |
 | `JWKS` | auth | Auth JSON Web Key Set |
 | `JWT_PRIVATE_KEY` | auth | Auth JWT signing key |
@@ -280,7 +312,7 @@ Unit tests live in `tests/` and run with Bun's test runner (they live outside `s
 ## Agent handoff (Odysseus & worker agents)
 
 - **Reviewing deals:** use the MCP server at `POST https://keen-aardvark-333.convex.site/api/mcp` with `MCP_TOOL_SERVER_SECRET` (`tools/list` → `list_pipeline`, `list_pipeline_brief`, `run_agent_team`, `consultant_court`, `semantic_search`, …). The MCP surface is read/recommend only.
-- **Collaborating mid-task:** `shared_thread_post` (post as Odysseus), `shared_thread_read` (full thread), `shared_threads_list` (find threads). Post a `REQUEST`/`ESCALATION` whenever you hit something outside your strengths — missing data, blocked gates, unknown sources, or owner-judgment steps — instead of handling it alone. Threads never approve deals.
+- **Collaborating mid-task:** `shared_thread_post` (post as Odysseus), `shared_thread_read` (full thread), `shared_threads_list` (find threads) via MCP — or the plain REST endpoints `POST/GET /api/shared-thread` and `GET /api/shared-threads` (same `MCP_TOOL_SERVER_SECRET`, no MCP client needed). Post a `REQUEST`/`ESCALATION` whenever you hit something outside your strengths — missing data, blocked gates, unknown sources, or owner-judgment steps — instead of handling it alone. Threads never approve deals.
 - **Writing data:** use the admin API above with `ADMIN_API_KEY` (create/update leads, buyers, matches, hot-deals, staging). Approvals are owner-only; the API validates every shape server-side.
 - **Code fixes + redeploy:** push to `main` on `github.com/joopyjiop/deal-pipeline-pro`; the Render static site auto-redeploys, and `npx convex deploy` updates the backend. Run `bun tsc -b --noEmit && bun test tests` before pushing.
 - **This README is the source of truth** for the schema, admin API, env vars, and deployment. When you change the live app, update the relevant sections here in the same change.

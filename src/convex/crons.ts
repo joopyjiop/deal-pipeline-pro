@@ -16,7 +16,7 @@ crons.hourly(
 // configured (see src/convex/threadResponder.ts).
 crons.interval(
   "answer open shared threads",
-  { minutes: 3 },
+  { minutes: 5 },
   internal.threadResponder.respondToOpenThreads,
   {},
 );

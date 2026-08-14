@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
@@ -71,6 +71,54 @@ export default function SharedConversation() {
 
   const postMessage = useMutation(api.sharedConversation.postSharedMessage);
   const [posting, setPosting] = useState(false);
+
+  const runResponderNow = useAction(api.threadResponder.runThreadResponderNow);
+  const answerThread = useAction(api.threadResponder.respondToThread);
+  const [responding, setResponding] = useState(false);
+  const [answering, setAnswering] = useState(false);
+
+  // The auto-responder answers the newest open Odysseus request/question in a
+  // thread. Mirror that here so the per-message button only shows on the
+  // message the responder would actually answer.
+  const lastOdysseusMessage =
+    thread !== undefined
+      ? [...thread.messages].reverse().find((message) => message.sender === "odysseus")
+      : undefined;
+
+  async function handleRunResponder() {
+    setResponding(true);
+    try {
+      const result = await runResponderNow({ maxThreads: 5 });
+      const replied = result.responded.filter((item) => item.status === "REPLIED").length;
+      const skipped = result.responded.filter((item) => item.status !== "REPLIED");
+      if (replied > 0) {
+        toast.success(`The website answered ${replied} open thread${replied === 1 ? "" : "s"}.`);
+      } else {
+        toast.info(skipped.length > 0 ? `Nothing to answer — ${skipped[0]?.reason ?? "threads are settled"}.` : "No open questions in any thread.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not run the auto-responder.");
+    } finally {
+      setResponding(false);
+    }
+  }
+
+  async function handleAnswerThread() {
+    const threadId = effectiveThreadId();
+    if (!threadId) {
+      toast.error("Pick a thread first.");
+      return;
+    }
+    setAnswering(true);
+    try {
+      await answerThread({ threadId });
+      toast.success("The website posted a reply to the open question.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not generate a reply.");
+    } finally {
+      setAnswering(false);
+    }
+  }
 
   function effectiveThreadId() {
     const target = showNewThread ? newThreadId : (selectedThread ?? newThreadId);
@@ -162,9 +210,24 @@ export default function SharedConversation() {
               </div>
             </div>
           </div>
-          <Badge variant="outline" className="border-sky-200/80 bg-sky-50/60 text-xs text-sky-800">
-            Owner-only · live thread
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="border-sky-200/80 bg-sky-50/60 text-xs text-sky-800">
+              Owner-only · live thread
+            </Badge>
+            <Button
+              type="button"
+              onClick={() => void handleRunResponder()}
+              disabled={responding}
+              className="h-8 gap-1.5 rounded-lg bg-violet-700 px-3 text-xs hover:bg-violet-800"
+              title="Generate answers for every open Odysseus request/question now (also runs automatically every ~3 minutes when AI access is enabled)"
+            >
+              {responding ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+              Run auto-responder
+            </Button>
+          </div>
+          <p className="mt-1 w-full text-right text-[0.68rem] leading-4 text-slate-400">
+            Auto-answers open Odysseus requests/questions every ~3 min when AI access is enabled in the Toolkit.
+          </p>
         </div>
 
         <div className="mt-6 grid gap-5 lg:grid-cols-[320px_1fr]">
@@ -264,9 +327,23 @@ export default function SharedConversation() {
                             {message.sender === "website" ? <Globe2 className="size-3" /> : <Bot className="size-3" />} {senderLabel(message.sender)}
                           </span>
                           <Badge className={`border-0 ${KIND_STYLES[message.kind]}`}>{KIND_LABELS[message.kind]}</Badge>
+                          {message.sender === "website" && message.metadata?.auto === true && (
+                            <Badge className="border-0 bg-violet-100/80 text-violet-800">Auto</Badge>
+                          )}
                           <span className="text-[0.62rem] text-slate-400">{new Date(message.sentAt).toLocaleString()}</span>
                         </div>
                         <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-700">{message.content}</p>
+                        {message.sender === "odysseus" && lastOdysseusMessage?._id === message._id && (
+                          <button
+                            type="button"
+                            onClick={() => void handleAnswerThread()}
+                            disabled={answering}
+                            className="mt-2 inline-flex items-center gap-1 rounded-lg bg-violet-100/70 px-2 py-1 text-[0.65rem] font-semibold text-violet-800 transition-colors hover:bg-violet-200/80 disabled:opacity-60"
+                          >
+                            {answering ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+                            Ask the website to answer
+                          </button>
+                        )}
                         {message.refs.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             {message.refs.map((ref) => (

@@ -100,6 +100,14 @@ Post into the relevant thread the moment you hit something outside your strength
 
 Kinds: `MESSAGE` (note), `REQUEST` (please do X), `ESCALATION` (blocked, need help/owner), `RESOLUTION` (closed — summarize what happened).
 
+### The website answers you back (auto-responder)
+
+The website now actively replies to your open messages instead of waiting for the owner. Every ~3 minutes a cron (`answer open shared threads`) checks the threads; when the latest message in a thread is your `REQUEST`, `ESCALATION`, or a question (ends with `?`), it generates a reply grounded in its own data — the referenced lead / staged source / buyer document for `deal:`/`task:`/`buyer:` threads, or the pipeline brief + staging queue + match board for `ops:` threads — and posts it as sender `website` with `metadata.auto: true` (the UI labels these "Auto").
+
+- Treat auto-replies as the website's working answer, **not** as verification or approval. The website obeys the same rules you do: it never fabricates PII/prices/comps/verification, never approves a deal, and defers owner-only decisions with the exact owner step named.
+- The auto-responder skips when the owner disables "AI access" in the Toolkit or `AI_BASE_URL` is unset. If you need an answer right now, the owner can press "Run auto-responder" on `/shared-conversation`, or you can post again (a fresh message re-triggers the scan).
+- Keep posting `REQUEST`/`ESCALATION`/questions as usual — that is the trigger. Post `RESOLUTION` when you close an open item so the thread reads as settled.
+
 ### Rules
 
 - Never paste API keys, webhook secrets, or unnecessary PII into a thread — both sides read the full thread.

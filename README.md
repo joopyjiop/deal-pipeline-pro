@@ -57,6 +57,8 @@ Defined with `defineSchema`; `schemaValidation: false`. Every table has `_id` an
 
 `sharedConversations` is the mid-task collaboration thread between the website and the external Odysseus harness. The website writes via the owner-gated `postSharedMessage` mutation and reads via `getSharedThread`/`listSharedThreads` (UI: `/shared-conversation`); Odysseus writes/reads via the MCP tools `shared_thread_post` / `shared_thread_read` / `shared_threads_list`. Sender is forced server-side — the website can never impersonate Odysseus and vice versa. Protocol: either side posts `REQUEST`/`ESCALATION` when it hits something outside its strengths (see `src/convex/sharedConversation.ts` and `docs/odysseus-briefing.md`).
 
+**Auto-responder:** the website actively answers open Odysseus messages. A cron (`answer open shared threads`, every 3 minutes) runs `src/convex/threadResponder.ts`: it finds threads whose latest message is an unanswered Odysseus `REQUEST`/`ESCALATION` or question, grounds a reply in real app data (the referenced lead/staged-source/buyer document, or the pipeline brief for `ops:` threads), and posts it as sender `website` with `metadata.auto: true` (shown as an "Auto" badge in the UI). Auto-replies never fabricate, never approve a deal, and defer owner-only decisions with the exact owner step named. It skips when the Toolkit "AI access" switch is off or `AI_BASE_URL` is unset; model is `OLLAMA_MODEL` (default `gpt-oss:20b`). See README → "Website auto-responder" below.
+
 `sourceType` enum: `SHERIFF_SALE` \| `TAX_SALE` \| `AUCTION_COM` \| `PROBATE` \| `OFF_MARKET` \| `ASSESSOR` \| `RECORDER` \| `MANUAL` \| `SEED`.
 
 Plus `authTables` from `@convex-dev/auth/server` (auth accounts/sessions/verification codes — do not edit).
@@ -201,6 +203,18 @@ curl -X POST https://keen-aardvark-333.convex.site/api/shared-thread \
   -H "Authorization: Bearer $MCP_TOOL_SERVER_SECRET" -H "content-type: application/json" \
   -d '{ "threadId": "deal:abc123", "kind": "ESCALATION", "content": "SALE_HISTORY cannot be verified from here: no comps in 12 months within 3 miles. Can the website pull RentCast comps?", "refs": ["abc123"] }'
 ```
+
+---
+
+## Website auto-responder (answers Odysseus in threads)
+
+The website actively responds to Odysseus's open messages instead of leaving every thread to the owner. A Convex cron (`answer open shared threads`, every 3 minutes) runs `src/convex/threadResponder.ts`:
+
+- **Trigger:** a thread whose latest message is an unanswered Odysseus `REQUEST`, `ESCALATION`, or a question (content ends with `?`). Messages younger than 20s are skipped so message bursts settle; the newest few open threads are answered per run (max 3 by default).
+- **Grounding:** the reply is generated from real app data only — the referenced document for `deal:<leadId>` / `task:<stagedId>` / `buyer:<buyerId>` threads (read via the admin read path; buyer summaries are PII-free), or the live pipeline brief + staging queue + match board for `ops:` threads. It never invents PII, prices, comps, distress, or verification status; missing data is named as missing and owner-only decisions are deferred to the owner with the exact step needed.
+- **Delivery:** replies are posted as sender `website`, kind `MESSAGE`, with `metadata.auto: true` (the `/shared-conversation` UI shows an "Auto" badge). Auto-replies never approve a deal and never claim verification.
+- **Gates:** the cron skips cleanly when the owner's Toolkit "AI access" switch is off (same gate as the MCP tools and consultant court) or `AI_BASE_URL` is not configured. Model: `OLLAMA_MODEL` (default `gpt-oss:20b`), routed through the same OmniRoute AI gateway as every other model call.
+- **Owner controls:** enable "AI access" in `/toolkit` to turn auto-replies on. The `/shared-conversation` page adds a "Run auto-responder" button (owner-only, runs the same scan immediately) and an "Ask the website to answer" button on the latest open Odysseus message.
 
 ---
 

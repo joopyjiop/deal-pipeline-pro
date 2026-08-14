@@ -37,6 +37,7 @@
 
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query, QueryCtx, MutationCtx } from "./_generated/server";
 
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
@@ -93,7 +94,7 @@ async function requireOwner(ctx: QueryCtx | MutationCtx) {
   return user;
 }
 
-type MessageDoc = {
+export type MessageDoc = {
   _id: string;
   _creationTime: number;
   threadId: string;
@@ -104,6 +105,22 @@ type MessageDoc = {
   metadata?: Record<string, unknown>;
   sentAt: number;
 };
+
+// A thread is "open" for the website auto-responder when its latest message is
+// an Odysseus REQUEST/ESCALATION, a question, or a message explicitly marked
+// expectReply, and no auto-reply has been generated for it yet.
+export function isUnansweredThreadMessage(last: MessageDoc): boolean {
+  if (last.sender !== "odysseus") return false;
+  if (last.kind === "RESOLUTION") return false;
+  const metadata = last.metadata ?? {};
+  if (typeof metadata.autoRepliedAt === "number") return false;
+  const asks =
+    last.kind === "REQUEST" ||
+    last.kind === "ESCALATION" ||
+    /\?\s*$/.test(last.content.trim()) ||
+    metadata.expectReply === true;
+  return asks;
+}
 
 export function serializeMessage(doc: MessageDoc) {
   return {
@@ -220,6 +237,7 @@ export const insertMessage = internalMutation({
     kind: kindValidator,
     content: v.string(),
     refs: v.optional(v.array(v.string())),
+    metadata: v.optional(v.any()),
     sentAt: v.number(),
   },
   handler: async (ctx, args) => {
@@ -229,9 +247,103 @@ export const insertMessage = internalMutation({
       kind: args.kind,
       content: args.content,
       ...(args.refs && args.refs.length > 0 ? { refs: args.refs } : {}),
+      ...(args.metadata !== undefined && args.metadata !== null ? { metadata: args.metadata } : {}),
       sentAt: args.sentAt,
     });
     return String(id);
+  },
+});
+
+// ---- Auto-responder claims ------------------------------------------------
+// The website-side auto-responder (src/convex/threadResponder.ts) answers
+// open Odysseus questions/requests on a cron. Before generating a reply it
+// claims the Odysseus message atomically so two overlapping responder runs
+// cannot both reply to the same message; the claim is released if generation
+// fails. `metadata.autoRepliedAt` on an Odysseus message also lets the UI and
+// the scan see that a reply was already generated for it.
+
+export const claimAutoReply = internalMutation({
+  args: { messageId: v.string(), claimId: v.string() },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db.get(args.messageId as Id<"sharedConversations">);
+    if (!doc) throw new Error("Message not found");
+    const message = doc as unknown as MessageDoc;
+    if (message.sender !== "odysseus") throw new Error("Only Odysseus messages can be claimed for an auto-reply");
+    const metadata = message.metadata ?? {};
+    if (typeof metadata.autoRepliedAt === "number") return { claimed: false, messageId: args.messageId, reason: "already_answered" };
+    if (typeof metadata.autoReplyClaimId === "string") return { claimed: false, messageId: args.messageId, reason: "already_claimed" };
+    await ctx.db.patch(args.messageId as Id<"sharedConversations">, { metadata: { ...metadata, autoReplyClaimId: args.claimId, autoReplyClaimedAt: Date.now() } });
+    return { claimed: true, messageId: args.messageId };
+  },
+});
+
+export const releaseAutoReply = internalMutation({
+  args: { messageId: v.string(), claimId: v.string() },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db.get(args.messageId as Id<"sharedConversations">);
+    if (!doc) return { released: false };
+    const message = doc as unknown as MessageDoc;
+    const metadata = message.metadata ?? {};
+    if (metadata.autoReplyClaimId !== args.claimId) return { released: false };
+    const next: Record<string, unknown> = { ...metadata };
+    delete next.autoReplyClaimId;
+    delete next.autoReplyClaimedAt;
+    await ctx.db.patch(args.messageId as Id<"sharedConversations">, { metadata: next });
+    return { released: true };
+  },
+});
+
+export const markAutoReplied = internalMutation({
+  args: { messageId: v.string(), claimId: v.string(), replyMessageId: v.string(), model: v.string() },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db.get(args.messageId as Id<"sharedConversations">);
+    if (!doc) return { marked: false };
+    const message = doc as unknown as MessageDoc;
+    const metadata = message.metadata ?? {};
+    if (metadata.autoReplyClaimId !== args.claimId) return { marked: false };
+    const next: Record<string, unknown> = { ...metadata, autoRepliedAt: Date.now(), autoReplyMessageId: args.replyMessageId, autoReplyModel: args.model };
+    delete next.autoReplyClaimId;
+    delete next.autoReplyClaimedAt;
+    await ctx.db.patch(args.messageId as Id<"sharedConversations">, { metadata: next });
+    return { marked: true };
+  },
+});
+
+// Scan for threads whose latest message is an unanswered Odysseus
+// request/escalation/question — the auto-responder's work queue
+// (src/convex/threadResponder.ts). Bounded: only the most recently active
+// candidates are returned so one run never replies to a backlog flood.
+export const unansweredThreads = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const limit = Math.max(1, Math.min(10, Math.floor(args.limit ?? 5)));
+    const now = Date.now();
+    const docs = await ctx.db.query("sharedConversations").order("desc").take(500);
+    const byThread = new Map<string, MessageDoc[]>();
+    for (const doc of docs) {
+      const message = doc as unknown as MessageDoc;
+      const list = byThread.get(message.threadId) ?? [];
+      list.push(message);
+      byThread.set(message.threadId, list);
+    }
+    const candidates: Array<{ threadId: string; messageCount: number; last: MessageDoc }> = [];
+    for (const [threadId, messages] of byThread) {
+      messages.sort((a, b) => a.sentAt - b.sentAt);
+      const last = messages[messages.length - 1];
+      if (!isUnansweredThreadMessage(last)) continue;
+      // Let bursts settle: do not answer a message posted in the last 20s.
+      if (now - last.sentAt < 20_000) continue;
+      candidates.push({ threadId, messageCount: messages.length, last });
+    }
+    candidates.sort((a, b) => b.last.sentAt - a.last.sentAt);
+    return candidates.slice(0, limit).map(({ threadId, messageCount, last }) => ({
+      threadId,
+      messageCount,
+      lastMessageId: last._id,
+      lastKind: last.kind,
+      lastContent: last.content.slice(0, 200),
+      lastSentAt: last.sentAt,
+    }));
   },
 });
 

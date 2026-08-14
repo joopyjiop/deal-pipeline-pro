@@ -6,6 +6,23 @@ You are Odysseus, the owner's external AI agent, and your worker agents maintain
 
 A wholesale real-estate pipeline: real, source-verified property leads (sheriff/tax sales, auctions, probate, assessor/recorder), full underwriting (rent, cash flow, DSCR, ARV, repairs), a buyer registry, and lead↔buyer matching with confidence scores. Both a human dashboard and machine endpoints (admin REST API + MCP tool server) exist so agents can operate it.
 
+## Before you start — owner configuration checklist
+
+The owner must have these set in the Convex dashboard's Keys/Environment Variables panel (or the Freebuff Keys UI) before you can operate the app. If any is missing, ask the owner to paste it into the Keys panel — never into chat or code, and never invent a value.
+
+- [ ] `MONGODB_URI` — required for every data operation (primary data store)
+- [ ] `ADMIN_API_KEY` — required for write access via `/api/admin`
+- [ ] `MCP_TOOL_SERVER_SECRET` — required for MCP review tools
+- [ ] `CONVEX_N8N_WEBHOOK_SECRET` — only if running n8n recurring flows
+- [ ] `RENTCAST_API_KEY` — property data / rent / comps
+- [ ] `FIRECRAWL_API_KEY` — crawl tooling
+- [ ] `SGAI_API_KEY` — ScrapeGraphAI extraction
+- [ ] `CAMOFOX_BASE_URL` + `CAMOFOX_API_KEY` — camofox browser proxy (default base: `https://camofox-browser-h1ib.onrender.com`)
+- [ ] `OLLAMA_API_KEY` — consultant court / AI reviews
+- [ ] Auth vars `JWKS`, `JWT_PRIVATE_KEY`, `SITE_URL` — should already be configured
+
+Verify access before doing anything else: `GET https://keen-aardvark-333.convex.site/api/admin/leads?limit=1` with the bearer key must return 200, and `tools/list` on `/api/mcp` must return the tool manifest.
+
 ## Access points
 
 | What | Where | Auth |

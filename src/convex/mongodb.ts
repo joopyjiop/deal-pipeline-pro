@@ -23,6 +23,95 @@ import {
 } from "./agents";
 import type { AgentLead, AgentReport, BuyerLike, DueDiligenceLike, ReadinessReport, ScoredBuyerMatch } from "./agents";
 import { chatCompletion, isAiGatewayConfigured } from "./ollama";
+import { parseSearchbugResult, SEARCHBUG_ENDPOINT } from "./skiptrace";
+
+// Shared skip-trace runner. The public action below is owner-gated for the
+// website UI; the MCP bridge (mcpSkipTrace) reuses this same runner because
+// the MCP route authenticates with the server secret (no user session), so
+// the public owner check would always reject. Contact data is stored with a
+// source URL + date and never invented; owner approval still gates any dial.
+async function runSkipTrace(database: Awaited<ReturnType<typeof getDatabase>>, id: string) {
+  const apiKey = process.env.SKIPTRACE_API_KEY?.trim();
+  const accountId = process.env.SKIPTRACE_ACCOUNT_ID?.trim();
+  if (!apiKey || !accountId) {
+    throw new Error("Skip trace is not configured — set SKIPTRACE_API_KEY and SKIPTRACE_ACCOUNT_ID in the Convex Keys panel.");
+  }
+  const lead = await database.collection(LEADS).findOne({ _id: objectId(id), fabricated: { $ne: true } });
+  if (!lead) throw new Error("Lead not found");
+
+  // Reverse-address search: the provider accepts street + city + state + zip.
+  const form = new URLSearchParams();
+  form.set("CO_CODE", accountId);
+  form.set("PASS", apiKey);
+  form.set("TYPE", "api_ppl");
+  form.set("FORMAT", "JSON");
+  form.set("LIMIT", "25");
+  if (typeof lead.propertyAddress === "string" && lead.propertyAddress.trim()) form.set("ADDRESS", lead.propertyAddress.trim());
+  if (typeof lead.city === "string" && lead.city.trim()) form.set("CITY", lead.city.trim());
+  if (typeof lead.state === "string" && lead.state.trim()) form.set("STATE", lead.state.trim());
+  if (typeof lead.zip === "string" && lead.zip.trim()) form.set("ZIP", lead.zip.trim());
+
+  const response = await fetch(SEARCHBUG_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+  if (!response.ok) throw new Error(`Skip-trace provider returned HTTP ${response.status}`);
+
+  const raw = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (raw && typeof raw === "object" && "error" in raw) {
+    const error = raw.error;
+    const message = typeof error === "string" ? error : ((error as { message?: string } | null)?.message ?? "Unknown provider error");
+    throw new Error(`Skip-trace provider error: ${message}`);
+  }
+
+  const contact = parseSearchbugResult(raw);
+  const phoneNumbers = contact.phones.map((phone) => phone.number);
+  await database.collection(LEADS).updateOne(
+    { _id: lead._id },
+    {
+      $set: withoutUndefined({
+        skipTrace: {
+          provider: contact.provider,
+          sourceUrl: SEARCHBUG_ENDPOINT,
+          sourceDate: new Date().toISOString().slice(0, 10),
+          fetchedAt: Date.now(),
+          names: contact.names,
+          phones: contact.phones,
+          emails: contact.emails,
+          reportToken: contact.reportToken,
+        },
+        listedPhone: phoneNumbers.length > 0,
+        needsSkipTrace: phoneNumbers.length === 0,
+        updatedAt: Date.now(),
+      }),
+    },
+  );
+
+  return {
+    id,
+    ...contact,
+    phoneCount: phoneNumbers.length,
+    saved: true,
+  };
+}
+
+export const skipTraceLead = action({
+  args: { id: v.string() },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    return runSkipTrace(await getDatabase(), args.id);
+  },
+});
+
+export const mcpSkipTrace = internalAction({
+  args: { id: v.string() },
+  handler: async (_, args) => {
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    return runSkipTrace(database, args.id);
+  },
+});
 
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
 

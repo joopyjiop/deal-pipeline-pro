@@ -122,7 +122,7 @@ Server-side validation (never bypass it, and never try to disable it):
 
 ## MCP server — review and analysis (no writes)
 
-`POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
+`POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace` (reverse-address owner contact lookup; saves sourced phones/emails onto the lead — enrichment, never an approval), `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
 
 ## Shared conversation — collaborate mid-task with the website
 

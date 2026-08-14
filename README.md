@@ -21,7 +21,7 @@ Full-stack wholesale real-estate deal-finding and deal-making platform. It sourc
 - **Primary data store:** MongoDB (leads, buyers, matches, hot deals, staging) — accessed from Convex actions via `MONGODB_URI`
 - **Auth:** Convex Auth (email OTP + anonymous)
 - **Package manager:** Bun (`bun install`, `bun test`, `bun run build`)
-- **AI:** Ollama Cloud (consultant court), OpenAI-compatible AI gateway via `AI_BASE_URL` (default: local OmniRoute at `https://localhost:20128/v1`, embeddings `text-embedding-3-small`)
+- **AI:** every model call (consultant court, local-agents chat, semantic-search embeddings) routes through the OpenAI-compatible AI gateway via `AI_BASE_URL` (default: local OmniRoute at `https://localhost:20128/v1`, optional `AI_API_KEY` bearer). Embedding model: `text-embedding-3-small`
 - **Data providers:** RentCast (property data/rent/AVM), Firecrawl (crawl), ScrapeGraphAI (extract), Camofox browser proxy (anti-detection fetch), n8n (recurring source runs)
 
 ---
@@ -198,11 +198,10 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 | `CAMOFOX_API_KEY` | Camofox features | Bearer key for the camofox proxy |
 | `SGAI_API_KEY` | ScrapeGraphAI | `SGAI-APIKEY` header for `v2-api.scrapegraphai.com` |
 | `FIRECRAWL_API_KEY` | Firecrawl | Firecrawl API key |
-| `OLLAMA_API_KEY` | consultant court | Ollama Cloud key (`https://ollama.com/api`) for the AI consultant court |
-| `OLLAMA_MODEL` | optional | Chat model override (default `gpt-oss:20b`) |
-| `OLLAMA_COURT_MODEL` | optional | Court model override (wins over `OLLAMA_MODEL`) |
-| `AI_BASE_URL` | optional | OpenAI-compatible AI gateway base for chat + embeddings. Default `https://localhost:20128/v1` (local OmniRoute) |
+| `AI_BASE_URL` | AI features | OpenAI-compatible AI gateway base for chat (consultant court + local agents) and embeddings. Default `https://localhost:20128/v1` (local OmniRoute). Chat no longer calls Ollama Cloud directly — `OLLAMA_API_KEY` is not used |
 | `AI_API_KEY` | optional | Bearer key sent to the AI gateway (some local gateways expect one) |
+| `OLLAMA_MODEL` | optional | Chat model-name selector routed through the gateway (default `gpt-oss:20b`) |
+| `OLLAMA_COURT_MODEL` | optional | Court model-name selector (wins over `OLLAMA_MODEL`) |
 
 ---
 

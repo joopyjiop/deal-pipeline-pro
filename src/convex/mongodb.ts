@@ -22,6 +22,7 @@ import {
   verificationAgent,
 } from "./agents";
 import type { AgentLead, AgentReport, BuyerLike, DueDiligenceLike, ReadinessReport, ScoredBuyerMatch } from "./agents";
+import { chatCompletion, isAiGatewayConfigured } from "./ollama";
 
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
 
@@ -966,7 +967,8 @@ export const loadPropertyBrief = action({
 });
 
 // In-house semantic search — the honest in-project version of a vector index:
-// lead text embedded via Ollama Cloud and ranked with plain cosine similarity.
+// lead text embedded via the AI gateway (OmniRoute) and ranked with plain
+// cosine similarity.
 // Nothing is invented — only text the lead already carries is embedded, and
 // fabricated rows are excluded before ranking.
 
@@ -2674,10 +2676,10 @@ function courtConfidence(value: unknown): CourtConfidence {
 }
 
 type CourtModelResult =
-  | { ok: true; value: Record<string, unknown>; provider: "OLLAMA"; model: string; error?: string }
+  | { ok: true; value: Record<string, unknown>; provider: "AI_GATEWAY"; model: string; error?: string }
   | { ok: false; error: string };
 
-function parseCourtContent(content: unknown, provider: "OLLAMA", model: string): CourtModelResult {
+function parseCourtContent(content: unknown, provider: "AI_GATEWAY", model: string): CourtModelResult {
   if (typeof content !== "string" || !content.trim()) return { ok: false, error: "AI consultant returned no content" };
 
   const trimmed = content.trim();
@@ -2700,63 +2702,41 @@ function parseCourtContent(content: unknown, provider: "OLLAMA", model: string):
   return { ok: false, error: "AI consultant returned invalid JSON" };
 }
 
-async function callOllamaCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {
+async function callGatewayCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {
+  // The model name is a selector: the gateway (AI_BASE_URL, default local
+  // OmniRoute) routes it to whichever provider is configured there. The
+  // OLLAMA_COURT_MODEL / OLLAMA_MODEL names are kept as overrides so the owner
+  // can pick a model without touching the endpoint.
   const model = process.env.OLLAMA_COURT_MODEL ?? process.env.OLLAMA_MODEL ?? "gpt-oss:20b";
   // Reasoning models can return truncated or malformed JSON when the generation
   // budget is tight, so retry once on a parse failure. The court's strict
-  // coercion never trusts a partial object, and reasoning (message.thinking)
-  // is never parsed as the court result.
+  // coercion never trusts a partial object.
   let result: CourtModelResult = { ok: false, error: "AI consultant returned invalid JSON" };
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const response = await fetch("https://ollama.com/api/chat", {
-      method: "POST",
-      headers: { authorization: `Bearer ${process.env.OLLAMA_API_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({
+    try {
+      const { content } = await chatCompletion({
         model,
-        stream: false,
-        format: "json",
-        // GPT-OSS ignores boolean thinking flags and needs a level. Keeping it
-        // at low leaves enough generation budget for the final JSON response.
-        think: model.toLowerCase().includes("gpt-oss") ? "low" : false,
-        options: { temperature: 0, num_predict: maxTokens },
         messages: [{ role: "user", content: prompt }],
-      }),
-      signal: AbortSignal.timeout(120000),
-    });
-    const payload = await response.json().catch(() => ({})) as {
-      error?: string;
-      message?: { content?: unknown };
-      choices?: Array<{ message?: { content?: unknown } }>;
-    };
-    if (!response.ok) {
-      const detail = typeof payload.error === "string" ? `: ${payload.error.slice(0, 240)}` : "";
-      return { ok: false, error: `Ollama Cloud request failed (HTTP ${response.status}${detail})` };
+        maxTokens,
+        temperature: 0,
+      });
+      result = parseCourtContent(content, "AI_GATEWAY", model);
+      if (result.ok) return result;
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : "AI consultant request failed" };
     }
-
-    const messageContent = payload.message?.content;
-    const compatibleContent = payload.choices?.[0]?.message?.content;
-    // Only the final answer content is accepted; reasoning (message.thinking)
-    // is never parsed as the court result because it is not the JSON output.
-    const content = typeof messageContent === "string" && messageContent.trim()
-      ? messageContent
-      : typeof compatibleContent === "string" && compatibleContent.trim()
-        ? compatibleContent
-        : undefined;
-
-    result = parseCourtContent(content, "OLLAMA", model);
-    if (result.ok) return result;
   }
   return result;
 }
 
 async function callCourtModel(prompt: string, maxTokens: number): Promise<CourtModelResult> {
-  if (!process.env.OLLAMA_API_KEY?.trim()) return { ok: false, error: "OLLAMA_API_KEY is not configured" };
-  return callOllamaCourtModel(prompt, maxTokens);
+  if (!isAiGatewayConfigured()) return { ok: false, error: "AI gateway (AI_BASE_URL) is not configured" };
+  return callGatewayCourtModel(prompt, maxTokens);
 }
 
 async function runAiConsultantCourt(source: { title: string; excerpt: string; url: string }): Promise<CourtVerdict> {
   const reviewedAt = new Date().toISOString();
-  if (!process.env.OLLAMA_API_KEY?.trim()) return { status: "SKIPPED_MISSING_KEY", reviewedAt };
+  if (!isAiGatewayConfigured()) return { status: "SKIPPED_MISSING_KEY", reviewedAt };
   const sourcePacket = `SOURCE URL: ${source.url}\nTITLE: ${source.title}\nSOURCE EXCERPT (the only evidence allowed): ${source.excerpt.slice(0, 7000)}`;
   const assignments: Array<{ role: CourtRole; task: string }> = [
     { role: "EVIDENCE_AUDITOR", task: "Audit whether the source contains enough explicit, reliable facts for a real deal review. Separate sourced facts from assumptions." },
@@ -2854,7 +2834,7 @@ async function runAutomationCycleImpl() {
     { upsert: true },
   );
   const remaining = await database.collection(AUTOMATION_TASKS).countDocuments({ status: "PENDING" });
-  return { status: "COMPLETED" as const, processed, failed, remaining, ai: settings.mode === "BOTH" ? { completed: aiCompleted, configured: Boolean(process.env.OLLAMA_API_KEY && settings.aiEnabled) } : "not-requested" as const };
+  return { status: "COMPLETED" as const, processed, failed, remaining, ai: settings.mode === "BOTH" ? { completed: aiCompleted, configured: isAiGatewayConfigured() && settings.aiEnabled } : "not-requested" as const };
 }
 
 export const getAutomationConfig = action({
@@ -2865,7 +2845,7 @@ export const getAutomationConfig = action({
     const settings = automationSettings(document);
     return {
       ...settings,
-      providerConfigured: Boolean(process.env.OLLAMA_API_KEY),
+      providerConfigured: isAiGatewayConfigured(),
       n8nSecretConfigured: Boolean(process.env.CONVEX_N8N_WEBHOOK_SECRET),
     };
   },
@@ -2967,7 +2947,7 @@ export const setAutomationConfig = action({
     );
     return {
       ...args,
-      providerConfigured: Boolean(process.env.OLLAMA_API_KEY),
+      providerConfigured: isAiGatewayConfigured(),
       n8nSecretConfigured: Boolean(process.env.CONVEX_N8N_WEBHOOK_SECRET),
     };
   },

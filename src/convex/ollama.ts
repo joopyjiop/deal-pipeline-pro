@@ -14,8 +14,19 @@ const OWNER_EMAIL = "jacobvierra8@gmail.com";
 // the providers configured in OmniRoute. Override with AI_BASE_URL in the
 // Convex Keys panel if the gateway lives elsewhere. No API key is sent unless
 // AI_API_KEY is configured (some local gateways expect one).
-const AI_BASE_URL = process.env.AI_BASE_URL?.trim() || "https://localhost:20128/v1";
+const DEFAULT_AI_BASE_URL = "https://localhost:20128/v1";
+const AI_BASE_URL = process.env.AI_BASE_URL?.trim() || DEFAULT_AI_BASE_URL;
 const AI_API_KEY = process.env.AI_API_KEY?.trim();
+
+// True when the owner has configured the AI gateway: either a key is set, or
+// the base URL was overridden away from the localhost default. The consultant
+// court and automation flows use this to skip cleanly instead of failing when
+// no gateway is configured.
+export function isAiGatewayConfigured(): boolean {
+  if (AI_API_KEY) return true;
+  const base = process.env.AI_BASE_URL?.trim();
+  return Boolean(base && base !== DEFAULT_AI_BASE_URL);
+}
 
 const messageValidator = v.object({
   role: v.union(v.literal("system"), v.literal("user"), v.literal("assistant")),
@@ -109,6 +120,31 @@ async function aiRequest(
   });
 }
 
+// OpenAI-compatible chat completion against the gateway. Shared by the public
+// `chat` action (local agents) and the consultant court in mongodb.ts, so every
+// chat-shaped model call routes through the same OmniRoute transport.
+export async function chatCompletion(options: {
+  model: string;
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  maxTokens?: number;
+  temperature?: number;
+}): Promise<{ content: string; model: string }> {
+  const payload = await aiRequest("/chat/completions", {
+    body: {
+      model: options.model,
+      messages: options.messages,
+      stream: false,
+      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+    },
+  });
+  const choices = Array.isArray(payload.choices) ? (payload.choices as Array<{ message?: { content?: unknown } }>) : [];
+  const fallback = payload.message as { content?: unknown } | undefined;
+  const content = (choices[0]?.message?.content ?? fallback?.content) as string | undefined;
+  if (!content?.trim()) throw new Error("AI gateway returned no text");
+  return { content: content.trim(), model: options.model };
+}
+
 export const listModels = action({
   args: {},
   handler: async (ctx) => {
@@ -140,19 +176,9 @@ export const chat = action({
     if (args.messages.length === 0 || args.messages.length > 12) throw new Error("The local agent message list is outside the allowed bound");
     if (args.messages.some((message) => message.content.length > 20_000)) throw new Error("The local agent prompt is too large");
 
-    const payload = await aiRequest("/chat/completions", {
-      body: {
-        model,
-        messages: args.messages,
-        stream: false,
-      },
-    });
-    const choices = Array.isArray(payload.choices) ? (payload.choices as Array<{ message?: { content?: unknown } }>) : [];
-    const fallback = payload.message as { content?: unknown } | undefined;
-    const content = (choices[0]?.message?.content ?? fallback?.content) as string | undefined;
-    if (!content?.trim()) throw new Error("AI gateway returned no text");
+    const { content } = await chatCompletion({ model, messages: args.messages });
     return {
-      choices: [{ message: { content: content.trim() } }],
+      choices: [{ message: { content } }],
     };
   },
 });

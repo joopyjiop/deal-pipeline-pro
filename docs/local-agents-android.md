@@ -1,6 +1,6 @@
 # Free local agents on Android
 
-The app's `/local-agents` page supports three bounded modes: a browser-to-phone local model server, Ollama Cloud through an owner-gated Convex proxy, or both together for independent comparison. Neither mode writes leads or sends captured evidence to the database automatically.
+The app's `/local-agents` page supports three bounded modes: a browser-to-phone local model server, your AI gateway (default: local OmniRoute at `https://localhost:20128/v1`) through an owner-gated Convex proxy, or both together for independent comparison. Neither mode writes leads or sends captured evidence to the database automatically.
 
 ## What runs where
 
@@ -18,17 +18,16 @@ http://127.0.0.1:11434/v1
 
 The default model field is `qwen3:4b`; replace it with the exact model identifier reported by the server.
 
-## Secured Ollama Cloud mode
+## Secured AI gateway mode
 
-Ollama's official cloud API is available at `https://ollama.com/api` and requires a bearer API key. The app does not put that key in the browser. Add this server-side variable in the Keen Convex deployment's Keys/API keys panel:
+Every server-side model call routes through the OpenAI-compatible gateway configured by `AI_BASE_URL` (default `https://localhost:20128/v1`, i.e. your local OmniRoute). The app does not put any gateway key in the browser. Set these server-side variables in the Keen Convex deployment's Keys/API keys panel:
 
 ```text
-OLLAMA_API_KEY=<your Ollama API key>
+AI_BASE_URL=https://localhost:20128/v1
+AI_API_KEY=<optional bearer key if your gateway expects one>
 ```
 
-Then open **Local agents**, choose **Ollama Cloud** or **Both / compare**, click the connection test, select a reported cloud model, and run the bounded agent. The Convex action verifies the signed-in owner, limits message size, calls Ollama over HTTPS, and returns only the model response. Ollama currently lists a `$0` Free plan with light cloud usage; it has session, weekly, concurrency, and model-dependent limits, so it is not unlimited free compute.
-
-Use Ollama's official API-key settings to create or revoke the key. Never paste the key into the page, n8n, source code, or chat.
+Then open **Local agents**, choose **AI gateway** or **Both / compare**, click the connection test, select a reported model, and run the bounded agent. The Convex action verifies the signed-in owner, limits message size, calls `POST {AI_BASE_URL}/chat/completions` over HTTPS, and returns only the model response. Model names are passed through as selectors: OmniRoute routes them to whichever provider you configure there (Ollama, OpenAI, etc.).
 
 ## Android requirements
 
@@ -61,4 +60,4 @@ If the app is opened on a different device, `127.0.0.1` points to that other dev
 
 ## Safety boundary
 
-Local and cloud agent responses are recommendations only. In **Both / compare** mode, the app runs independent reviews and labels partial failures; it does not merge agreement into a verified fact. The page intentionally has no database mutations, approvals, exports, dial actions, scraping actions, or automatic lead creation. Do not paste API keys, deploy keys, webhook secrets, or unnecessary private contact data into the prompt. Cloud mode sends the prompt to Ollama Cloud; use phone mode when the evidence must remain entirely on-device.
+Local and gateway agent responses are recommendations only. In **Both / compare** mode, the app runs independent reviews and labels partial failures; it does not merge agreement into a verified fact. The page intentionally has no database mutations, approvals, exports, dial actions, scraping actions, or automatic lead creation. Do not paste API keys, deploy keys, webhook secrets, or unnecessary private contact data into the prompt. Gateway mode sends the prompt to the AI gateway (`AI_BASE_URL`); use phone mode when the evidence must remain entirely on-device.

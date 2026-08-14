@@ -222,11 +222,11 @@ export default function Operations() {
       if (verdict.status === "COMPLETED") {
         toast.success(`Consultant court verdict: ${pretty(verdict.verdict ?? "HOLD")}.`);
       } else if (verdict.status === "SKIPPED_MISSING_KEY") {
-        toast.warning("Add OLLAMA_API_KEY to run the consultant court.");
+        toast.warning("Configure your AI gateway (AI_BASE_URL) to run the consultant court.");
       } else {
         const failure = verdict.error ?? "The consultant court could not complete this review.";
         toast.error(failure.includes("HTTP 429")
-          ? "Ollama Cloud could not complete the court review. Check the Ollama key, model, or usage limit, then retry."
+          ? "The AI gateway could not complete the court review. Check AI_BASE_URL, the model, or usage limits, then retry."
           : failure);
       }
       refresh();

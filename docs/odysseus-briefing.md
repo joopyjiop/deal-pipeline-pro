@@ -18,7 +18,7 @@ The owner must have these set in the Convex dashboard's Keys/Environment Variabl
 - [ ] `FIRECRAWL_API_KEY` — crawl tooling
 - [ ] `SGAI_API_KEY` — ScrapeGraphAI extraction
 - [ ] `CAMOFOX_BASE_URL` + `CAMOFOX_API_KEY` — camofox browser proxy (default base: `https://camofox-browser-h1ib.onrender.com`)
-- [ ] `OLLAMA_API_KEY` — consultant court / AI reviews
+- [ ] `AI_BASE_URL` + optional `AI_API_KEY` — AI gateway (default local OmniRoute `https://localhost:20128/v1`) for the consultant court, local-agents chat, and embeddings
 - [ ] Auth vars `JWKS`, `JWT_PRIVATE_KEY`, `SITE_URL` — should already be configured
 
 Verify access before doing anything else: `GET https://keen-aardvark-333.convex.site/api/admin/leads?limit=1` with the bearer key must return 200, and `tools/list` on `/api/mcp` must return the tool manifest.

@@ -50,7 +50,7 @@ Never run interactive `bun convex dev` (no `--once`) — it hangs in non-interac
 
 ## Before-first-run configuration (owner action, not code)
 
-For an external agent to operate the app, the owner must set in the Convex dashboard Keys panel (or Freebuff Keys UI): `ADMIN_API_KEY`, `MCP_TOOL_SERVER_SECRET`, `MONGODB_URI`, and per-provider `RENTCAST_API_KEY`, `FIRECRAWL_API_KEY`, `SGAI_API_KEY`, `CAMOFOX_BASE_URL`, `CAMOFOX_API_KEY`, `OLLAMA_API_KEY` (plus auth vars `JWKS`, `JWT_PRIVATE_KEY`, `SITE_URL` as already configured). Full table: README → "Environment variables".
+For an external agent to operate the app, the owner must set in the Convex dashboard Keys panel (or Freebuff Keys UI): `ADMIN_API_KEY`, `MCP_TOOL_SERVER_SECRET`, `MONGODB_URI`, and per-provider `RENTCAST_API_KEY`, `FIRECRAWL_API_KEY`, `SGAI_API_KEY`, `CAMOFOX_BASE_URL`, `CAMOFOX_API_KEY`, plus `AI_BASE_URL` (AI gateway — consultant court, chat, embeddings; optional `AI_API_KEY`) (plus auth vars `JWKS`, `JWT_PRIVATE_KEY`, `SITE_URL` as already configured). Full table: README → "Environment variables".
 
 ## Auth files — do not modify
 

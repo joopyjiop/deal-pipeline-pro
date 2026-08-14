@@ -1,7 +1,7 @@
 // In-house semantic search over leads (build-your-own-x "Search Engine" pattern).
 //
 // This is the legitimate in-project version of a vector index: embeddings are
-// produced by an official provider (Ollama Cloud) and ranked with plain cosine
+// produced by the AI gateway (AI_BASE_URL, default local OmniRoute) and ranked with plain cosine
 // similarity — no Rust/Python index, no managed vector service, no data leaving
 // the app beyond the embedding call. For a corpus of hundreds of leads,
 // brute-force cosine is fast and keeps the whole pipeline owner-gated and

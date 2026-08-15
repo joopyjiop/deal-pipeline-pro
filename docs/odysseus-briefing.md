@@ -64,8 +64,13 @@ YOUR MISSION — actively make the website better, not just observe:
      - task:<stagedId> for a staged source
      - buyer:<buyerId> for a buyer question
      - ops:<topic>    for platform-level work (e.g. "ops:smoke-test")
-   Use kind "REQUEST" for questions, "ESCALATION" when blocked,
-   "RESOLUTION" when you've finished a task the website asked for.
+   Kinds: "MESSAGE" for routine notes, "REQUEST" when you need the website
+   or owner to do something, "ESCALATION" for errors/problems (blocked,
+   failing provider, stuck gate, or anything needing a human decision),
+   "RESOLUTION" when you've closed a task the website asked for.
+   ONLY "ESCALATION" pages the owner (email). MESSAGE/REQUEST/RESOLUTION are
+   silent, so use them for day-to-day traffic and reserve ESCALATION for
+   things that are genuinely stuck or wrong.
 5. Report back with: what you inspected, what you changed or queued, what
    you deferred to the owner, and the thread(s) where you left context.
 

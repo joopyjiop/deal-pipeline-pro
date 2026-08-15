@@ -15,8 +15,11 @@
 //     UI and Odysseus can tell an automated reply from a human one.
 //   * It respects the owner's Toolkit "AI access" switch (the same gate the
 //     MCP tools and the consultant court use): when AI access is disabled, the
-//     responder skips. Configure AI_BASE_URL + enable AI access in the Toolkit
-//     to turn auto-replies on.
+//     responder skips entirely.
+//   * When AI access is on but the AI gateway (AI_BASE_URL) is not configured
+//     or reachable, it falls back to a DETERMINISTIC reply built only from real
+//     app data — so Odysseus still gets a grounded answer on every cron run
+//     without any model call. When the gateway is configured, the LLM is used.
 
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
@@ -248,6 +251,33 @@ function formatThread(messages: MessageDoc[], maxMessages = 12): string {
     .join("\n");
 }
 
+// Deterministic fallback: builds a grounded, factual reply without any model
+// call. It only ever restates real app context (the referenced document or the
+// pipeline snapshot) and never invents, approves, or answers beyond the data.
+async function generateDeterministicReply(
+  ctx: ActionCtx,
+  threadId: string,
+  last: MessageDoc,
+): Promise<{ content: string; model: string }> {
+  const contextParts: string[] = [];
+  const docContext = await loadDocContext(ctx, threadId);
+  if (docContext) contextParts.push(docContext);
+  if (!threadId.startsWith("deal:") && !threadId.startsWith("task:") && !threadId.startsWith("buyer:")) {
+    contextParts.push(...(await buildOpsContext(ctx)));
+  }
+  const content = [
+    "Auto-reply from the website (deterministic — grounded in live app data only, no AI model involved):",
+    "",
+    `In reply to your ${last.kind}: ${last.content.slice(0, 400)}`,
+    "",
+    "Live app context:",
+    contextParts.length > 0 ? contextParts.join("\n\n") : "No live app context is available for this thread.",
+    "",
+    "Approvals, dialing, exports, and PII decisions remain owner-only — none have been performed here.",
+  ].join("\n");
+  return { content, model: "deterministic" };
+}
+
 async function generateReply(ctx: ActionCtx, threadId: string, messages: MessageDoc[], last: MessageDoc): Promise<{ content: string; model: string }> {
   const contextParts: string[] = [];
   const docContext = await loadDocContext(ctx, threadId);
@@ -289,7 +319,8 @@ async function respondToThreadImpl(
   const normalized = normalizeThreadId(threadId);
   if (!normalized) return { threadId: normalized, status: "SKIPPED", reason: "empty thread id" };
 
-  // Same AI-access gate the MCP tools and the consultant court use.
+  // Same AI-access gate the MCP tools and the consultant court use. This is the
+  // owner's master switch for auto-replies; when it is off we skip entirely.
   try {
     await ctx.runAction(internal.mongodb.mcpAssertAiAccess, {});
   } catch (error) {
@@ -299,9 +330,9 @@ async function respondToThreadImpl(
       reason: error instanceof Error ? error.message : "AI access is disabled in the owner Toolkit",
     };
   }
-  if (!isAiGatewayConfigured()) {
-    return { threadId: normalized, status: "SKIPPED", reason: "AI gateway is not configured (AI_BASE_URL)" };
-  }
+  // When the AI gateway is unreachable/unconfigured, answer deterministically
+  // from real app data instead of going silent.
+  const useDeterministic = !isAiGatewayConfigured();
 
   const messages = await ctx.runQuery(internal.sharedConversation.threadMessages, {
     threadId: normalized,
@@ -327,7 +358,9 @@ async function respondToThreadImpl(
   }
 
   try {
-    const { content, model } = await generateReply(ctx, normalized, ordered, last);
+    const { content, model } = useDeterministic
+      ? await generateDeterministicReply(ctx, normalized, last)
+      : await generateReply(ctx, normalized, ordered, last);
     const replyId = await ctx.runMutation(internal.sharedConversation.insertMessage, {
       threadId: normalized,
       sender: "website",
@@ -363,7 +396,6 @@ export const respondToOpenThreads = internalAction({
     } catch (error) {
       return { status: "SKIPPED", reason: error instanceof Error ? error.message : "AI access is disabled", responded: [] };
     }
-    if (!isAiGatewayConfigured()) return { status: "SKIPPED", reason: "AI gateway is not configured (AI_BASE_URL)", responded: [] };
 
     const candidates = await ctx.runQuery(internal.sharedConversation.unansweredThreads, {
       limit: Math.max(1, Math.min(3, Math.floor(args.maxThreads ?? 3))),
@@ -390,9 +422,6 @@ export const runThreadResponderNow = action({
   args: { maxThreads: v.optional(v.number()) },
   handler: async (ctx, args): Promise<{ model: string; responded: ThreadResponseList }> => {
     await requireOwner(ctx);
-    if (!isAiGatewayConfigured()) {
-      throw new Error("The AI gateway is not configured — set AI_BASE_URL in the Convex Keys panel first.");
-    }
     const candidates = await ctx.runQuery(internal.sharedConversation.unansweredThreads, {
       limit: Math.max(1, Math.min(5, Math.floor(args.maxThreads ?? 5))),
     });

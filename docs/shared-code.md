@@ -1,14 +1,14 @@
-# Shared code — Website ↔ Odysseus (v1 draft, co-authored)
+# Shared code — Website ↔ Odysseus (v2, frozen)
 
 A compact, unambiguous language the website and Odysseus use inside shared
 conversation threads (`docs/odysseus-briefing.md` → "Shared conversation") so
 the two sides cannot misread each other and so raw PII is not restated in the
 thread log.
 
-Status: **v1 draft**. Co-authored with Odysseus — v0 was posted to
-`ops:shared-code`; v1 folds in the vocabulary observed in Odysseus's real
-thread traffic (see §9). Still awaiting Odysseus's explicit confirmation of the
-open items in §8.
+Status: **v2 — frozen**. Co-authored with Odysseus: v0 was posted to
+`ops:shared-code`, v1 folded in the vocabulary observed in Odysseus's real
+thread traffic (see §9), and v2 applies Odysseus's explicit confirmation and
+amendments (see §8). Both sides now speak this code.
 
 ## 1. Thread references (unchanged)
 
@@ -42,7 +42,12 @@ deal:<leadId>   task:<stagedId>   buyer:<buyerId>   ops:<topic>
 | `PIPE` | Pipeline status — `S`/`C`/`A`/`R`. |
 | `RDY` | Ready for a buyer — `0`/`1`. |
 | `ARV REP MAO ACQ SPREAD` | Underwriting numbers. |
-| `DD:T DD:S DD:C DD:O` | Due-diligence gates (see §4). |
+| `DD:T` | Due-diligence gate — title (liens, encumbrances). |
+| `DD:S` | Due-diligence gate — sales/comps verification. |
+| `DD:C` | Due-diligence gate — condition/repairs. |
+| `DD:O` | Due-diligence gate — ownership (owner + chain). |
+| `MARG` | Estimated spread in dollars (ARV − repairs − purchase). |
+| `TTL` | Days until the relevant deadline (auction/close). |
 | `GAPS` | Count of blocking gaps. |
 | `COMPS` | Sold comparable count (0 = none). |
 | `COMPR` | Comps radius in miles. |
@@ -59,6 +64,11 @@ Verification: U unverified · P partial · V verified
 Pipeline:     S sourced · C critiqued · A approved · R rejected
 Diligence:    OK verified · NO missing/blocked · ? not checked
 ```
+
+`DD:T`, `DD:S`, `DD:C`, and `DD:O` are independent gates — Odysseus and the
+website check each one separately, and a lead is only `RDY=1` when all four
+read `OK`. An `ESC` names the exact gate that blocked, never a lumped
+"due diligence".
 
 ## 5. PII rule (privacy)
 
@@ -98,12 +108,21 @@ The secret envelope is AES-256-GCM with a key derived (PBKDF2-SHA256) from the
 shared `THREAD_CIPHER_KEY` secret held only by the website and Odysseus. The
 owner UI decrypts it for display. Anyone without the key sees only ciphertext.
 
-## 8. Open questions for Odysseus (co-author)
+## 8. Odysseus's confirmation (v1 → v2)
 
-1. Confirm/adjust the verb set and field set against the work it actually does.
-2. Confirm the `@ref` convention for PII (vs. an encrypted inline form).
-3. Confirm AES-GCM + PBKDF2 for the secret envelope, or prefer a simple
-   codebook first.
+Odysseus replied in `ops:shared-code` and confirmed the proposal with the
+following adjustments, all applied in v2:
+
+| Item | Odysseus's answer | Applied |
+| --- | --- | --- |
+| Verb set (`REQ ESC RES INFO OWNER WAIT`) | Keep. | ✓ |
+| v1 field set (incl. `RDY COMPS COMPR COMPD SCORE BID BOX HOT`, DD gates) | Keep. | ✓ |
+| PII `@ref` rule | Keep — never inline raw PII, reference `@deal:<leadId>`. | ✓ |
+| Secret envelope | AES-GCM + PBKDF2 as proposed. | ✓ |
+| New field `MARG` (estimated spread $) | Add, for quick deal-screening. | ✓ §3 |
+| New field `TTL` (days until auction/close) | Add, for urgency. | ✓ §3 |
+| Split `DD:O` (ownership) from `DD:T` (title) | Add — they are hit independently. | ✓ §3/§4 |
+| `ESC` rule | Keep — names exact gate + missing fact + one `ASK`. | ✓ §9 |
 
 ## 9. v1 additions — vocabulary observed in Odysseus's threads
 
@@ -123,3 +142,17 @@ for the things it actually asks about):
 **Escalation rule (both sides):** an `ESC` must name the exact gate
 (`DD:T/S/C/O`), the missing fact, and the single thing the other side should
 do — one `ASK`, never a wish-list.
+
+## 10. v2 additions — Odysseus's explicit amendments
+
+Folded in from Odysseus's confirmation reply in `ops:shared-code`:
+
+- `MARG` — estimated spread in dollars (`ARV − REP − ACQ`), used for quick
+deal-screening.
+- `TTL` — days until the deadline (auction or close), used for urgency
+ranking.
+- `DD:O` (ownership) split out from `DD:T` (title) — the two are checked
+independently, so a thread can be blocked on exactly one.
+
+Freeze: Odysseus offered `RES | CONF 1` to freeze; the website posted the
+acceptance and this document is now the single source of truth for the code.

@@ -1,19 +1,33 @@
 "use node";
 
-import { Document, MongoClient, ObjectId } from "mongodb";
-import { v } from "convex/values";
-import { internal } from "./_generated/api";
-import { action, ActionCtx, internalAction } from "./_generated/server";
-import { rankLeads } from "./search";
-import { scrapegraphExtract } from "./scrapegraph";
-import { discoverSitemapUrls } from "./sitemap";
-import type { SitemapFetch } from "./sitemap";
-import { fetchPropertyData, fetchPropertyRecord, formatOwnerMailingAddress, latestAnnualPropertyTax } from "./rentcast";
-import type { SearchableLead } from "./search";
-import { arvFromComps, median, rentalUnderwriting, repairEstimate } from "./underwriting";
-import { embeddingPrompt, rankBySimilarity, type EmbeddableLead } from "./embeddings";
-import type { RentalUnderwritingInput } from "./underwriting";
-import {
+import        {
+ Document, MongoClient, ObjectId } from "mongodb";
+import        {
+ v } from "convex/values";
+import        {
+ internal } from "./_generated/api";
+import        {
+ action, ActionCtx, internalAction } from "./_generated/server";
+import        {
+ rankLeads } from "./search";
+import        {
+ scrapegraphExtract } from "./scrapegraph";
+import        {
+ discoverSitemapUrls } from "./sitemap";
+import type        {
+ SitemapFetch } from "./sitemap";
+import        {
+ fetchPropertyData, fetchPropertyRecord, formatOwnerMailingAddress, latestAnnualPropertyTax } from "./rentcast";
+import type        {
+ SearchableLead } from "./search";
+import        {
+ arvFromComps, median, rentalUnderwriting, repairEstimate } from "./underwriting";
+import        {
+ embeddingPrompt, rankBySimilarity, type EmbeddableLead } from "./embeddings";
+import type        {
+ RentalUnderwritingInput } from "./underwriting";
+import        {
+
   arvRepairsAgent,
   buyerMatchingAgent,
   readinessReport,
@@ -21,22 +35,30 @@ import {
   underwritingAgentFromModel,
   verificationAgent,
 } from "./agents";
-import type { AgentLead, AgentReport, BuyerLike, DueDiligenceLike, ReadinessReport, ScoredBuyerMatch } from "./agents";
-import { chatCompletion, isAiGatewayConfigured } from "./ollama";
-import { extractSearchbugError, parseSearchbugResult, SEARCHBUG_ENDPOINT } from "./skiptrace";
+import type        {
+ AgentLead, AgentReport, BuyerLike, DueDiligenceLike, ReadinessReport, ScoredBuyerMatch } from "./agents";
+import        {
+ chatCompletion, isAiGatewayConfigured } from "./ollama";
+import        {
+ extractSearchbugError, parseSearchbugResult, SEARCHBUG_ENDPOINT } from "./skiptrace";
+import        {
+ computeStagingStatus, missingEvidenceFields, stagingScoreMismatch, TERMINAL_STAGING_STATUSES } from "./stagingEvidence"; // evidence gate
 
 // Shared skip-trace runner. The public action below is owner-gated for the
 // website UI; the MCP bridge (mcpSkipTrace) reuses this same runner because
 // the MCP route authenticates with the server secret (no user session), so
 // the public owner check would always reject. Contact data is stored with a
 // source URL + date and never invented; owner approval still gates any dial.
-async function runSkipTrace(database: Awaited<ReturnType<typeof getDatabase>>, id: string) {
+async function runSkipTrace(database: Awaited<ReturnType<typeof getDatabase>>, id: string)        {
+
   const apiKey = process.env.SKIPTRACE_API_KEY?.trim();
   const accountId = process.env.SKIPTRACE_ACCOUNT_ID?.trim();
-  if (!apiKey || !accountId) {
+  if (!apiKey || !accountId)        {
+
     throw new Error("Skip trace is not configured — set SKIPTRACE_API_KEY and SKIPTRACE_ACCOUNT_ID in the Convex Keys panel.");
   }
-  const lead = await database.collection(LEADS).findOne({ _id: objectId(id), fabricated: { $ne: true } });
+  const lead = await database.collection(LEADS).findOne({ _id: objectId(id), fabricated:        {
+ $ne: true } });
   if (!lead) throw new Error("Lead not found");
 
   // Reverse-address search: the provider accepts street + city + state + zip.
@@ -51,9 +73,11 @@ async function runSkipTrace(database: Awaited<ReturnType<typeof getDatabase>>, i
   if (typeof lead.state === "string" && lead.state.trim()) form.set("STATE", lead.state.trim());
   if (typeof lead.zip === "string" && lead.zip.trim()) form.set("ZIP", lead.zip.trim());
 
-  const response = await fetch(SEARCHBUG_ENDPOINT, {
+  const response = await fetch(SEARCHBUG_ENDPOINT,        {
+
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers:        {
+ "content-type": "application/x-www-form-urlencoded" },
     body: form.toString(),
   });
   if (!response.ok) throw new Error(`Skip-trace provider returned HTTP ${response.status}`);
@@ -65,10 +89,13 @@ async function runSkipTrace(database: Awaited<ReturnType<typeof getDatabase>>, i
   const contact = parseSearchbugResult(raw);
   const phoneNumbers = contact.phones.map((phone) => phone.number);
   await database.collection(LEADS).updateOne(
-    { _id: lead._id },
-    {
+           {
+ _id: lead._id },
+           {
+
       $set: withoutUndefined({
-        skipTrace: {
+        skipTrace:        {
+
           provider: contact.provider,
           sourceUrl: SEARCHBUG_ENDPOINT,
           sourceDate: new Date().toISOString().slice(0, 10),
@@ -85,7 +112,8 @@ async function runSkipTrace(database: Awaited<ReturnType<typeof getDatabase>>, i
     },
   );
 
-  return {
+  return        {
+
     id,
     ...contact,
     phoneCount: phoneNumbers.length,
@@ -94,16 +122,20 @@ async function runSkipTrace(database: Awaited<ReturnType<typeof getDatabase>>, i
 }
 
 export const skipTraceLead = action({
-  args: { id: v.string() },
-  handler: async (ctx, args) => {
+  args:        {
+ id: v.string() },
+  handler: async (ctx, args) =>        {
+
     await requireOwner(ctx);
     return runSkipTrace(await getDatabase(), args.id);
   },
 });
 
 export const mcpSkipTrace = internalAction({
-  args: { id: v.string() },
-  handler: async (_, args) => {
+  args:        {
+ id: v.string() },
+  handler: async (_, args) =>        {
+
     const database = await getDatabase();
     await requireMcpAiAccess(database);
     return runSkipTrace(database, args.id);
@@ -115,8 +147,10 @@ export const mcpSkipTrace = internalAction({
 // RENTCAST_API_KEY — no per-record fee) and writes them onto the lead with a
 // source URL + date. This is the free, TCPA-safe outreach channel (direct
 // mail); phone numbers still require a paid provider or a manual lookup.
-async function runOwnerEnrichment(database: Awaited<ReturnType<typeof getDatabase>>, id: string) {
-  const lead = await database.collection(LEADS).findOne({ _id: objectId(id), fabricated: { $ne: true } });
+async function runOwnerEnrichment(database: Awaited<ReturnType<typeof getDatabase>>, id: string)        {
+
+  const lead = await database.collection(LEADS).findOne({ _id: objectId(id), fabricated:        {
+ $ne: true } });
   if (!lead) throw new Error("Lead not found");
 
   const address = [lead.propertyAddress, lead.city, lead.state]
@@ -127,7 +161,8 @@ async function runOwnerEnrichment(database: Awaited<ReturnType<typeof getDatabas
 
   const property = await fetchPropertyRecord(address);
   if (!property) throw new Error("RentCast returned no property record for this address");
-  if (!property.ownerNames && !property.ownerMailingAddress) {
+  if (!property.ownerNames && !property.ownerMailingAddress)        {
+
     throw new Error("RentCast has no owner record for this address (county owner data not published)");
   }
 
@@ -137,14 +172,17 @@ async function runOwnerEnrichment(database: Awaited<ReturnType<typeof getDatabas
   const sourceUrl = `https://api.rentcast.io/v1/properties?address=${encodeURIComponent(address)}`;
 
   await database.collection(LEADS).updateOne(
-    { _id: lead._id },
-    {
+           {
+ _id: lead._id },
+           {
+
       $set: withoutUndefined({
         ownerNames: property.ownerNames,
         ownerType: property.ownerType,
         ownerMailingAddress: mailing,
         absenteeOwner,
-        ownerLookup: {
+        ownerLookup:        {
+
           provider: "rentcast",
           sourceUrl,
           sourceDate: new Date().toISOString().slice(0, 10),
@@ -156,7 +194,8 @@ async function runOwnerEnrichment(database: Awaited<ReturnType<typeof getDatabas
     },
   );
 
-  return {
+  return        {
+
     id,
     ownerNames: property.ownerNames ?? [],
     ownerType: property.ownerType,
@@ -168,16 +207,20 @@ async function runOwnerEnrichment(database: Awaited<ReturnType<typeof getDatabas
 }
 
 export const enrichOwnerFromRentCast = action({
-  args: { id: v.string() },
-  handler: async (ctx, args) => {
+  args:        {
+ id: v.string() },
+  handler: async (ctx, args) =>        {
+
     await requireOwner(ctx);
     return runOwnerEnrichment(await getDatabase(), args.id);
   },
 });
 
 export const mcpOwnerLookup = internalAction({
-  args: { id: v.string() },
-  handler: async (_, args) => {
+  args:        {
+ id: v.string() },
+  handler: async (_, args) =>        {
+
     const database = await getDatabase();
     await requireMcpAiAccess(database);
     return runOwnerEnrichment(database, args.id);
@@ -192,12 +235,17 @@ const HOT_DEALS = "hot_deals";
 const BUYERS = "buyers";
 const MATCHES = "property_matches";
 const IMPORT_STAGING = "import_staging";
+// Immutable promotion audit log: one entry per NEW → lead promotion, written by
+// the evidence gate so the owner can trace who promoted what and with which
+// source evidence (NON-NEGOTIABLE #4). Rows are append-only.
+const PROMOTION_AUDIT = "lead_promotion_audit";
 const TOOL_ACCESS = "tool_access";
 const AUTOMATION_TASKS = "automation_tasks";
 
 type AutomationMode = "DETERMINISTIC" | "BOTH";
 
-type ToolAccessDocument = {
+type ToolAccessDocument =        {
+
   _id: string;
   scraperEnabled?: boolean;
   estimatorEnabled?: boolean;
@@ -482,10 +530,20 @@ const importStagingValidator = v.object({
   rawJson: v.any(),
   status: v.union(
     v.literal("NEW"),
+    v.literal("NEEDS_EVIDENCE"),
     v.literal("DUPLICATE"),
     v.literal("REJECTED"),
+    v.literal("ARCHIVED"),
   ),
   rejectReason: v.optional(v.string()),
+  // Top-level source-evidence fields (NON-NEGOTIABLE #4). When present they
+  // are the authority for the promotion gate; when absent the crawl pipeline
+  // derives them from rawJson via extractSourcedCandidate. A row is promotable
+  // (NEW) only when all three are present and valid.
+  sourceUrl: v.optional(v.string()),
+  sourceRef: v.optional(v.string()),
+  sourceDate: v.optional(v.string()),
+  distressScore: v.optional(v.number()),
 });
 
 // Due-diligence gate: before a lead-linked ARV/profit estimate is computed, the
@@ -508,26 +566,33 @@ const dueDiligenceEntryValidator = v.object({
   checkedAt: v.optional(v.number()),
 });
 
-function uriHasCredentials(uri: string) {
+function uriHasCredentials(uri: string)        {
+
   // A usable driver URI embeds userinfo (`user:pass@host`). The Atlas SQL
   // endpoint (no credentials) looks similar but contains no `@` and cannot be
   // authenticated against by the driver.
   return /^mongodb(\+srv)?:\/\/[^/@]+@/.test(uri);
 }
 
-function maskUriHost(uri: string) {
-  try {
+function maskUriHost(uri: string)        {
+
+  try        {
+
     return new URL(uri).host;
-  } catch {
+  } catch        {
+
     return null;
   }
 }
 
-async function getStoredMongoUri(ctx: ActionCtx): Promise<string | null> {
-  return (await ctx.runQuery(internal.settings.getByKey, { key: MONGO_URI_SETTING_KEY })) ?? null;
+async function getStoredMongoUri(ctx: ActionCtx): Promise<string | null>        {
+
+  return (await ctx.runQuery(internal.settings.getByKey,        {
+ key: MONGO_URI_SETTING_KEY })) ?? null;
 }
 
-type MongoHealthResult = {
+type MongoHealthResult =        {
+
   configured: boolean;
   connected: boolean;
   status: string;
@@ -536,17 +601,23 @@ type MongoHealthResult = {
   usingFallback: boolean;
 };
 
-async function connectWithUri(uri: string): Promise<MongoClient> {
-  try {
-    const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10000 });
+async function connectWithUri(uri: string): Promise<MongoClient>        {
+
+  try        {
+
+    const client = new MongoClient(uri,        {
+ serverSelectionTimeoutMS: 10000 });
     await client.connect();
     return client;
-  } catch (error) {
+  } catch (error)        {
+
     clientPromise = null;
     // The env value can be stale or credential-less on managed deployments.
     // Retry against the owner-saved fallback before giving up.
-    if (cachedMongoUri && cachedMongoUri !== uri) {
-      const fallback = new MongoClient(cachedMongoUri, { serverSelectionTimeoutMS: 10000 });
+    if (cachedMongoUri && cachedMongoUri !== uri)        {
+
+      const fallback = new MongoClient(cachedMongoUri,        {
+ serverSelectionTimeoutMS: 10000 });
       await fallback.connect();
       return fallback;
     }
@@ -554,33 +625,39 @@ async function connectWithUri(uri: string): Promise<MongoClient> {
   }
 }
 
-function getMongoClient() {
+function getMongoClient()        {
+
   const envUri = process.env.MONGODB_URI;
   // Prefer the env var when it carries credentials. A credential-less env value
   // (e.g. the Atlas SQL endpoint on managed deployments) is treated as absent
   // so the owner-saved fallback is used directly instead of failing first.
   const uri = envUri && uriHasCredentials(envUri) ? envUri : cachedMongoUri ?? envUri;
-  if (!uri) {
+  if (!uri)        {
+
     throw new Error("MONGODB_URI is not configured");
   }
 
-  if (!clientPromise) {
+  if (!clientPromise)        {
+
     clientPromise = connectWithUri(uri);
   }
 
   return clientPromise;
 }
 
-async function getDatabase() {
+async function getDatabase()        {
+
   const client = await getMongoClient();
   return client.db();
 }
 
-function isOwnerEmail(email: string | undefined) {
+function isOwnerEmail(email: string | undefined)        {
+
   return email?.trim().toLowerCase() === OWNER_EMAIL;
 }
 
-async function isOwnerIdentity(ctx: ActionCtx): Promise<boolean> {
+async function isOwnerIdentity(ctx: ActionCtx): Promise<boolean>        {
+
   const identity = await ctx.auth.getUserIdentity();
   if (isOwnerEmail(identity?.email)) return true;
   // The identity subject is `<userId>|<sessionId>` (see @convex-dev/auth
@@ -589,35 +666,42 @@ async function isOwnerIdentity(ctx: ActionCtx): Promise<boolean> {
   // permanent owner email) against the same row the frontend reads.
   const [userId] = (identity?.subject ?? "").split("|");
   if (!userId) return false;
-  const user = await ctx.runQuery(internal.users.getUserBySubject, {
+  const user = await ctx.runQuery(internal.users.getUserBySubject,        {
+
     subject: userId,
   });
   return Boolean(user && (user.role === "admin" || isOwnerEmail(user.email)));
 }
 
-async function requireOwner(ctx: ActionCtx) {
+async function requireOwner(ctx: ActionCtx)        {
+
   if (await isOwnerIdentity(ctx)) return;
   throw new Error("Owner access required");
 }
 
-async function requireSignedIn(ctx: ActionCtx) {
+async function requireSignedIn(ctx: ActionCtx)        {
+
   const identity = await ctx.auth.getUserIdentity();
-  if (!identity) {
+  if (!identity)        {
+
     throw new Error("Authentication required");
   }
 }
 
-function withoutUndefined<T extends Record<string, unknown>>(value: T) {
+function withoutUndefined<T extends Record<string, unknown>>(value: T)        {
+
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined),
   ) as Partial<T>;
 }
 
-function serializeValue(value: unknown): unknown {
+function serializeValue(value: unknown): unknown        {
+
   if (value instanceof ObjectId) return String(value);
   if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(serializeValue);
-  if (value && typeof value === "object") {
+  if (value && typeof value === "object")        {
+
     return Object.fromEntries(
       Object.entries(value).map(([key, item]) => [key, serializeValue(item)]),
     );
@@ -625,15 +709,19 @@ function serializeValue(value: unknown): unknown {
   return value;
 }
 
-function serialize<T extends Document>(document: T) {
+function serialize<T extends Document>(document: T)        {
+
   // `_id` is always stringified by serializeValue, so declare it as a known
   // property. Without it, object-literal spreads like `{ ...lead, x }` drop the
   // index signature and TypeScript loses `_id` on the spread result.
-  return serializeValue(document) as Record<string, unknown> & { _id: string };
+  return serializeValue(document) as Record<string, unknown> &        {
+ _id: string };
 }
 
-function objectId(id: string) {
-  if (!ObjectId.isValid(id)) {
+function objectId(id: string)        {
+
+  if (!ObjectId.isValid(id))        {
+
     throw new Error("Invalid MongoDB document id");
   }
   return new ObjectId(id);
@@ -644,17 +732,20 @@ function objectId(id: string) {
 // public site the owner can crawl in bounded batches; none of them generate
 // leads automatically — they seed the review queue.
 const OFF_MARKET_SOURCE_PRESETS = [
-  {
+         {
+
     name: "Probate & trust property sales",
     url: "https://www.trustpropertiesusa.com/",
     sourceType: "PROBATE" as const,
   },
-  {
+         {
+
     name: "Harris County delinquent tax sale listings",
     url: "https://www.hctax.net/Property/listings/taxsalelisting",
     sourceType: "TAX_SALE" as const,
   },
-  {
+         {
+
     name: "Bid4Assets county tax & government-seized property auctions",
     url: "https://www.bid4assets.com/",
     sourceType: "OFF_MARKET" as const,
@@ -662,8 +753,10 @@ const OFF_MARKET_SOURCE_PRESETS = [
 ] as const;
 
 export const queueOffMarketSources = action({
-  args: {},
-  handler: async (ctx) => {
+  args:        {
+},
+  handler: async (ctx) =>        {
+
     await requireOwner(ctx);
     const database = await getDatabase();
     const queued = await Promise.all(
@@ -672,7 +765,8 @@ export const queueOffMarketSources = action({
         ...(await enqueueSourceTask(database, source.url, source.sourceType, `off-market:${source.sourceType}:2026`)),
       })),
     );
-    return { queued, ownerApprovalRequired: true };
+    return        {
+ queued, ownerApprovalRequired: true };
   },
 });
 
@@ -683,16 +777,20 @@ export const queueOffMarketSources = action({
 // team only reads data the lead already carries plus the owner-provided rental
 // and comp inputs — nothing is invented, and an incomplete deal is flagged.
 
-function leadText(value: unknown): string | undefined {
+function leadText(value: unknown): string | undefined        {
+
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
-function leadNumber(value: unknown): number | undefined {
+function leadNumber(value: unknown): number | undefined        {
+
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function toAgentLead(document: Document): AgentLead {
-  return {
+function toAgentLead(document: Document): AgentLead        {
+
+  return        {
+
     _id: String(document._id),
     propertyAddress: leadText(document.propertyAddress),
     city: leadText(document.city),
@@ -725,13 +823,15 @@ function toAgentLead(document: Document): AgentLead {
   };
 }
 
-type StoredAgentTeam = {
+type StoredAgentTeam =        {
+
   reports?: AgentReport[];
   readiness?: ReadinessReport;
   ranAt?: number;
 };
 
-type RunAgentTeamInput = {
+type RunAgentTeamInput =        {
+
   leadId: string;
   rental?: RentalUnderwritingInput;
   compPrices?: number[];
@@ -741,8 +841,10 @@ type RunAgentTeamInput = {
 async function runAgentTeamImpl(
   database: Awaited<ReturnType<typeof getDatabase>>,
   args: RunAgentTeamInput,
-) {
-  const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+)        {
+
+  const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated:        {
+ $ne: true } });
   if (!document) throw new Error("Lead not found");
 
   const lead = toAgentLead(document);
@@ -751,10 +853,12 @@ async function runAgentTeamImpl(
     leadNumber(document.acquisitionPrice) ??
     leadNumber(document.mao) ??
     0;
-  const rentalInput: RentalUnderwritingInput = args.rental ?? { purchasePrice };
+  const rentalInput: RentalUnderwritingInput = args.rental ??        {
+ purchasePrice };
   const model = rentalUnderwriting(rentalInput);
   const rentalModel = model.dscr !== undefined || model.annualCashFlow !== undefined
-    ? { dscr: model.dscr, annualCashFlow: model.annualCashFlow, monthlyCashFlow: model.monthlyCashFlow }
+    ?        {
+ dscr: model.dscr, annualCashFlow: model.annualCashFlow, monthlyCashFlow: model.monthlyCashFlow }
     : undefined;
 
   const reports: AgentReport[] = [
@@ -776,10 +880,13 @@ async function runAgentTeamImpl(
     : undefined;
   const ranAt = Date.now();
   await database.collection(LEADS).updateOne(
-    { _id: document._id },
-    {
+           {
+ _id: document._id },
+           {
+
       $set: withoutUndefined({
-        agentTeam: { reports, readiness, ranAt },
+        agentTeam:        {
+ reports, readiness, ranAt },
         rentalModel: rentalModel ?? undefined,
         readinessStatus: readiness.status,
         arv: arv?.median,
@@ -788,25 +895,30 @@ async function runAgentTeamImpl(
       }),
     },
   );
-  return { leadId: args.leadId, reports, readiness, rentalModel };
+  return        {
+ leadId: args.leadId, reports, readiness, rentalModel };
 }
 
 export const runAgentTeam = action({
-  args: {
+  args:        {
+
     leadId: v.string(),
     rental: v.optional(rentalUnderwritingInputValidator),
     compPrices: v.optional(v.array(v.number())),
     repairTier: v.optional(repairTierValidator),
     autoData: v.optional(v.boolean()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args) =>        {
+
     await requireOwner(ctx);
     const database = await getDatabase();
     let rental = args.rental;
     let compPrices = args.compPrices;
     let source:
-      | { provider: "rentcast"; address: string; propertyId?: string; compsUsed: number; rentEstimate?: number; status: "OK"; message?: string }
-      | { provider: "rentcast"; address: string; status: "NO_MATCH" | "ERROR"; message: string }
+      |        {
+ provider: "rentcast"; address: string; propertyId?: string; compsUsed: number; rentEstimate?: number; status: "OK"; message?: string }
+      |        {
+ provider: "rentcast"; address: string; status: "NO_MATCH" | "ERROR"; message: string }
       | undefined;
     // autoData: pull real market data (SF, rent, property tax, sold comps)
     // from RentCast to fill whatever the owner did not supply, so the
@@ -815,15 +927,21 @@ export const runAgentTeam = action({
     // RentCast only fills what is missing. If RentCast contributes nothing,
     // the result carries a status note so the owner sees why the gate still
     // blocks instead of failing silently.
-    if (args.autoData === true) {
-      const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
-      if (document) {
-        try {
+    if (args.autoData === true)        {
+
+      const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated:        {
+ $ne: true } });
+      if (document)        {
+
+        try        {
+
           const built = await rentcastInputsForLead(database, document);
-          if (built) {
+          if (built)        {
+
             const user = args.rental;
             const rc = built.rental;
-            rental = {
+            rental =        {
+
               purchasePrice: user?.purchasePrice ?? rc.purchasePrice,
               rentComps: user?.rentComps?.length ? user.rentComps : rc.rentComps,
               marketRentPerSqFt: user?.marketRentPerSqFt ?? rc.marketRentPerSqFt,
@@ -839,17 +957,24 @@ export const runAgentTeam = action({
               loanTermYears: user?.loanTermYears ?? rc.loanTermYears,
             };
             compPrices = args.compPrices?.length ? args.compPrices : built.compPrices;
-            source = { provider: "rentcast" as const, address: built.data.address, propertyId: built.data.property?.id, compsUsed: built.compPrices.length, rentEstimate: built.data.rentEstimate?.rent, status: "OK" as const };
-          } else {
-            source = { provider: "rentcast" as const, address: "", status: "NO_MATCH" as const, message: "RentCast found no property record for this lead's address — the gate flags the real gaps." };
+            source =        {
+ provider: "rentcast" as const, address: built.data.address, propertyId: built.data.property?.id, compsUsed: built.compPrices.length, rentEstimate: built.data.rentEstimate?.rent, status: "OK" as const };
+          } else        {
+
+            source =        {
+ provider: "rentcast" as const, address: "", status: "NO_MATCH" as const, message: "RentCast found no property record for this lead's address — the gate flags the real gaps." };
           }
-        } catch (error) {
-          source = { provider: "rentcast" as const, address: "", status: "ERROR" as const, message: `RentCast unavailable (${(error as Error).message}) — the gate flags the real gaps.` };
+        } catch (error)        {
+
+          source =        {
+ provider: "rentcast" as const, address: "", status: "ERROR" as const, message: `RentCast unavailable (${(error as Error).message}) — the gate flags the real gaps.` };
         }
       }
     }
-    const team = await runAgentTeamImpl(database, { leadId: args.leadId, rental, compPrices, repairTier: args.repairTier });
-    return source ? { ...team, source } : team;
+    const team = await runAgentTeamImpl(database,        {
+ leadId: args.leadId, rental, compPrices, repairTier: args.repairTier });
+    return source ?        {
+ ...team, source } : team;
   },
 });
 
@@ -859,8 +984,10 @@ export const runAgentTeam = action({
 async function rentcastInputsForLead(
   database: Awaited<ReturnType<typeof getDatabase>>,
   document: Document,
-  options?: { radius?: number; saleDateRange?: number },
-): Promise<{ data: Awaited<ReturnType<typeof rentcastFetchImpl>>; rental: RentalUnderwritingInput; compPrices: number[] } | null> {
+  options?:        {
+ radius?: number; saleDateRange?: number },
+): Promise<{ data: Awaited<ReturnType<typeof rentcastFetchImpl>>; rental: RentalUnderwritingInput; compPrices: number[] } | null>        {
+
   const address = [document.propertyAddress, document.city, document.state, document.zip]
     .filter((part): part is string => typeof part === "string" && Boolean(part.trim()))
     .join(", ");
@@ -870,7 +997,8 @@ async function rentcastInputsForLead(
   const squareFeet = data.property.squareFootage;
   const rentComps = data.rentEstimate?.rent ? [data.rentEstimate.rent] : [];
   const annualPropertyTax = data.summary.annualPropertyTax;
-  const rental = {
+  const rental =        {
+
     purchasePrice,
     rentComps,
     squareFeet,
@@ -882,11 +1010,14 @@ async function rentcastInputsForLead(
   const compPrices = data.comps.soldPrices;
   const dueDiligenceRecord = rentcastSaleHistoryRecord(document, data, compPrices);
   const setFields: Record<string, unknown> = withoutUndefined({ squareFeet, yearBuilt: data.property.yearBuilt, updatedAt: Date.now() });
-  if (dueDiligenceRecord) {
+  if (dueDiligenceRecord)        {
+
     setFields.dueDiligence = dueDiligenceRecord;
   }
-  await database.collection(LEADS).updateOne({ _id: document._id }, { $set: setFields });
-  return { data, rental, compPrices };
+  await database.collection(LEADS).updateOne({ _id: document._id },        {
+ $set: setFields });
+  return        {
+ data, rental, compPrices };
 }
 
 // Builds the sale-history due-diligence entry from a RentCast pull (sold
@@ -899,7 +1030,8 @@ function rentcastSaleHistoryRecord(
   document: Document,
   data: Awaited<ReturnType<typeof rentcastFetchImpl>>,
   compPrices: number[],
-): DueDiligenceRecord | undefined {
+): DueDiligenceRecord | undefined        {
+
   const current = document.dueDiligence && typeof document.dueDiligence === "object"
     ? document.dueDiligence as DueDiligenceRecord
     : undefined;
@@ -907,19 +1039,24 @@ function rentcastSaleHistoryRecord(
   const property = data.property;
   if (!property) return undefined;
   const evidenceParts: string[] = [];
-  if (compPrices.length > 0) {
+  if (compPrices.length > 0)        {
+
     const sorted = [...compPrices].sort((a, b) => a - b);
     const medianValue = sorted[Math.floor(sorted.length / 2)];
     evidenceParts.push(`${compPrices.length} sold comp${compPrices.length === 1 ? "" : "s"} (median $${medianValue.toLocaleString()}) within ${data.comps.radiusMiles} mi, last ${data.comps.saleDateRangeDays} days`);
   }
-  if (typeof property.lastSalePrice === "number" && property.lastSalePrice > 0) {
+  if (typeof property.lastSalePrice === "number" && property.lastSalePrice > 0)        {
+
     evidenceParts.push(`subject last sale $${property.lastSalePrice.toLocaleString()}${property.lastSaleDate ? ` on ${String(property.lastSaleDate).slice(0, 10)}` : ""}`);
   }
   if (evidenceParts.length === 0) return undefined;
-  return {
+  return        {
+
     ...emptyDueDiligence(),
-    ...(current ?? {}),
-    saleHistory: {
+    ...(current ??        {
+}),
+    saleHistory:        {
+
       status: "FOUND",
       summary: `Sale history from RentCast property records (county-record derived): ${evidenceParts.join("; ")}. Retrieved ${new Date().toISOString().slice(0, 10)}.`,
       sourceUrl: "https://www.rentcast.io/",
@@ -929,29 +1066,38 @@ function rentcastSaleHistoryRecord(
 }
 
 export const getAgentTeam = action({
-  args: { leadId: v.string() },
-  handler: async (ctx, args) => {
+  args:        {
+ leadId: v.string() },
+  handler: async (ctx, args) =>        {
+
     await requireOwner(ctx);
-    const document = await (await getDatabase()).collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+    const document = await (await getDatabase()).collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated:        {
+ $ne: true } });
     if (!document) throw new Error("Lead not found");
     const stored = document.agentTeam as StoredAgentTeam | undefined;
-    return { leadId: args.leadId, agentTeam: stored ?? null };
+    return        {
+ leadId: args.leadId, agentTeam: stored ?? null };
   },
 });
 
 export const runBuyerMatches = action({
-  args: {
+  args:        {
+
     leadId: v.string(),
     minScore: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args) =>        {
+
     await requireOwner(ctx);
     const database = await getDatabase();
-    const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+    const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated:        {
+ $ne: true } });
     if (!document) throw new Error("Lead not found");
 
-    const rentalModel = document.rentalModel as { dscr?: number; annualCashFlow?: number; monthlyCashFlow?: number } | undefined;
-    const leadForScoring = {
+    const rentalModel = document.rentalModel as        {
+ dscr?: number; annualCashFlow?: number; monthlyCashFlow?: number } | undefined;
+    const leadForScoring =        {
+
       city: leadText(document.city) ?? "",
       county: leadText(document.county) ?? "",
       state: leadText(document.state) ?? "",
@@ -963,9 +1109,11 @@ export const runBuyerMatches = action({
     };
 
     const buyerDocuments = await database.collection(BUYERS).find({ intakeStatus: "APPROVED" }).limit(500).toArray();
-    const buyerLikes: BuyerLike[] = buyerDocuments.map((buyer) => {
+    const buyerLikes: BuyerLike[] = buyerDocuments.map((buyer) =>        {
+
       const exitType = buyer.exitType;
-      return {
+      return        {
+
         _id: String(buyer._id),
         budgetMin: leadNumber(buyer.budgetMin) ?? 0,
         budgetMax: leadNumber(buyer.budgetMax) ?? 0,
@@ -977,7 +1125,8 @@ export const runBuyerMatches = action({
 
     const scored = buyerMatchingAgent(leadForScoring, buyerLikes, args.minScore ?? 55);
     const matches: ScoredBuyerMatch[] = scored.matches;
-    return {
+    return        {
+
       leadId: args.leadId,
       matches,
       skipped: scored.skipped,
@@ -986,7 +1135,8 @@ export const runBuyerMatches = action({
   },
 });
 
-type PipelineBriefEntry = {
+type PipelineBriefEntry =        {
+
   _id: string;
   propertyAddress: string;
   city: string;
@@ -1000,17 +1150,21 @@ type PipelineBriefEntry = {
   ranAt?: number;
 };
 
-async function listPipelineBriefImpl(database: Awaited<ReturnType<typeof getDatabase>>) {
+async function listPipelineBriefImpl(database: Awaited<ReturnType<typeof getDatabase>>)        {
+
   const documents = await database.collection(LEADS)
-    .find({ fabricated: { $ne: true } })
+    .find({ fabricated:        {
+ $ne: true } })
     .sort({ updatedAt: -1 })
     .limit(200)
     .toArray();
-  const leads: PipelineBriefEntry[] = documents.map((document) => {
+  const leads: PipelineBriefEntry[] = documents.map((document) =>        {
+
     const lead = toAgentLead(document);
     const team = document.agentTeam as StoredAgentTeam | undefined;
     const gaps = team?.readiness?.gaps ?? team?.reports?.flatMap((report) => report.dataGaps) ?? [];
-    return {
+    return        {
+
       _id: String(document._id),
       propertyAddress: lead.propertyAddress ?? "",
       city: lead.city ?? "",
@@ -1025,7 +1179,8 @@ async function listPipelineBriefImpl(database: Awaited<ReturnType<typeof getData
     };
   });
   const readyCount = leads.filter((lead) => lead.ready).length;
-  return {
+  return        {
+
     total: leads.length,
     readyCount,
     incompleteCount: leads.length - readyCount,
@@ -1035,8 +1190,10 @@ async function listPipelineBriefImpl(database: Awaited<ReturnType<typeof getData
 }
 
 export const listPipelineBrief = action({
-  args: {},
-  handler: async (ctx) => {
+  args:        {
+},
+  handler: async (ctx) =>        {
+
     await requireOwner(ctx);
     return listPipelineBriefImpl(await getDatabase());
   },
@@ -1048,21 +1205,27 @@ export const listPipelineBrief = action({
 // each field is either on file or came back from a source; fields no source
 // provided are omitted so the caller leaves them blank.
 export const loadPropertyBrief = action({
-  args: { leadId: v.string() },
-  handler: async (ctx, args) => {
+  args:        {
+ leadId: v.string() },
+  handler: async (ctx, args) =>        {
+
     await requireOwner(ctx);
     const database = await getDatabase();
-    const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated: { $ne: true } });
+    const document = await database.collection(LEADS).findOne({ _id: objectId(args.leadId), fabricated:        {
+ $ne: true } });
     if (!document) throw new Error("Lead not found");
     const lead = toAgentLead(document);
     const address = [lead.propertyAddress, lead.city, lead.state, lead.zip]
       .filter((part): part is string => typeof part === "string" && Boolean(part.trim()))
       .join(", ");
     let rentcast: Awaited<ReturnType<typeof rentcastFetchImpl>> | null = null;
-    if (address.trim().length >= 10) {
-      try {
+    if (address.trim().length >= 10)        {
+
+      try        {
+
         rentcast = await rentcastFetchImpl({ address, radius: 5, saleDateRange: 365, compsLimit: 12 });
-      } catch {
+      } catch        {
+
         // Unconfigured key, no property match, or quota exhausted: the brief
         // still carries everything already stored on the lead.
       }
@@ -1074,17 +1237,23 @@ export const loadPropertyBrief = action({
     // Pre-fill what connected sources already provide: when RentCast matched,
     // record the sale-history evidence now so the panel shows it as found
     // immediately after Load brief (the team run would do the same later).
-    if (rentcast) {
+    if (rentcast)        {
+
       const record = rentcastSaleHistoryRecord(document, rentcast, compPrices);
-      if (record) {
-        await database.collection(LEADS).updateOne({ _id: document._id }, { $set: { dueDiligence: record, updatedAt: Date.now() } });
+      if (record)        {
+
+        await database.collection(LEADS).updateOne({ _id: document._id },        {
+ $set:        {
+ dueDiligence: record, updatedAt: Date.now() } });
         document.dueDiligence = record;
       }
     }
-    return {
+    return        {
+
       leadId: args.leadId,
       address,
-      stored: {
+      stored:        {
+
         squareFeet: lead.squareFeet,
         yearBuilt: leadNumber(document.yearBuilt),
         acquisitionPrice: lead.acquisitionPrice,
@@ -1103,7 +1272,8 @@ export const loadPropertyBrief = action({
           : undefined,
       },
       rentcast: rentcast
-        ? {
+        ?        {
+
             address: rentcast.address,
             matched: true,
             squareFeet: rentcast.summary.squareFeet,
@@ -1115,7 +1285,8 @@ export const loadPropertyBrief = action({
             soldCompsCount: rentcast.summary.soldCompsCount,
           }
         : null,
-      prefill: {
+      prefill:        {
+
         purchasePrice: lead.acquisitionPrice ?? lead.mao ?? undefined,
         rentComps,
         squareFeet,
@@ -1134,7 +1305,9 @@ export const loadPropertyBrief = action({
 
 const EMBEDDING_MODEL = "text-embedding-3-small";
 
-type SemanticSearchLead = { relevance: { score: number; semantic: boolean }; _id: string; [key: string]: unknown };
+type SemanticSearchLead =        {
+ relevance:        {
+ score: number; semantic: boolean }; _id: string; [key: string]: unknown };
 
 async function semanticSearchImpl(
   database: Awaited<ReturnType<typeof getDatabase>>,
@@ -1142,10 +1315,14 @@ async function semanticSearchImpl(
   limit: number,
   owner: boolean,
   embedQuery: () => Promise<number[]>,
-): Promise<{ query: string; model: string; totalScored: number; leads: SemanticSearchLead[] }> {
+): Promise<{ query: string; model: string; totalScored: number; leads: SemanticSearchLead[] }>        {
+
   const queryVector = await embedQuery();
-  const filter: Document = { fabricated: { $ne: true } };
-  if (!owner) {
+  const filter: Document =        {
+ fabricated:        {
+ $ne: true } };
+  if (!owner)        {
+
     filter.pipelineStatus = "APPROVED";
     filter.verificationStatus = "VERIFIED";
   }
@@ -1153,77 +1330,99 @@ async function semanticSearchImpl(
   const rows = documents.map((document) => ({ id: String(document._id), vector: document.embedding }));
   const ranked = rankBySimilarity(queryVector, rows, limit);
   const byId = new Map(documents.map((document) => [String(document._id), serialize(document)]));
-  return {
+  return        {
+
     query: query.trim(),
     model: EMBEDDING_MODEL,
     totalScored: ranked.length,
     leads: ranked
-      .map((item) => {
+      .map((item) =>        {
+
         const lead = byId.get(item.id);
-        return lead ? { ...lead, relevance: { score: item.score, semantic: true } } : undefined;
+        return lead ?        {
+ ...lead, relevance:        {
+ score: item.score, semantic: true } } : undefined;
       })
       .filter((lead): lead is SemanticSearchLead => Boolean(lead)),
   };
 }
 
 export const indexLeadEmbeddings = action({
-  args: {},
-  handler: async (ctx) => {
+  args:        {
+},
+  handler: async (ctx) =>        {
+
     await requireOwner(ctx);
     const database = await getDatabase();
     // Pinned to the shared constant: indexed vectors and query vectors must
     // come from the same model or cosine similarity is meaningless.
     const model = EMBEDDING_MODEL;
-    const documents = await database.collection(LEADS).find({ fabricated: { $ne: true } }).sort({ updatedAt: -1 }).limit(500).toArray();
+    const documents = await database.collection(LEADS).find({ fabricated:        {
+ $ne: true } }).sort({ updatedAt: -1 }).limit(500).toArray();
     let indexed = 0;
     let skipped = 0;
     let failed = 0;
     let firstError: string | undefined;
-    for (const document of documents) {
+    for (const document of documents)        {
+
       const prompt = embeddingPrompt(document as unknown as EmbeddableLead);
-      if (!prompt) {
+      if (!prompt)        {
+
         skipped += 1;
         continue;
       }
-      try {
-        const result = await ctx.runAction(internal.ollama.embedText, { text: prompt });
+      try        {
+
+        const result = await ctx.runAction(internal.ollama.embedText,        {
+ text: prompt });
         await database.collection(LEADS).updateOne(
-          { _id: document._id },
-          { $set: { embedding: result.embedding, embeddingModel: result.model, embeddedAt: Date.now(), updatedAt: Date.now() } },
+                 {
+ _id: document._id },
+                 {
+ $set:        {
+ embedding: result.embedding, embeddingModel: result.model, embeddedAt: Date.now(), updatedAt: Date.now() } },
         );
         indexed += 1;
-      } catch (error) {
+      } catch (error)        {
+
         failed += 1;
         if (!firstError) firstError = error instanceof Error ? error.message : String(error);
       }
     }
-    return { total: documents.length, indexed, skipped, failed, model, firstError };
+    return        {
+ total: documents.length, indexed, skipped, failed, model, firstError };
   },
 });
 
 export const semanticSearchLeads = action({
-  args: { query: v.string(), limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
+  args:        {
+ query: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) =>        {
+
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Authentication required");
     const owner = await isOwnerIdentity(ctx);
     const query = args.query.trim();
     if (!query || query.length > 500) throw new Error("Enter a search query (max 500 characters)");
     const embedQuery: () => Promise<number[]> = () =>
-      ctx.runAction(internal.ollama.embedText, { text: query }).then((result) => result.embedding);
+      ctx.runAction(internal.ollama.embedText,        {
+ text: query }).then((result) => result.embedding);
     return semanticSearchImpl(await getDatabase(), query, args.limit ?? 10, owner, embedQuery);
   },
 });
 
 export const mcpSemanticSearch = internalAction({
-  args: { query: v.string(), limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
+  args:        {
+ query: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) =>        {
+
     const database = await getDatabase();
     await requireMcpAiAccess(database);
     const query = args.query.trim();
     if (!query || query.length > 500) throw new Error("Enter a search query (max 500 characters)");
     const embedQuery: () => Promise<number[]> = () =>
-      ctx.runAction(internal.ollama.embedText, { text: query }).then((result) => result.embedding);
+      ctx.runAction(internal.ollama.embedText,        {
+ text: query }).then((result) => result.embedding);
     return semanticSearchImpl(database, query, args.limit ?? 10, true, embedQuery);
   },
 });
@@ -1235,13 +1434,15 @@ export const mcpSemanticSearch = internalAction({
 // by the other MCP bridges applies.
 
 export const mcpRunAgentTeam = internalAction({
-  args: {
+  args:        {
+
     leadId: v.string(),
     rental: v.optional(rentalUnderwritingInputValidator),
     compPrices: v.optional(v.array(v.number())),
     repairTier: v.optional(repairTierValidator),
   },
-  handler: async (_, args) => {
+  handler: async (_, args) =>        {
+
     const database = await getDatabase();
     await requireMcpAiAccess(database);
     return runAgentTeamImpl(database, args);
@@ -1249,27 +1450,35 @@ export const mcpRunAgentTeam = internalAction({
 });
 
 export const mcpListPipelineBrief = internalAction({
-  args: { limit: v.optional(v.number()) },
-  handler: async (_, args) => {
+  args:        {
+ limit: v.optional(v.number()) },
+  handler: async (_, args) =>        {
+
     const database = await getDatabase();
     await requireMcpAiAccess(database);
     const limit = Math.max(1, Math.min(200, Math.floor(args.limit ?? 200)));
     const brief = await listPipelineBriefImpl(database);
-    return { ...brief, leads: brief.leads.slice(0, limit) };
+    return        {
+ ...brief, leads: brief.leads.slice(0, limit) };
   },
 });
 
-function calculateEstimatedProfit(value: { mao?: unknown; acquisitionPrice?: unknown } | Record<string, unknown>) {
+function calculateEstimatedProfit(value:        {
+ mao?: unknown; acquisitionPrice?: unknown } | Record<string, unknown>)        {
+
   return typeof value.mao === "number" && typeof value.acquisitionPrice === "number"
     ? value.mao - value.acquisitionPrice
     : undefined;
 }
 
-function assertPublicHttpUrl(value: string) {
+function assertPublicHttpUrl(value: string)        {
+
   let parsed: URL;
-  try {
+  try        {
+
     parsed = new URL(value);
-  } catch {
+  } catch        {
+
     throw new Error("Enter a valid public http(s) URL");
   }
   const hostname = parsed.hostname.toLowerCase();
@@ -1288,15 +1497,18 @@ function assertPublicHttpUrl(value: string) {
   return parsed;
 }
 
-function assertAuctionComSourceUrl(parsed: URL, sourceType: string) {
+function assertAuctionComSourceUrl(parsed: URL, sourceType: string)        {
+
   if (sourceType !== "AUCTION_COM") return;
   const hostname = parsed.hostname.toLowerCase();
-  if (hostname !== "auction.com" && !hostname.endsWith(".auction.com")) {
+  if (hostname !== "auction.com" && !hostname.endsWith(".auction.com"))        {
+
     throw new Error("Auction.com sources must use a public auction.com URL");
   }
 }
 
-function decodeHtml(value: string) {
+function decodeHtml(value: string)        {
+
   return value
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
@@ -1306,7 +1518,8 @@ function decodeHtml(value: string) {
     .replace(/&gt;/gi, ">");
 }
 
-function htmlToText(value: string) {
+function htmlToText(value: string)        {
+
   return decodeHtml(
     value
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -1318,7 +1531,8 @@ function htmlToText(value: string) {
 }
 
 
-type EstimateInput = {
+type EstimateInput =        {
+
   leadId?: string;
   squareFeet: number;
   yearBuilt?: number;
@@ -1333,31 +1547,38 @@ type EstimateInput = {
   acquisitionPrice?: number;
 };
 
-function calculateDealEstimate(args: EstimateInput) {
-  if (args.squareFeet <= 0 || args.targetPct <= 0 || args.targetPct > 100) {
+function calculateDealEstimate(args: EstimateInput)        {
+
+  if (args.squareFeet <= 0 || args.targetPct <= 0 || args.targetPct > 100)        {
+
     throw new Error("Square feet and target percentage must be positive; target must be 100 or less");
   }
-  if ([args.wholesaleFee, args.closingCosts, args.holdingCosts, args.acquisitionPrice].some((value) => value !== undefined && value < 0)) {
+  if ([args.wholesaleFee, args.closingCosts, args.holdingCosts, args.acquisitionPrice].some((value) => value !== undefined && value < 0))        {
+
     throw new Error("Deal costs and price cannot be negative");
   }
-  if (args.soldComps.length > 0 && (!args.compSourceUrl?.trim() || !args.compSourceDate?.trim())) {
+  if (args.soldComps.length > 0 && (!args.compSourceUrl?.trim() || !args.compSourceDate?.trim()))        {
+
     throw new Error("Sold comps require a source URL and source date");
   }
   const compValues = args.soldComps.map((comp) => comp.salePrice).filter((value) => value > 0);
   const compMedian = median(compValues);
   const repairs = repairEstimate(args.squareFeet, args.repairTier, args.yearBuilt);
-  const arv = compMedian === undefined ? undefined : {
+  const arv = compMedian === undefined ? undefined :        {
+
     conservative: Math.round(compMedian * 0.9),
     median: Math.round(compMedian),
     aggressive: Math.round(compMedian * 1.1),
   };
-  const mao = arv === undefined ? undefined : {
+  const mao = arv === undefined ? undefined :        {
+
     conservative: Math.round(arv.conservative * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
     median: Math.round(arv.median * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
     aggressive: Math.round(arv.aggressive * args.targetPct / 100 - repairs.total - args.wholesaleFee - args.closingCosts - args.holdingCosts),
   };
   const estimatedProfit = mao && args.acquisitionPrice !== undefined ? mao.median - args.acquisitionPrice : undefined;
-  return {
+  return        {
+
     estimateStatus: arv ? "READY" as const : "NEEDS_APPRAISAL" as const,
     compCount: compValues.length,
     compMedian,
@@ -1365,7 +1586,8 @@ function calculateDealEstimate(args: EstimateInput) {
     repairs,
     mao,
     estimatedProfit,
-    inputs: {
+    inputs:        {
+
       targetPct: args.targetPct,
       wholesaleFee: args.wholesaleFee,
       closingCosts: args.closingCosts,
@@ -1377,43 +1599,54 @@ function calculateDealEstimate(args: EstimateInput) {
   };
 }
 
-function validateBuyer(buyer: {
+function validateBuyer(buyer:        {
+
   budgetMin: number;
   budgetMax: number;
   proofOfFundsStatus: string;
   pofEvidenceRef?: string;
-}) {
-  if (buyer.budgetMin < 0 || buyer.budgetMax < buyer.budgetMin) {
+})        {
+
+  if (buyer.budgetMin < 0 || buyer.budgetMax < buyer.budgetMin)        {
+
     throw new Error("Buyer budget range is invalid");
   }
-  if (buyer.proofOfFundsStatus === "VERIFIED" && !buyer.pofEvidenceRef?.trim()) {
+  if (buyer.proofOfFundsStatus === "VERIFIED" && !buyer.pofEvidenceRef?.trim())        {
+
     throw new Error("Verified proof of funds requires an evidence reference");
   }
 }
 
 async function validateMatch(
   database: Awaited<ReturnType<typeof getDatabase>>,
-  match: { leadId: string; buyerId: string; matchScore: number; confidence: string },
-) {
-  if (match.matchScore < 0 || match.matchScore > 100) {
+  match:        {
+ leadId: string; buyerId: string; matchScore: number; confidence: string },
+)        {
+
+  if (match.matchScore < 0 || match.matchScore > 100)        {
+
     throw new Error("Match score must be between 0 and 100");
   }
   const [lead, buyer] = await Promise.all([
     database.collection(LEADS).findOne({ _id: objectId(match.leadId) }),
     database.collection(BUYERS).findOne({ _id: objectId(match.buyerId) }),
   ]);
-  if (!lead || lead.fabricated === true || lead.pipelineStatus !== "APPROVED" || lead.verificationStatus !== "VERIFIED") {
+  if (!lead || lead.fabricated === true || lead.pipelineStatus !== "APPROVED" || lead.verificationStatus !== "VERIFIED")        {
+
     throw new Error("Matches require a verified, approved, non-fabricated lead");
   }
-  if (!buyer || buyer.intakeStatus !== "APPROVED") {
+  if (!buyer || buyer.intakeStatus !== "APPROVED")        {
+
     throw new Error("Matches require an approved buyer");
   }
-  if (match.confidence === "HIGH" && buyer.proofOfFundsStatus !== "VERIFIED") {
+  if (match.confidence === "HIGH" && buyer.proofOfFundsStatus !== "VERIFIED")        {
+
     throw new Error("High-confidence matches require verified proof of funds");
   }
 }
 
-function validateApprovedLead(lead: {
+function validateApprovedLead(lead:        {
+
   sourceType: string;
   sourceUrl: string;
   sourceRef: string;
@@ -1427,17 +1660,22 @@ function validateApprovedLead(lead: {
   }>;
   verificationStatus: string;
   pipelineStatus: string;
-}) {
-  if (lead.sourceType === "SEED") {
+})        {
+
+  if (lead.sourceType === "SEED")        {
+
     throw new Error("Seed rows cannot enter the verified lead workspace");
   }
-  if (!lead.sourceUrl.trim() || !lead.sourceRef.trim() || !lead.sourceDate.trim()) {
+  if (!lead.sourceUrl.trim() || !lead.sourceRef.trim() || !lead.sourceDate.trim())        {
+
     throw new Error("A source URL, source reference, and source date are required");
   }
-  if (lead.distressScore < 0 || lead.distressScore > 100) {
+  if (lead.distressScore < 0 || lead.distressScore > 100)        {
+
     throw new Error("Distress score must be between 0 and 100");
   }
-  if (lead.verificationStatus !== "VERIFIED" || lead.pipelineStatus !== "APPROVED") {
+  if (lead.verificationStatus !== "VERIFIED" || lead.pipelineStatus !== "APPROVED")        {
+
     throw new Error("Only verified and approved leads can be surfaced");
   }
   if (
@@ -1448,12 +1686,14 @@ function validateApprovedLead(lead: {
         !signal.sourceUrl.trim() ||
         !signal.sourceDate.trim(),
     )
-  ) {
+  )        {
+
     throw new Error("Every distress signal needs verified, dated source evidence");
   }
 }
 
-type DueDiligenceEntry = {
+type DueDiligenceEntry =        {
+
   status: "UNCHECKED" | "FOUND" | "MISSING";
   sourceUrl?: string;
   sourceDate?: string;
@@ -1461,7 +1701,8 @@ type DueDiligenceEntry = {
   data?: unknown;
   checkedAt?: number;
 };
-type DueDiligenceRecord = {
+type DueDiligenceRecord =        {
+
   titleAndLiens: DueDiligenceEntry;
   saleHistory: DueDiligenceEntry;
   condition: DueDiligenceEntry;
@@ -1469,7 +1710,8 @@ type DueDiligenceRecord = {
   lastAssessedAt?: number;
 };
 
-const DUE_DILIGENCE_KEYS = {
+const DUE_DILIGENCE_KEYS =        {
+
   TITLE_AND_LIENS: "titleAndLiens",
   SALE_HISTORY: "saleHistory",
   CONDITION: "condition",
@@ -1477,18 +1719,26 @@ const DUE_DILIGENCE_KEYS = {
 } as const;
 
 const DUE_DILIGENCE_CATEGORIES: Array<{ key: keyof typeof DUE_DILIGENCE_KEYS; label: string }> = [
-  { key: "TITLE_AND_LIENS", label: "Title status & liens" },
-  { key: "SALE_HISTORY", label: "Sale history & comparables" },
-  { key: "CONDITION", label: "Property condition" },
-  { key: "OCCUPANCY", label: "Occupancy status" },
+         {
+ key: "TITLE_AND_LIENS", label: "Title status & liens" },
+         {
+ key: "SALE_HISTORY", label: "Sale history & comparables" },
+         {
+ key: "CONDITION", label: "Property condition" },
+         {
+ key: "OCCUPANCY", label: "Occupancy status" },
 ];
 
-function emptyDueDiligenceEntry(): DueDiligenceEntry {
-  return { status: "UNCHECKED" };
+function emptyDueDiligenceEntry(): DueDiligenceEntry        {
+
+  return        {
+ status: "UNCHECKED" };
 }
 
-function emptyDueDiligence(): DueDiligenceRecord {
-  return {
+function emptyDueDiligence(): DueDiligenceRecord        {
+
+  return        {
+
     titleAndLiens: emptyDueDiligenceEntry(),
     saleHistory: emptyDueDiligenceEntry(),
     condition: emptyDueDiligenceEntry(),
@@ -1496,27 +1746,32 @@ function emptyDueDiligence(): DueDiligenceRecord {
   };
 }
 
-function dueDiligenceSummary(record: DueDiligenceRecord | undefined) {
+function dueDiligenceSummary(record: DueDiligenceRecord | undefined)        {
+
   const missing: string[] = [];
   const found: string[] = [];
-  for (const category of DUE_DILIGENCE_CATEGORIES) {
+  for (const category of DUE_DILIGENCE_CATEGORIES)        {
+
     const entry = record?.[DUE_DILIGENCE_KEYS[category.key]] as DueDiligenceEntry | undefined;
     if (entry?.status === "FOUND") found.push(category.label);
     else missing.push(category.label);
   }
-  return { found, missing, complete: missing.length === 0 };
+  return        {
+ found, missing, complete: missing.length === 0 };
 }
 
 // Honest automated assessment: derive FOUND/MISSING flags only from evidence the
 // lead already carries (its source packet). It never claims to have browsed the
 // county assessor, Zillow, Redfin, or Realtor.com. Absent evidence is recorded
 // as MISSING with the exact source the owner should check.
-function assessDueDiligenceRecord(input: {
+function assessDueDiligenceRecord(input:        {
+
   sourceType: string;
   sourceUrl: string;
   sourceRef?: string;
   evidenceText?: string;
-}): DueDiligenceRecord {
+}): DueDiligenceRecord        {
+
   const text = (input.evidenceText ?? "").toLowerCase();
   const sourceDate = new Date().toISOString().slice(0, 10);
   const checkedAt = Date.now();
@@ -2281,11 +2536,30 @@ function extractSourcedCandidate(staged: Document): SourcedCandidate | { reason:
   };
 }
 
-async function qualifyStagedSourceImpl(database: Awaited<ReturnType<typeof getDatabase>>, stagedId: string) {
+async function qualifyStagedSourceImpl(database: Awaited<ReturnType<typeof getDatabase>>, stagedId: string, promotedBy?: string) {
   const stagingId = objectId(stagedId);
   const staging = await database.collection(IMPORT_STAGING).findOne({ _id: stagingId });
   if (!staging) throw new Error("Staged source not found");
+
+  // Evidence gate (NON-NEGOTIABLE #4): a staged source cannot become a live
+  // lead until its sourceUrl, sourceRef, and sourceDate are all present and
+  // valid. This runs BEFORE the "already processed" guard so a NEEDS_EVIDENCE
+  // row is rejected, never silently skipped. Rows carrying explicit top-level
+  // evidence fields are judged here; rawJson-only crawl rows are judged by
+  // extractSourcedCandidate below.
+  if (staging.status === "NEEDS_EVIDENCE") {
+    throw new Error("Missing source evidence");
+  }
   if (staging.status !== "NEW") return { status: "SKIPPED" as const, stagedId, reason: "This staged source was already processed" };
+  const hasExplicitEvidence = [staging.sourceUrl, staging.sourceRef, staging.sourceDate]
+    .some((field) => typeof field === "string" && field.trim());
+  if (hasExplicitEvidence) {
+    const missing = missingEvidenceFields(staging);
+    if (missing.length > 0) {
+      await database.collection(IMPORT_STAGING).updateOne({ _id: stagingId }, { $set: { status: "NEEDS_EVIDENCE", missingEvidence: missing, updatedAt: Date.now() } });
+      throw new Error("Missing source evidence");
+    }
+  }
 
   const candidate = extractSourcedCandidate(staging);
   if ("reason" in candidate) {
@@ -2325,7 +2599,34 @@ async function qualifyStagedSourceImpl(database: Awaited<ReturnType<typeof getDa
     updatedAt: now,
   };
   const inserted = await database.collection(LEADS).insertOne(lead);
-  await database.collection(IMPORT_STAGING).updateOne({ _id: stagingId }, { $set: { status: "NEW", candidateLeadId: inserted.insertedId, updatedAt: now } });
+  // Persist the derived evidence back onto the staging row, write the
+  // immutable promotion audit entry, and archive the staged source so it can
+  // never be promoted twice.
+  await database.collection(IMPORT_STAGING).updateOne(
+    { _id: stagingId },
+    {
+      $set: {
+        status: "ARCHIVED",
+        candidateLeadId: inserted.insertedId,
+        sourceUrl: candidate.sourceUrl,
+        sourceRef: candidate.sourceRef,
+        sourceDate: candidate.sourceDate,
+        distressScore: candidate.distressScore,
+        promotedAt: now,
+        updatedAt: now,
+      },
+    },
+  );
+  await database.collection(PROMOTION_AUDIT).insertOne({
+    stagingId,
+    leadId: String(inserted.insertedId),
+    promotedBy: promotedBy ?? "website",
+    promotedAt: now,
+    sourceUrl: candidate.sourceUrl,
+    sourceRef: candidate.sourceRef,
+    sourceDate: candidate.sourceDate,
+    distressScore: candidate.distressScore,
+  });
   return { status: "CANDIDATE_CREATED" as const, stagedId, leadId: String(inserted.insertedId), distressScore: candidate.distressScore };
 }
 
@@ -2333,7 +2634,9 @@ export const qualifyStagedSource = action({
   args: { stagedId: v.string() },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
-    return qualifyStagedSourceImpl(await getDatabase(), args.stagedId);
+    const identity = await ctx.auth.getUserIdentity();
+    const promotedBy = identity?.email ?? "owner";
+    return qualifyStagedSourceImpl(await getDatabase(), args.stagedId, promotedBy);
   },
 });
 
@@ -3271,7 +3574,7 @@ export const mcpListPipeline = internalAction({
 
 export const mcpListStagedSources = internalAction({
   args: {
-    status: v.optional(v.union(v.literal("NEW"), v.literal("DUPLICATE"), v.literal("REJECTED"))),
+    status: v.optional(v.union(v.literal("NEW"), v.literal("NEEDS_EVIDENCE"), v.literal("DUPLICATE"), v.literal("REJECTED"), v.literal("ARCHIVED"))),
     limit: v.optional(v.number()),
   },
   handler: async (_, args) => {
@@ -3290,7 +3593,10 @@ export const mcpListStagedSources = internalAction({
         _id: staging._id,
         sourceType: staging.sourceType,
         status: staging.status,
-        sourceUrl: raw.url,
+        sourceUrl: staging.sourceUrl ?? raw.url,
+        sourceRef: staging.sourceRef,
+        sourceDate: staging.sourceDate,
+        distressScore: staging.distressScore,
         title: raw.title,
         excerpt: typeof raw.excerpt === "string" ? raw.excerpt.slice(0, 4000) : undefined,
         links: Array.isArray(raw.links) ? raw.links.slice(0, 20) : [],
@@ -3298,6 +3604,8 @@ export const mcpListStagedSources = internalAction({
         candidateLeadId: staging.candidateLeadId,
         aiCourtVerdict: staging.aiCourtVerdict,
         rejectReason: staging.rejectReason,
+        scoreMismatch: stagingScoreMismatch(staging),
+        missingEvidence: staging.missingEvidence ?? missingEvidenceFields(staging),
         updatedAt: staging.updatedAt,
       };
     });
@@ -3725,16 +4033,84 @@ export const insertImportStaging = action({
   args: { row: importStagingValidator },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
-    const result = await (await getDatabase()).collection(IMPORT_STAGING).insertOne({ ...args.row, createdAt: Date.now(), updatedAt: Date.now() });
-    return { id: String(result.insertedId) };
+    // Evidence auto-flag (NON-NEGOTIABLE #4): a staged source written without
+    // complete source evidence is stored as NEEDS_EVIDENCE, never NEW, unless
+    // it already carries a terminal review status.
+    const existingStatus = typeof args.row.status === "string" ? args.row.status : "NEW";
+    const status = TERMINAL_STAGING_STATUSES.has(existingStatus) ? existingStatus : computeStagingStatus(args.row);
+    const now = Date.now();
+    const result = await (await getDatabase()).collection(IMPORT_STAGING).insertOne({
+      ...args.row,
+      status,
+      missingEvidence: status === "NEEDS_EVIDENCE" ? missingEvidenceFields(args.row) : undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { id: String(result.insertedId), status };
   },
 });
 
 export const listImportStaging = action({
-  args: { status: v.optional(v.union(v.literal("NEW"), v.literal("DUPLICATE"), v.literal("REJECTED"))) },
+  args: { status: v.optional(v.union(v.literal("NEW"), v.literal("NEEDS_EVIDENCE"), v.literal("DUPLICATE"), v.literal("REJECTED"), v.literal("ARCHIVED"))) },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
     const documents = await (await getDatabase()).collection(IMPORT_STAGING).find(args.status ? { status: args.status } : {}).sort({ updatedAt: -1 }).limit(500).toArray();
+    return documents.map((document) => {
+      const staging = serialize(document);
+      return {
+        ...staging,
+        scoreMismatch: stagingScoreMismatch(staging),
+        missingEvidence: typeof staging.status === "string" && staging.status !== "NEW" ? missingEvidenceFields(staging) : [],
+      };
+    });
+  },
+});
+
+
+export const setStagingEvidence = action({
+  args: {
+    stagedId: v.string(),
+    sourceUrl: v.optional(v.string()),
+    sourceRef: v.optional(v.string()),
+    sourceDate: v.optional(v.string()),
+    distressScore: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const database = await getDatabase();
+    const stagingId = objectId(args.stagedId);
+    const existing = await database.collection(IMPORT_STAGING).findOne({ _id: stagingId });
+    if (!existing) throw new Error("Staged source not found");
+    // Terminal review states are final; evidence edits only apply to rows still
+    // in review (NEW or NEEDS_EVIDENCE).
+    if (TERMINAL_STAGING_STATUSES.has(String(existing.status ?? ""))) {
+      throw new Error(`This staged source is ${existing.status} and cannot be edited`);
+    }
+    const patch = withoutUndefined({
+      sourceUrl: args.sourceUrl,
+      sourceRef: args.sourceRef,
+      sourceDate: args.sourceDate,
+      distressScore: args.distressScore,
+    });
+    const next = { ...existing, ...patch } as Record<string, unknown>;
+    // Fill all three evidence fields and the status flips to NEW automatically
+    // (NON-NEGOTIABLE #4); anything missing stays NEEDS_EVIDENCE.
+    const status = computeStagingStatus(next);
+    const now = Date.now();
+    await database.collection(IMPORT_STAGING).updateOne(
+      { _id: stagingId },
+      { $set: { ...patch, status, missingEvidence: status === "NEEDS_EVIDENCE" ? missingEvidenceFields(next) : undefined, updatedAt: now } },
+    );
+    return { id: args.stagedId, status, missingEvidence: status === "NEEDS_EVIDENCE" ? missingEvidenceFields(next) : [] };
+  },
+});
+
+export const listPromotionAudit = action({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const limit = Math.max(1, Math.min(500, Math.floor(args.limit ?? 200)));
+    const documents = await (await getDatabase()).collection(PROMOTION_AUDIT).find({}).sort({ promotedAt: -1 }).limit(limit).toArray();
     return documents.map(serialize);
   },
 });

@@ -4,6 +4,7 @@ import { Document, MongoClient, ObjectId } from "mongodb";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
+import { computeStagingStatus, missingEvidenceFields, stagingScoreMismatch, TERMINAL_STAGING_STATUSES } from "./stagingEvidence";
 
 const LEADS = "leads";
 const HOT_DEALS = "hot_deals";
@@ -146,7 +147,21 @@ function validateStaging(value: Record<string, unknown>) {
   requiredString(value, "sourceType");
   if (!("rawJson" in value)) throw new Error("rawJson is required");
   enumValue(value, "sourceType", sourceTypes);
-  enumValue(value, "status", ["NEW", "DUPLICATE", "REJECTED"]);
+  enumValue(value, "status", ["NEW", "NEEDS_EVIDENCE", "DUPLICATE", "REJECTED", "ARCHIVED"]);
+  if (value.sourceUrl !== undefined && typeof value.sourceUrl !== "string") throw new Error("sourceUrl must be a string");
+  if (value.sourceRef !== undefined && typeof value.sourceRef !== "string") throw new Error("sourceRef must be a string");
+  if (value.sourceDate !== undefined && typeof value.sourceDate !== "string") throw new Error("sourceDate must be a string");
+  if (value.distressScore !== undefined && (typeof value.distressScore !== "number" || !Number.isFinite(value.distressScore))) throw new Error("distressScore must be a number");
+}
+
+// Recompute a staged source's review status from its evidence fields
+// (NON-NEGOTIABLE #4). Terminal states are preserved; anything else is NEW
+// when the three evidence fields are complete and valid, NEEDS_EVIDENCE
+// otherwise.
+function stagingStatusFor(value: Record<string, unknown>, existingStatus?: unknown): string {
+  const current = typeof existingStatus === "string" ? existingStatus : typeof value.status === "string" ? value.status : "NEW";
+  if (TERMINAL_STAGING_STATUSES.has(current)) return current;
+  return computeStagingStatus(value);
 }
 
 function cleanPayload(value: Record<string, unknown>) {
@@ -221,7 +236,17 @@ export const adminCrud = internalAction({
     if (args.operation === "LIST") {
       const { filter, limit } = filtersFor(args.resource, args.filters);
       const rows = await documents.find(filter).sort({ updatedAt: -1, createdAt: -1 }).limit(limit).toArray();
-      return { resource: args.resource, count: rows.length, data: rows.map(serialize) };
+      const data = args.resource === "import-staging"
+        ? rows.map((row) => {
+            const serialized = serialize(row) as Record<string, unknown>;
+            return {
+              ...serialized,
+              scoreMismatch: stagingScoreMismatch(serialized),
+              missingEvidence: missingEvidenceFields(serialized),
+            };
+          })
+        : rows.map(serialize);
+      return { resource: args.resource, count: rows.length, data };
     }
 
     if (args.operation === "CREATE") {
@@ -240,6 +265,8 @@ export const adminCrud = internalAction({
         await validateMatchReferences(database, next);
       } else {
         validateStaging(next);
+        next.status = stagingStatusFor(next);
+        next.missingEvidence = missingEvidenceFields(next);
       }
       const now = Date.now();
       const inserted = await documents.insertOne({ ...next, createdAt: now, updatedAt: now });
@@ -275,6 +302,11 @@ export const adminCrud = internalAction({
       await validateMatchReferences(database, next);
     } else {
       validateStaging(next);
+      const status = stagingStatusFor(next, existing.status);
+      patch.status = status;
+      next.status = status;
+      patch.missingEvidence = missingEvidenceFields(next);
+      next.missingEvidence = patch.missingEvidence;
     }
     const updatedAt = Date.now();
     await documents.updateOne({ _id: id }, { $set: { ...patch, ...(next.fabricated !== undefined ? { fabricated: next.fabricated } : {}), updatedAt } });

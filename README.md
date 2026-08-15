@@ -77,7 +77,8 @@ Managed from Convex actions (`src/convex/mongodb.ts`, `src/convex/admin.ts`).
 | `hot_deals` | Paywalled hot-deals feed. Same shape as leads minus pipeline fields. Non-fabricated rows must be `VERIFIED` with `distressScore >= 80` |
 | `buyers` | Buyer registry: `name`, `phone`, `email`, `budgetMin`, `budgetMax`, `targetAreas[]`, `exitType` (`ASSIGN`\|`FLIP`\|`BUY_HOLD`), `proofOfFundsStatus` (`NONE`\|`SELF_REPORTED`\|`VERIFIED`), `pofEvidenceRef?`, `purchaseHistory`, `listSource`, `intakeStatus` (`PENDING`\|`APPROVED`\|`REJECTED`), `verificationStatus`, `createdAt`, `updatedAt` |
 | `property_matches` | Lead↔buyer matches: `leadId`, `buyerId`, `matchScore` (0–100), `buyBoxSummary`, `confidence` (`LOW`\|`MEDIUM`\|`HIGH`), `status` (`CANDIDATE`\|`APPROVED`\|`REJECTED`\|`CONTACTED`\|`CLOSED`), `rejectReason?`, `createdAt`, `updatedAt` |
-| `import_staging` | Pending source/staging queue: `sourceType`, `rawJson`, `status` (`NEW`\|`DUPLICATE`\|`REJECTED`), `rejectReason?`, `aiCourtVerdict?`, `candidateLeadId?`, `createdAt`, `updatedAt`. Public buyer intake also lands here as `listSource: "PUBLIC_INTAKE"` |
+| `import_staging` | Pending source/staging queue: `sourceType`, `rawJson`, `status` (`NEW`\|`NEEDS_EVIDENCE`\|`DUPLICATE`\|`REJECTED`\|`ARCHIVED`), `sourceUrl?`, `sourceRef?`, `sourceDate?`, `distressScore?`, `missingEvidence?`, `rejectReason?`, `aiCourtVerdict?`, `candidateLeadId?`, `createdAt`, `updatedAt`. A row written without complete source evidence is auto-flagged `NEEDS_EVIDENCE` (never `NEW`). Public buyer intake also lands here as `listSource: "PUBLIC_INTAKE"` |
+| `promotion_audit` | Immutable promotion log: `stagingId`, `promotedBy`, `promotedAt`, `sourceUrl`, `sourceRef`, `sourceDate`, `distressScore` — written every time a staged row is promoted to a live lead |
 | `tool_access` | Singleton doc `_id: "admin_tools"` — feature toggles (`scraperEnabled`, `estimatorEnabled`, `aiEnabled`, `automationEnabled`, `automationMode`, `dailyRunLimit`, `runsToday`, `usageDay`) |
 | `automation_tasks` | Queued automation runs (`SCRAPE` / `ESTIMATE`, status `PENDING`\|`RUNNING`\|`COMPLETED`\|`FAILED`) |
 | `integration_checks` | Health-check results for connected providers |
@@ -122,7 +123,7 @@ Owner-only write surface for worker agents and integrations. **Every request mus
   - `hot-deals`: `status` (verificationStatus), `minDistressScore`
   - `buyers`: `status` (intakeStatus), `proofOfFundsStatus`
   - `matches`: `status`, `confidence`, `minMatchScore`
-  - `import-staging`: `status`
+  - `import-staging`: `status` (`NEW`/`NEEDS_EVIDENCE`/`DUPLICATE`/`REJECTED`/`ARCHIVED`)
 - `GET /api/admin/{resource}/{id}` — one document (`_id` is the MongoDB ObjectId as a string)
 - `POST /api/admin/{resource}` — create; body is the document (without `_id`/`createdAt`/`updatedAt`, which are managed)
 - `PATCH /api/admin/{resource}/{id}` (or `PUT`) — partial merge update; body is the fields to change
@@ -147,7 +148,7 @@ Errors: `401` unauthorized · `400` bad filter/body · `404` unknown resource or
 - **hot-deals:** same base shape; non-fabricated rows must be `verificationStatus: "VERIFIED"` with `distressScore >= 80`.
 - **buyers:** required `name`, `phone`, `email`, `listSource`, `budgetMin <= budgetMax` (both ≥ 0), `targetAreas[]`, `exitType`, `proofOfFundsStatus`, `intakeStatus`, `verificationStatus`. `proofOfFundsStatus: "VERIFIED"` requires `pofEvidenceRef`.
 - **matches:** required `leadId`, `buyerId`, `buyBoxSummary`, `matchScore` (0–100), `confidence`, `status`. The lead must exist, be non-fabricated, `APPROVED` and `VERIFIED`; the buyer must be `intakeStatus: "APPROVED"`. `confidence: "HIGH"` requires the buyer to have verified proof of funds.
-- **import-staging:** required `sourceType` + `rawJson` (any), `status` in `NEW`/`DUPLICATE`/`REJECTED`.
+- **import-staging:** required `sourceType` + `rawJson` (any), `status` in `NEW`/`NEEDS_EVIDENCE`/`DUPLICATE`/`REJECTED`/`ARCHIVED`. **Evidence gate (NON-NEGOTIABLE #4):** promotion to a live lead requires all three of `sourceUrl` (valid HTTPS), `sourceRef` (non-empty citation), and `sourceDate` (ISO date ≤ today). A row written without complete evidence is auto-flagged `NEEDS_EVIDENCE`; filling all three flips it back to `NEW`. Promoting a `NEEDS_EVIDENCE` row is rejected with `Missing source evidence`. A computed `scoreMismatch` flag (`SCORE_MISMATCH`) is returned on list when the cited source contradicts `distressScore`. Every successful promotion writes an immutable `promotion_audit` entry.
 
 ### Examples
 

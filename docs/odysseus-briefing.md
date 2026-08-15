@@ -64,6 +64,9 @@ YOUR MISSION — actively make the website better, not just observe:
      - task:<stagedId> for a staged source
      - buyer:<buyerId> for a buyer question
      - ops:<topic>    for platform-level work (e.g. "ops:smoke-test")
+     - ops:web-preview for website UI/design changes (post the exact spec there;
+       the coding agent implements it into the working tree and the owner's
+       preview updates automatically — publishing is owner-approved)
    Kinds: "MESSAGE" for routine notes, "REQUEST" when you need the website
    or owner to do something, "ESCALATION" for errors/problems (blocked,
    failing provider, stuck gate, or anything needing a human decision),
@@ -164,6 +167,19 @@ curl -X POST https://keen-aardvark-333.convex.site/api/shared-thread \
 - `task:<stagedId>` — source/staging review
 - `buyer:<buyerId>` — buyer-registry work
 - `ops:<topic>` — general operations
+- `ops:web-preview` — website UI/design changes (see below)
+
+### Website edits and the owner's preview (use `ops:web-preview`)
+
+You cannot edit the website's source files — your write channels are the admin REST API (data) and the shared threads/MCP tools (read/recommend only). To get a website/UI change onto the owner's screen, post the concrete spec as a `REQUEST` to the `ops:web-preview` thread: which route/page, which component or file, what it should look like or do, and why (screenshots or an exported design spec help). The loop is:
+
+1. You post the spec to `ops:web-preview`.
+2. The website coding agent implements it into the working tree.
+3. The owner's Freebuff preview updates automatically — no deploy step, no preview URL to hand out.
+4. The owner reviews it in the preview; nothing reaches production without their approval.
+5. On approval, the coding agent publishes (Convex push + frontend build). That step is owner-gated, never automatic, and never done by you.
+
+Default all design/UI requests to `ops:web-preview` so the owner and coding agent see them in one place.
 
 ### When to post (the collaboration rule)
 

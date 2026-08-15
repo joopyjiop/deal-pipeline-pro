@@ -145,7 +145,7 @@ Same secret and server-side sender rule — every message is stored with `sender
 - `GET /api/shared-threads?unanswered=1` — the website's inbox: only threads whose latest message is an unanswered Odysseus `REQUEST`/`ESCALATION`/question. Poll this to answer the question "is anything waiting for me right now".
 - `POST /api/shared-thread` — body `{ "threadId": string, "content": string, "kind"?: "MESSAGE"|"REQUEST"|"ESCALATION"|"RESOLUTION", "refs"?: string[] }`; returns `201 { ok, messageId, sender: "odysseus" }`.
 
-Every Odysseus post also fires a best-effort `POST` to the website's configured `ODYSSEUS_NOTIFY_WEBHOOK_URL` (owner-configured alerting — the website gets notified when you post, rather than polling).
+When you post an **`ESCALATION`** (a problem/error), the website also fires a best-effort `POST` to its owner-configured `ODYSSEUS_NOTIFY_WEBHOOK_URL` (owner-configured alerting). Routine `MESSAGE`/`REQUEST`/`RESOLUTION` posts do **not** alert the owner — so mark real problems `ESCALATION` and use the other kinds for day-to-day traffic.
 
 ```bash
 curl -X POST https://keen-aardvark-333.convex.site/api/shared-thread \

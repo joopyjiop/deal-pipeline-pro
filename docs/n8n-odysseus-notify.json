@@ -1,5 +1,5 @@
 {
-  "name": "Deal Pipeline Pro — Odysseus post → email",
+  "name": "Deal Pipeline Pro — Odysseus problem → email",
   "active": false,
   "nodes": [
     {
@@ -16,7 +16,7 @@
           "responseMode": "onReceived"
         }
       },
-      "notes": "Receives the odysseus_post event fired by Deal Pipeline Pro (ODYSSEUS_NOTIFY_WEBHOOK_URL). Body: { event, threadId, kind, messageId, refs[], contentPreview, sentAt }."
+      "notes": "Receives the odysseus_post event fired by Deal Pipeline Pro (ODYSSEUS_NOTIFY_WEBHOOK_URL). Only problem kinds notify by default (ESCALATION; override with ODYSSEUS_NOTIFY_KINDS). Body: { event, threadId, kind, messageId, refs[], contentPreview, sentAt }."
     },
     {
       "id": "2b8c4a0f-5d3e-4f6a-9b7c-8d0e1f2a3b4c",
@@ -28,9 +28,9 @@
         "resource": "message",
         "operation": "send",
         "sendTo": "jacobvierra8@gmail.com",
-        "subject": "=Odysseus → {{ $json.threadId }} [{{ $json.kind }}]",
+        "subject": "=⚠️ Odysseus {{ $json.kind }} → {{ $json.threadId }}",
         "emailType": "text",
-        "message": "=Odysseus posted to the shared conversation.\n\nThread: {{ $json.threadId }}\nKind: {{ $json.kind }}\nAt: {{ new Date($json.sentAt).toLocaleString() }}\n\n{{ $json.contentPreview }}\n\nRefs: {{ $json.refs ? $json.refs.join(', ') : '(none)' }}\n\nOpen the shared conversation in Deal Pipeline Pro to read and answer it.",
+        "message": "=Odysseus hit a problem in the shared conversation.\n\nThread: {{ $json.threadId }}\nKind: {{ $json.kind }}\nAt: {{ new Date($json.sentAt).toLocaleString() }}\n\n{{ $json.contentPreview }}\n\nRefs: {{ $json.refs ? $json.refs.join(', ') : '(none)' }}\n\nOpen the shared conversation in Deal Pipeline Pro to read and answer it.",
         "options": {}
       },
       "credentials": {
@@ -50,7 +50,7 @@
         "color": 4,
         "width": 360,
         "height": 220,
-        "content": "## Setup\n1. Select your Gmail OAuth2 credential on the 'Email owner' node.\n2. Activate the workflow, then copy the production webhook URL (…/webhook/odysseus-post).\n3. In the Convex Keys panel set ODYSSEUS_NOTIFY_WEBHOOK_URL to that URL.\n4. Post a message as Odysseus to verify the email arrives.\n\nThe payload fields come from Deal Pipeline Pro: event, threadId, kind, messageId, refs, contentPreview, sentAt."
+        "content": "## Setup\n1. Select your Gmail OAuth2 credential on the 'Email owner' node.\n2. Activate the workflow, then copy the production webhook URL (…/webhook/odysseus-post).\n3. In the Convex Keys panel set ODYSSEUS_NOTIFY_WEBHOOK_URL to that URL.\n4. Post an ESCALATION as Odysseus to verify the email arrives.\n\nOnly problem kinds notify by default (ESCALATION — override with ODYSSEUS_NOTIFY_KINDS). Payload: event, threadId, kind, messageId, refs, contentPreview, sentAt."
       },
       "notes": "This stickyNote node documents the setup steps."
     }

@@ -122,6 +122,19 @@ export function isUnansweredThreadMessage(last: MessageDoc): boolean {
   return asks;
 }
 
+// Which message kinds fire the owner's outbound notification (the
+// ODYSSEUS_NOTIFY_WEBHOOK_URL webhook). Defaults to ESCALATION so the owner is
+// only pinged for errors/problems — not every message Odysseus posts. The
+// configured list is comma-separated (e.g. "ESCALATION,REQUEST").
+export function shouldNotifyOwner(kind: string, configuredKinds?: string): boolean {
+  const raw = (configuredKinds ?? "").trim();
+  const wanted = (raw || "ESCALATION")
+    .split(",")
+    .map((entry) => entry.trim().toUpperCase())
+    .filter(Boolean);
+  return wanted.includes(kind.trim().toUpperCase());
+}
+
 export function serializeMessage(doc: MessageDoc) {
   return {
     _id: doc._id,

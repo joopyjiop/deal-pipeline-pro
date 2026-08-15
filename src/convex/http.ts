@@ -2,7 +2,7 @@ import { httpRouter } from "convex/server";
 import { httpAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { auth } from "./auth";
-import { messageContent, normalizeThreadId, sanitizeRefs } from "./sharedConversation";
+import { messageContent, normalizeThreadId, sanitizeRefs, shouldNotifyOwner } from "./sharedConversation";
 
 const http = httpRouter();
 
@@ -181,11 +181,12 @@ const adminApi = httpAction(async (ctx, request) => {
   }
 });
 
-// Best-effort notification fired whenever Odysseus posts a new message, so an
-// external system (n8n → email/Slack, or the owner's own endpoint) can alert
-// on the shared-thread activity without polling. Configured via the optional
+// Best-effort notification fired when Odysseus posts a message the owner cares
+// about, so an external system (n8n → email/Slack, or the owner's own
+// endpoint) can alert without polling. Configured via the optional
 // ODYSSEUS_NOTIFY_WEBHOOK_URL env var; a failed webhook must never fail the
-// post itself.
+// post itself. Only "problem" kinds notify by default (ESCALATION) — override
+// with ODYSSEUS_NOTIFY_KINDS (comma-separated, e.g. "ESCALATION,REQUEST").
 async function notifyOdysseusPost(payload: {
   threadId: string;
   kind: string;
@@ -195,6 +196,7 @@ async function notifyOdysseusPost(payload: {
 }) {
   const url = process.env.ODYSSEUS_NOTIFY_WEBHOOK_URL?.trim();
   if (!url) return;
+  if (!shouldNotifyOwner(payload.kind, process.env.ODYSSEUS_NOTIFY_KINDS)) return;
   try {
     await fetch(url, {
       method: "POST",

@@ -7,6 +7,7 @@ import {
   messageContent,
   normalizeThreadId,
   sanitizeRefs,
+  shouldNotifyOwner,
 } from "../src/convex/sharedConversation";
 
 type MessageDoc = {
@@ -117,5 +118,29 @@ describe("isUnansweredThreadMessage", () => {
         message({ kind: "REQUEST", content: "Pull comps please", metadata: { autoRepliedAt: 1234 } }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("shouldNotifyOwner", () => {
+  test("only ESCALATION notifies by default", () => {
+    expect(shouldNotifyOwner("ESCALATION")).toBe(true);
+    expect(shouldNotifyOwner("MESSAGE")).toBe(false);
+    expect(shouldNotifyOwner("REQUEST")).toBe(false);
+    expect(shouldNotifyOwner("RESOLUTION")).toBe(false);
+  });
+
+  test("is case-insensitive and trims", () => {
+    expect(shouldNotifyOwner(" escalation ")).toBe(true);
+    expect(shouldNotifyOwner("message")).toBe(false);
+  });
+
+  test("respects a custom comma-separated list", () => {
+    expect(shouldNotifyOwner("REQUEST", "ESCALATION,REQUEST")).toBe(true);
+    expect(shouldNotifyOwner("RESOLUTION", "ESCALATION,REQUEST")).toBe(false);
+  });
+
+  test("falls back to ESCALATION when the configured list is empty", () => {
+    expect(shouldNotifyOwner("ESCALATION", "  ")).toBe(true);
+    expect(shouldNotifyOwner("REQUEST", "")).toBe(false);
   });
 });

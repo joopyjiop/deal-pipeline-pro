@@ -188,9 +188,9 @@ Plain REST alternative to the MCP `shared_thread_*` tools so Odysseus (or a work
 - `GET /api/shared-threads?unanswered=1` — the **inbox**: only threads whose latest message is an unanswered Odysseus `REQUEST`/`ESCALATION`/question, newest first (`limit` 1–50). This is the low-friction polling surface for "is there anything waiting for me right now".
 - `POST /api/shared-thread` — post as Odysseus. Body: `{ "threadId": string, "content": string, "kind"?: "MESSAGE"|"REQUEST"|"ESCALATION"|"RESOLUTION", "refs"?: string[] }`. Returns `201 { "ok": true, "messageId": "…", "sender": "odysseus" }`.
 
-**Webhook notification.** Every Odysseus post (REST and MCP both) also fires a best-effort `POST` to `ODYSSEUS_NOTIFY_WEBHOOK_URL` (if set) with `{ event: "odysseus_post", threadId, kind, messageId, refs, contentPreview, sentAt }`, so an external system (n8n → email/Slack, or the owner's own endpoint) can alert on new agent messages without polling. A failed webhook never fails the post itself.
+**Webhook notification.** When Odysseus posts an **error/problem** (`ESCALATION` by default), the backend fires a best-effort `POST` to `ODYSSEUS_NOTIFY_WEBHOOK_URL` (if set) with `{ event: "odysseus_post", threadId, kind, messageId, refs, contentPreview, sentAt }`, so an external system (n8n → email/Slack, or the owner's own endpoint) can alert without polling. Routine `MESSAGE`/`REQUEST`/`RESOLUTION` posts do **not** notify. Override the kinds with `ODYSSEUS_NOTIFY_KINDS` (comma-separated). A failed webhook never fails the post itself.
 
-A ready-to-import n8n workflow that emails the owner on each post is committed at `docs/n8n-odysseus-notify.json` (adapted from the [Zie619 n8n-workflows](https://github.com/zie619/n8n-workflows) collection). Import it, select a Gmail OAuth2 credential on the "Email owner" node, activate it, and set `ODYSSEUS_NOTIFY_WEBHOOK_URL` to its production webhook URL (`…/webhook/odysseus-post`).
+A ready-to-import n8n workflow that emails the owner on each escalation is committed at `docs/n8n-odysseus-notify.json` (adapted from the [Zie619 n8n-workflows](https://github.com/zie619/n8n-workflows) collection). Import it, select a Gmail OAuth2 credential on the "Email owner" node, activate it, and set `ODYSSEUS_NOTIFY_WEBHOOK_URL` to its production webhook URL (`…/webhook/odysseus-post`).
 
 Thread ids follow the shared convention: `deal:<leadId>`, `task:<stagedId>`, `buyer:<buyerId>`, `ops:<topic>`. Never post secrets or unnecessary PII — both sides read the full thread.
 
@@ -255,7 +255,8 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 | `SKIPTRACE_API_KEY` | Skip trace (optional, paid) | Searchbug API password (`PASS`) for the reverse-address people search. Phone numbers are licensed per-record and need a funded Searchbug prepaid balance |
 | `SKIPTRACE_ACCOUNT_ID` | Skip trace (optional, paid) | Searchbug account/company code (`CO_CODE`) for the reverse-address people search |
 | `AI_BASE_URL` | AI features | OpenAI-compatible AI gateway base for chat (consultant court + local agents) and embeddings. Default `https://localhost:20128/v1` (local OmniRoute). Chat no longer calls Ollama Cloud directly — `OLLAMA_API_KEY` is not used |
-| `ODYSSEUS_NOTIFY_WEBHOOK_URL` | optional | When set, the backend `POST`s an `odysseus_post` event to this URL every time Odysseus posts to a shared thread (best-effort, 5s timeout). Point it at n8n/Slack/email to get alerted on new agent messages without polling |
+| `ODYSSEUS_NOTIFY_WEBHOOK_URL` | optional | When set, the backend `POST`s an `odysseus_post` event to this URL whenever Odysseus posts a notifying kind (default: `ESCALATION` only; best-effort, 5s timeout). Point it at n8n/Slack/email |
+| `ODYSSEUS_NOTIFY_KINDS` | optional | Comma-separated message kinds that trigger the notify webhook (default `ESCALATION`, e.g. `ESCALATION,REQUEST`). Set it so you are only pinged for the problems you care about |
 | `AI_API_KEY` | optional | Bearer key sent to the AI gateway (some local gateways expect one) |
 | `OLLAMA_MODEL` | optional | Chat model-name selector routed through the gateway (default `gpt-oss:20b`) |
 | `OLLAMA_COURT_MODEL` | optional | Court model-name selector (wins over `OLLAMA_MODEL`) |

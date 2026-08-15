@@ -23,7 +23,7 @@ import {
 } from "./agents";
 import type { AgentLead, AgentReport, BuyerLike, DueDiligenceLike, ReadinessReport, ScoredBuyerMatch } from "./agents";
 import { chatCompletion, isAiGatewayConfigured } from "./ollama";
-import { parseSearchbugResult, SEARCHBUG_ENDPOINT } from "./skiptrace";
+import { extractSearchbugError, parseSearchbugResult, SEARCHBUG_ENDPOINT } from "./skiptrace";
 
 // Shared skip-trace runner. The public action below is owner-gated for the
 // website UI; the MCP bridge (mcpSkipTrace) reuses this same runner because
@@ -59,11 +59,8 @@ async function runSkipTrace(database: Awaited<ReturnType<typeof getDatabase>>, i
   if (!response.ok) throw new Error(`Skip-trace provider returned HTTP ${response.status}`);
 
   const raw = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (raw && typeof raw === "object" && "error" in raw) {
-    const error = raw.error;
-    const message = typeof error === "string" ? error : ((error as { message?: string } | null)?.message ?? "Unknown provider error");
-    throw new Error(`Skip-trace provider error: ${message}`);
-  }
+  const providerError = extractSearchbugError(raw);
+  if (providerError) throw new Error(`Skip-trace provider error: ${providerError}`);
 
   const contact = parseSearchbugResult(raw);
   const phoneNumbers = contact.phones.map((phone) => phone.number);

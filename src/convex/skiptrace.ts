@@ -75,6 +75,32 @@ function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+// Detects Searchbug's error envelope. The provider reports failures as
+// {"Status":"Error","Data":null,"Error":"..."} (account/plan problems, bad
+// credentials, etc.) rather than via an HTTP status, and some paths also return
+// an {"error": ...} node. Returns the message when the payload is a provider
+// error, else undefined. This must run before parseSearchbugResult so an error
+// payload is never persisted as an empty ("no records") contact.
+export function extractSearchbugError(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Record<string, unknown>;
+  const status =
+    typeof record.Status === "string"
+      ? record.Status
+      : typeof record.status === "string"
+        ? record.status
+        : undefined;
+  const errorField = record.Error ?? record.error;
+  const isErrorStatus = typeof status === "string" && status.toLowerCase() === "error";
+  if (!isErrorStatus && !("Error" in record) && !("error" in record)) return undefined;
+  if (typeof errorField === "string" && errorField.trim()) return errorField.trim();
+  if (errorField && typeof errorField === "object") {
+    const message = (errorField as { message?: string }).message;
+    if (typeof message === "string" && message.trim()) return message.trim();
+  }
+  return isErrorStatus ? "Unknown provider error" : undefined;
+}
+
 // Normalizes a Searchbug "Enhanced People Search" JSON response into the flat
 // contact shape persisted on leads. Defensive: the provider's JSON mirrors its
 // XML (names/addresses/phones/reportToken) and may omit any node.

@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildSearchbugForm,
+  extractSearchbugError,
   formatPropertyAddress,
   parseSearchbugResult,
   PEOPLEFINDERS_ADDRESS_URL,
@@ -67,6 +68,28 @@ describe("parseSearchbugResult", () => {
     const result = parseSearchbugResult({ reportToken: "flat", phones: [], names: [], emails: [] });
     expect(result.reportToken).toBe("flat");
     expect(result.phones).toEqual([]);
+  });
+});
+
+describe("extractSearchbugError", () => {
+  test("detects the Searchbug Status:Error envelope", () => {
+    expect(
+      extractSearchbugError({ Status: "Error", Data: null, Error: "Prepaid Plan with balance is required." }),
+    ).toBe("Prepaid Plan with balance is required.");
+  });
+
+  test("detects a lowercase error string", () => {
+    expect(extractSearchbugError({ error: "bad credentials" })).toBe("bad credentials");
+  });
+
+  test("detects an error object with a message", () => {
+    expect(extractSearchbugError({ error: { message: "nope" } })).toBe("nope");
+  });
+
+  test("returns undefined for a clean payload", () => {
+    expect(extractSearchbugError({ response: { names: [], phones: [] } })).toBeUndefined();
+    expect(extractSearchbugError(undefined)).toBeUndefined();
+    expect(extractSearchbugError(null)).toBeUndefined();
   });
 });
 

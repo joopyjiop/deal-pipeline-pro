@@ -9,6 +9,7 @@ import {
   buildPropertyQuery,
   fetchPropertyRecord,
   fetchRentEstimate,
+  formatOwnerMailingAddress,
   latestAnnualPropertyTax,
   parsePropertyRecord,
   parseRentEstimate,
@@ -94,6 +95,54 @@ describe("parsePropertyRecord", () => {
     expect(property?.id).toBe("abc");
     expect(property?.squareFootage).toBeUndefined();
     expect(property?.propertyTaxes).toBeUndefined();
+  });
+
+  test("extracts the owner block and ownerOccupied flag", () => {
+    const property = parsePropertyRecord({
+      id: "5500-Grand-Lake-Dr",
+      owner: {
+        names: ["Rolando Villarreal"],
+        type: "Individual",
+        mailingAddress: {
+          formattedAddress: "5500 Grand Lake Dr, San Antonio, TX 78244",
+          addressLine1: "5500 Grand Lake Dr",
+          city: "San Antonio",
+          state: "TX",
+          zipCode: "78244",
+        },
+      },
+      ownerOccupied: true,
+    });
+    expect(property?.ownerNames).toEqual(["Rolando Villarreal"]);
+    expect(property?.ownerType).toBe("Individual");
+    expect(property?.ownerMailingAddress?.city).toBe("San Antonio");
+    expect(property?.ownerOccupied).toBe(true);
+  });
+
+  test("leaves owner fields undefined when the owner block is absent", () => {
+    const property = parsePropertyRecord({ id: "abc" });
+    expect(property?.ownerNames).toBeUndefined();
+    expect(property?.ownerMailingAddress).toBeUndefined();
+    expect(property?.ownerOccupied).toBeUndefined();
+  });
+});
+
+describe("formatOwnerMailingAddress", () => {
+  test("prefers the provider's formatted address", () => {
+    expect(formatOwnerMailingAddress({ formattedAddress: "5500 Grand Lake Dr, San Antonio, TX 78244", city: "San Antonio" })).toBe(
+      "5500 Grand Lake Dr, San Antonio, TX 78244",
+    );
+  });
+
+  test("joins parts when there is no formatted address", () => {
+    expect(formatOwnerMailingAddress({ addressLine1: "5500 Grand Lake Dr", city: "San Antonio", state: "TX", zipCode: "78244" })).toBe(
+      "5500 Grand Lake Dr, San Antonio, TX, 78244",
+    );
+  });
+
+  test("returns undefined for empty or missing addresses", () => {
+    expect(formatOwnerMailingAddress(undefined)).toBeUndefined();
+    expect(formatOwnerMailingAddress({})).toBeUndefined();
   });
 });
 

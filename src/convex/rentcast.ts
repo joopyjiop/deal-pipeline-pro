@@ -14,6 +14,15 @@
 
 export const RENTCAST_BASE_URL = "https://api.rentcast.io/v1";
 
+export type RentcastOwnerMailingAddress = {
+  formattedAddress?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+};
+
 export type RentcastProperty = {
   id: string;
   formattedAddress?: string;
@@ -32,6 +41,12 @@ export type RentcastProperty = {
   lastSaleDate?: string;
   lastSalePrice?: number;
   propertyTaxes?: Record<string, { year?: number; total?: number }>;
+  /** Current owner name(s) from public county records (free, no per-record fee). */
+  ownerNames?: string[];
+  ownerType?: string;
+  ownerMailingAddress?: RentcastOwnerMailingAddress;
+  /** False means the owner's mailing address differs from the property → absentee. */
+  ownerOccupied?: boolean;
 };
 
 export type RentcastRentEstimate = {
@@ -95,6 +110,32 @@ export function parsePropertyRecord(value: unknown): RentcastProperty | null {
       }
     }
   }
+
+  // Owner block: `owner.names`, `owner.type`, `owner.mailingAddress`, plus the
+  // flat `ownerOccupied` flag. Absent from the response for counties that don't
+  // publish owner records; the parser stays tolerant and leaves them undefined.
+  const ownerRaw = record.owner;
+  const owner = ownerRaw && typeof ownerRaw === "object" && !Array.isArray(ownerRaw) ? (ownerRaw as Record<string, unknown>) : {};
+  const ownerNames = Array.isArray(owner.names)
+    ? owner.names.filter((name): name is string => typeof name === "string" && name.trim().length > 0).map((name) => name.trim())
+    : undefined;
+  const mailingRaw = owner.mailingAddress;
+  const mailing =
+    mailingRaw && typeof mailingRaw === "object" && !Array.isArray(mailingRaw)
+      ? (mailingRaw as Record<string, unknown>)
+      : {};
+  const ownerMailingAddress: RentcastOwnerMailingAddress | undefined =
+    Object.keys(mailing).length > 0
+      ? {
+          formattedAddress: typeof mailing.formattedAddress === "string" ? mailing.formattedAddress : undefined,
+          addressLine1: typeof mailing.addressLine1 === "string" ? mailing.addressLine1 : undefined,
+          addressLine2: typeof mailing.addressLine2 === "string" ? mailing.addressLine2 : undefined,
+          city: typeof mailing.city === "string" ? mailing.city : undefined,
+          state: typeof mailing.state === "string" ? mailing.state : undefined,
+          zipCode: typeof mailing.zipCode === "string" ? mailing.zipCode : undefined,
+        }
+      : undefined;
+
   return {
     id,
     formattedAddress: stringField("formattedAddress"),
@@ -113,6 +154,10 @@ export function parsePropertyRecord(value: unknown): RentcastProperty | null {
     lastSaleDate: stringField("lastSaleDate"),
     lastSalePrice: numberField("lastSalePrice"),
     propertyTaxes,
+    ownerNames: ownerNames && ownerNames.length > 0 ? ownerNames : undefined,
+    ownerType: typeof owner.type === "string" && owner.type.trim() ? owner.type.trim() : undefined,
+    ownerMailingAddress,
+    ownerOccupied: typeof record.ownerOccupied === "boolean" ? record.ownerOccupied : undefined,
   };
 }
 
@@ -127,6 +172,15 @@ export function parseRentEstimate(value: unknown): RentcastRentEstimate | null {
     rentRangeHigh: numberField("rentRangeHigh"),
     subjectProperty: parsePropertyRecord(record.subjectProperty) ?? undefined,
   };
+}
+
+/** Pure: joins the owner mailing-address parts into one display string. */
+export function formatOwnerMailingAddress(address: RentcastOwnerMailingAddress | null | undefined): string | undefined {
+  if (!address) return undefined;
+  if (address.formattedAddress?.trim()) return address.formattedAddress.trim();
+  const line2 = [address.city, address.state, address.zipCode].filter((value) => value?.trim()).join(", ");
+  const parts = [address.addressLine1, address.addressLine2, line2].filter((value) => value?.trim());
+  return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
 /** Pure: latest annual property tax total from the record's tax history. */

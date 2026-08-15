@@ -73,7 +73,7 @@ Managed from Convex actions (`src/convex/mongodb.ts`, `src/convex/admin.ts`).
 
 | Collection | Contents |
 | --- | --- |
-| `leads` | Source-verified property leads: `propertyAddress`, `city`, `state`, `zip`, `county`, `parcelId?`, `ownerMailingAddress?`, `sourceType`, `sourceUrl`, `sourceRef`, `sourceDate`, `distressScore`, `distressSignals[]`, `verificationStatus`, `pipelineStatus`, `fabricated` (true = tombstoned, never exportable), `absenteeOwner`, `needsSkipTrace`, `listedPhone`, `arv?`, `repairs?`, `mao?`, `acquisitionPrice?`, `estimatedProfit?`, `dueDiligence?` (four evidence categories), `notes?`, `createdAt`, `updatedAt` |
+| `leads` | Source-verified property leads: `propertyAddress`, `city`, `state`, `zip`, `county`, `parcelId?`, `ownerMailingAddress?`, `ownerNames?`, `ownerType?`, `ownerLookup?` (provider + source evidence), `sourceType`, `sourceUrl`, `sourceRef`, `sourceDate`, `distressScore`, `distressSignals[]`, `verificationStatus`, `pipelineStatus`, `fabricated` (true = tombstoned, never exportable), `absenteeOwner`, `needsSkipTrace`, `listedPhone`, `skipTrace?` (paid provider contact data), `arv?`, `repairs?`, `mao?`, `acquisitionPrice?`, `estimatedProfit?`, `dueDiligence?` (four evidence categories), `notes?`, `createdAt`, `updatedAt` |
 | `hot_deals` | Paywalled hot-deals feed. Same shape as leads minus pipeline fields. Non-fabricated rows must be `VERIFIED` with `distressScore >= 80` |
 | `buyers` | Buyer registry: `name`, `phone`, `email`, `budgetMin`, `budgetMax`, `targetAreas[]`, `exitType` (`ASSIGN`\|`FLIP`\|`BUY_HOLD`), `proofOfFundsStatus` (`NONE`\|`SELF_REPORTED`\|`VERIFIED`), `pofEvidenceRef?`, `purchaseHistory`, `listSource`, `intakeStatus` (`PENDING`\|`APPROVED`\|`REJECTED`), `verificationStatus`, `createdAt`, `updatedAt` |
 | `property_matches` | Lead↔buyer matches: `leadId`, `buyerId`, `matchScore` (0–100), `buyBoxSummary`, `confidence` (`LOW`\|`MEDIUM`\|`HIGH`), `status` (`CANDIDATE`\|`APPROVED`\|`REJECTED`\|`CONTACTED`\|`CLOSED`), `rejectReason?`, `createdAt`, `updatedAt` |
@@ -91,7 +91,7 @@ All HTTP routes live on the Convex site URL: `https://keen-aardvark-333.convex.s
 | Route | Method | Auth | Purpose |
 | --- | --- | --- | --- |
 | `/api/admin/...` | GET/POST/PATCH/PUT/DELETE | `Authorization: Bearer ADMIN_API_KEY` | Full CRUD over leads, buyers, matches, hot-deals, import-staging (below) |
-| `/api/mcp` | GET/POST/OPTIONS | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` or `x-mcp-api-key` header | MCP tool server for external AI agents (21 tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace`, `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, …). Recommendations only — never approves |
+| `/api/mcp` | GET/POST/OPTIONS | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` or `x-mcp-api-key` header | MCP tool server for external AI agents (22 tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace`, `owner_lookup`, `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, …). Recommendations only — never approves |
 | `/api/shared-thread` | GET/POST | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` | Shared-conversation REST API for Odysseus (below): read a thread, post as `odysseus` |
 | `/api/shared-threads` | GET | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` | List shared-conversation thread summaries |
 | `/api/n8n/source` | POST | `x-convex-n8n-secret: CONVEX_N8N_WEBHOOK_SECRET` | Queue a public source URL for automated processing (n8n recurring runs) |
@@ -247,12 +247,19 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 | `CAMOFOX_API_KEY` | Camofox features | Bearer key for the camofox proxy |
 | `SGAI_API_KEY` | ScrapeGraphAI | `SGAI-APIKEY` header for `v2-api.scrapegraphai.com` |
 | `FIRECRAWL_API_KEY` | Firecrawl | Firecrawl API key |
-| `SKIPTRACE_API_KEY` | Skip trace | Searchbug API password (`PASS`) for the reverse-address people search |
-| `SKIPTRACE_ACCOUNT_ID` | Skip trace | Searchbug account/company code (`CO_CODE`) for the reverse-address people search |
+| `SKIPTRACE_API_KEY` | Skip trace (optional, paid) | Searchbug API password (`PASS`) for the reverse-address people search. Phone numbers are licensed per-record and need a funded Searchbug prepaid balance |
+| `SKIPTRACE_ACCOUNT_ID` | Skip trace (optional, paid) | Searchbug account/company code (`CO_CODE`) for the reverse-address people search |
 | `AI_BASE_URL` | AI features | OpenAI-compatible AI gateway base for chat (consultant court + local agents) and embeddings. Default `https://localhost:20128/v1` (local OmniRoute). Chat no longer calls Ollama Cloud directly — `OLLAMA_API_KEY` is not used |
 | `AI_API_KEY` | optional | Bearer key sent to the AI gateway (some local gateways expect one) |
 | `OLLAMA_MODEL` | optional | Chat model-name selector routed through the gateway (default `gpt-oss:20b`) |
 | `OLLAMA_COURT_MODEL` | optional | Court model-name selector (wins over `OLLAMA_MODEL`) |
+
+### Owner enrichment (free) vs. skip trace (paid)
+
+Two contact-data paths, both stored with source evidence and never invented:
+
+- **Owner enrichment — free.** The "Pull owner" button (and the MCP tool `owner_lookup`) reads the current owner's **name, entity type, and mailing address** from RentCast's `/properties` record (sourced from public county records) using the existing `RENTCAST_API_KEY`. No per-record fee. It writes `ownerNames`, `ownerType`, `ownerMailingAddress`, `ownerLookup` (provider + source URL/date), and `absenteeOwner` (owner-occupied = false) onto the lead. Mailing address is the TCPA-safe outreach channel (direct mail).
+- **Skip trace — paid.** Phone numbers are licensed per-record and cannot be sourced free. The "Run skip trace" button / `skip_trace` MCP tool calls Searchbug (requires a funded prepaid balance via `SKIPTRACE_API_KEY` + `SKIPTRACE_ACCOUNT_ID`), and free manual lookups are available as TruePeopleSearch / PeopleFinders deep-links on the lead dossier. Owner approval still gates any dial/export.
 
 ---
 

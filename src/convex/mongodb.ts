@@ -8,7 +8,7 @@ import { rankLeads } from "./search";
 import { scrapegraphExtract } from "./scrapegraph";
 import { discoverSitemapUrls } from "./sitemap";
 import type { SitemapFetch } from "./sitemap";
-import { fetchPropertyData, latestAnnualPropertyTax } from "./rentcast";
+import { fetchPropertyData, fetchPropertyRecord, formatOwnerMailingAddress, latestAnnualPropertyTax } from "./rentcast";
 import type { SearchableLead } from "./search";
 import { arvFromComps, median, rentalUnderwriting, repairEstimate } from "./underwriting";
 import { embeddingPrompt, rankBySimilarity, type EmbeddableLead } from "./embeddings";
@@ -107,6 +107,80 @@ export const mcpSkipTrace = internalAction({
     const database = await getDatabase();
     await requireMcpAiAccess(database);
     return runSkipTrace(database, args.id);
+  },
+});
+
+// Shared owner-enrichment runner. Pulls the current owner's name and mailing
+// address from RentCast's public county records (free with the existing
+// RENTCAST_API_KEY — no per-record fee) and writes them onto the lead with a
+// source URL + date. This is the free, TCPA-safe outreach channel (direct
+// mail); phone numbers still require a paid provider or a manual lookup.
+async function runOwnerEnrichment(database: Awaited<ReturnType<typeof getDatabase>>, id: string) {
+  const lead = await database.collection(LEADS).findOne({ _id: objectId(id), fabricated: { $ne: true } });
+  if (!lead) throw new Error("Lead not found");
+
+  const address = [lead.propertyAddress, lead.city, lead.state]
+    .map((part) => (typeof part === "string" ? part.trim() : ""))
+    .filter(Boolean)
+    .join(", ");
+  if (!address) throw new Error("Lead has no property address to look up");
+
+  const property = await fetchPropertyRecord(address);
+  if (!property) throw new Error("RentCast returned no property record for this address");
+  if (!property.ownerNames && !property.ownerMailingAddress) {
+    throw new Error("RentCast has no owner record for this address (county owner data not published)");
+  }
+
+  const mailing = formatOwnerMailingAddress(property.ownerMailingAddress);
+  const ownerOccupied = property.ownerOccupied;
+  const absenteeOwner = typeof ownerOccupied === "boolean" ? !ownerOccupied : undefined;
+  const sourceUrl = `https://api.rentcast.io/v1/properties?address=${encodeURIComponent(address)}`;
+
+  await database.collection(LEADS).updateOne(
+    { _id: lead._id },
+    {
+      $set: withoutUndefined({
+        ownerNames: property.ownerNames,
+        ownerType: property.ownerType,
+        ownerMailingAddress: mailing,
+        absenteeOwner,
+        ownerLookup: {
+          provider: "rentcast",
+          sourceUrl,
+          sourceDate: new Date().toISOString().slice(0, 10),
+          fetchedAt: Date.now(),
+          ownerOccupied,
+        },
+        updatedAt: Date.now(),
+      }),
+    },
+  );
+
+  return {
+    id,
+    ownerNames: property.ownerNames ?? [],
+    ownerType: property.ownerType,
+    ownerMailingAddress: mailing,
+    absenteeOwner,
+    sourceUrl,
+    saved: true,
+  };
+}
+
+export const enrichOwnerFromRentCast = action({
+  args: { id: v.string() },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    return runOwnerEnrichment(await getDatabase(), args.id);
+  },
+});
+
+export const mcpOwnerLookup = internalAction({
+  args: { id: v.string() },
+  handler: async (_, args) => {
+    const database = await getDatabase();
+    await requireMcpAiAccess(database);
+    return runOwnerEnrichment(database, args.id);
   },
 });
 

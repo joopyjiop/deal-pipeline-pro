@@ -190,6 +190,8 @@ Plain REST alternative to the MCP `shared_thread_*` tools so Odysseus (or a work
 
 **Webhook notification.** Every Odysseus post (REST and MCP both) also fires a best-effort `POST` to `ODYSSEUS_NOTIFY_WEBHOOK_URL` (if set) with `{ event: "odysseus_post", threadId, kind, messageId, refs, contentPreview, sentAt }`, so an external system (n8n → email/Slack, or the owner's own endpoint) can alert on new agent messages without polling. A failed webhook never fails the post itself.
 
+A ready-to-import n8n workflow that emails the owner on each post is committed at `docs/n8n-odysseus-notify.json` (adapted from the [Zie619 n8n-workflows](https://github.com/zie619/n8n-workflows) collection). Import it, select a Gmail OAuth2 credential on the "Email owner" node, activate it, and set `ODYSSEUS_NOTIFY_WEBHOOK_URL` to its production webhook URL (`…/webhook/odysseus-post`).
+
 Thread ids follow the shared convention: `deal:<leadId>`, `task:<stagedId>`, `buyer:<buyerId>`, `ops:<topic>`. Never post secrets or unnecessary PII — both sides read the full thread.
 
 ```bash

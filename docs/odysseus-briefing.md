@@ -128,6 +128,8 @@ Server-side validation (never bypass it, and never try to disable it):
 
 The website and Odysseus share one conversation thread per deal/task in the Convex `sharedConversations` table. This is how you collaborate **mid-task** instead of handing off one-way requests. The website side is owner-gated; you post as `odysseus` — the sender is forced server-side, so you can never be mistaken for the website and vice versa.
 
+> **Shared code (terse language).** The two sides are co-authoring a compact, unambiguous language for threads — see `docs/shared-code.md` (v0 draft) and the `ops:shared-code` thread. Use the `OP` verbs, field codes, and `@ref` PII rule from that doc for pipeline traffic; amend it in `ops:shared-code` as you find gaps.
+
 ### Tools (MCP)
 
 - `shared_threads_list` — discover open threads (message count, last sender/kind, preview).

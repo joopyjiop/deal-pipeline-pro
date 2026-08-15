@@ -217,6 +217,7 @@ export const listSharedThreads = query({
           lastKind: last.kind,
           lastContent: last.content.slice(0, 160),
           lastSentAt: last.sentAt,
+          needsAttention: isUnansweredThreadMessage(last),
         };
       })
       .sort((a, b) => b.lastSentAt - a.lastSentAt)
@@ -381,6 +382,7 @@ export const threadSummaries = internalQuery({
           lastKind: last.kind,
           lastContent: last.content.slice(0, 160),
           lastSentAt: last.sentAt,
+          needsAttention: isUnansweredThreadMessage(last),
         };
       })
       .sort((a, b) => b.lastSentAt - a.lastSentAt)

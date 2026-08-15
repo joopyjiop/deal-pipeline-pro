@@ -181,6 +181,40 @@ const adminApi = httpAction(async (ctx, request) => {
   }
 });
 
+// Best-effort notification fired whenever Odysseus posts a new message, so an
+// external system (n8n → email/Slack, or the owner's own endpoint) can alert
+// on the shared-thread activity without polling. Configured via the optional
+// ODYSSEUS_NOTIFY_WEBHOOK_URL env var; a failed webhook must never fail the
+// post itself.
+async function notifyOdysseusPost(payload: {
+  threadId: string;
+  kind: string;
+  content: string;
+  messageId: string;
+  refs?: string[];
+}) {
+  const url = process.env.ODYSSEUS_NOTIFY_WEBHOOK_URL?.trim();
+  if (!url) return;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        event: "odysseus_post",
+        threadId: payload.threadId,
+        kind: payload.kind,
+        messageId: payload.messageId,
+        refs: payload.refs ?? [],
+        contentPreview: payload.content.slice(0, 400),
+        sentAt: Date.now(),
+      }),
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch {
+    // Notification is best-effort only.
+  }
+}
+
 // Shared conversation REST API for external agents (Odysseus). Authenticated
 // with the same MCP_TOOL_SERVER_SECRET Odysseus uses for /api/mcp. Messages
 // posted here are forced to sender "odysseus" server-side — a website client
@@ -201,6 +235,16 @@ const sharedThreadApi = httpAction(async (ctx, request) => {
   if (method === "GET" && url.pathname === "/api/shared-threads") {
     const limit = Number(url.searchParams.get("limit") ?? 100);
     if (!Number.isFinite(limit)) return json({ error: "limit must be a number" }, 400, { "cache-control": "no-store" });
+    const unansweredOnly = url.searchParams.get("unanswered") === "1" || url.searchParams.get("unanswered") === "true";
+    if (unansweredOnly) {
+      // Inbox view: threads whose latest message is an unanswered Odysseus
+      // request/escalation/question. This is the website's "notification"
+      // surface — a quick poll returns exactly what is waiting for attention.
+      const pending = await ctx.runQuery(internal.sharedConversation.unansweredThreads, {
+        limit: Math.max(1, Math.min(50, Math.floor(limit))),
+      });
+      return json({ count: pending.length, unanswered: pending }, 200, { "cache-control": "no-store" });
+    }
     const result = await ctx.runQuery(internal.sharedConversation.threadSummaries, {
       limit: Math.max(1, Math.min(100, Math.floor(limit))),
     });
@@ -243,6 +287,13 @@ const sharedThreadApi = httpAction(async (ctx, request) => {
       content: messageContent(payload.content),
       refs: sanitizeRefs(refs as string[] | undefined),
       sentAt: Date.now(),
+    });
+    await notifyOdysseusPost({
+      threadId: normalizeThreadId(payload.threadId),
+      kind: (kind ?? "MESSAGE") as string,
+      content: messageContent(payload.content),
+      messageId,
+      refs: sanitizeRefs(refs as string[] | undefined),
     });
     return json({ ok: true, messageId, sender: "odysseus" }, 201, { "cache-control": "no-store" });
   }
@@ -495,6 +546,13 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
       content: messageContent(rawArguments.content),
       refs: sanitizeRefs(refs as string[] | undefined),
       sentAt: Date.now(),
+    });
+    await notifyOdysseusPost({
+      threadId: normalizeThreadId(rawArguments.threadId),
+      kind: (kind ?? "MESSAGE") as string,
+      content: messageContent(rawArguments.content),
+      messageId,
+      refs: sanitizeRefs(refs as string[] | undefined),
     });
     return { ok: true, messageId, sender: "odysseus" };
   }

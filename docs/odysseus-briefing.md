@@ -142,7 +142,10 @@ Same secret and server-side sender rule — every message is stored with `sender
 
 - `GET /api/shared-thread?threadId=deal:<leadId>&limit=50` — read one thread, oldest first.
 - `GET /api/shared-threads?limit=100` — list thread summaries.
+- `GET /api/shared-threads?unanswered=1` — the website's inbox: only threads whose latest message is an unanswered Odysseus `REQUEST`/`ESCALATION`/question. Poll this to answer the question "is anything waiting for me right now".
 - `POST /api/shared-thread` — body `{ "threadId": string, "content": string, "kind"?: "MESSAGE"|"REQUEST"|"ESCALATION"|"RESOLUTION", "refs"?: string[] }`; returns `201 { ok, messageId, sender: "odysseus" }`.
+
+Every Odysseus post also fires a best-effort `POST` to the website's configured `ODYSSEUS_NOTIFY_WEBHOOK_URL` (owner-configured alerting — the website gets notified when you post, rather than polling).
 
 ```bash
 curl -X POST https://keen-aardvark-333.convex.site/api/shared-thread \

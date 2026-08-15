@@ -57,6 +57,7 @@ export default function SharedConversation() {
   );
 
   const threads = useQuery(api.sharedConversation.listSharedThreads, {});
+  const unansweredCount = threads ? threads.threads.filter((item) => item.needsAttention).length : 0;
   const [selectedThread, setSelectedThread] = useState<string | null>(null);
   const thread = useQuery(
     api.sharedConversation.getSharedThread,
@@ -214,6 +215,11 @@ export default function SharedConversation() {
             <Badge variant="outline" className="border-sky-200/80 bg-sky-50/60 text-xs text-sky-800">
               Owner-only · live thread
             </Badge>
+            {unansweredCount > 0 && (
+              <Badge className="border-0 bg-violet-100/90 text-xs text-violet-800" title={`${unansweredCount} open Odysseus message${unansweredCount === 1 ? "" : "s"} waiting for a reply`}>
+                {unansweredCount} unanswered
+              </Badge>
+            )}
             <Button
               type="button"
               onClick={() => void handleRunResponder()}
@@ -277,7 +283,10 @@ export default function SharedConversation() {
                   className={`w-full rounded-xl border p-3 text-left transition-colors ${selectedThread === item.threadId ? "border-sky-300/90 bg-sky-50/80" : "border-white/80 bg-white/45 hover:border-sky-200/80 hover:bg-white/70"}`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-xs font-semibold text-slate-800">{item.threadId}</p>
+                    <p className="flex min-w-0 items-center gap-1.5 truncate text-xs font-semibold text-slate-800">
+                      {item.needsAttention && <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-violet-500" title="Needs a reply" />}
+                      <span className="truncate">{item.threadId}</span>
+                    </p>
                     <Badge className={`shrink-0 border-0 ${KIND_STYLES[item.lastKind]}`}>{KIND_LABELS[item.lastKind]}</Badge>
                   </div>
                   <p className="mt-1 truncate text-[0.68rem] leading-4 text-slate-500">{item.lastContent}</p>

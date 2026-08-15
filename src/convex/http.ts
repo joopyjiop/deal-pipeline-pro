@@ -187,6 +187,19 @@ const adminApi = httpAction(async (ctx, request) => {
 // ODYSSEUS_NOTIFY_WEBHOOK_URL env var; a failed webhook must never fail the
 // post itself. Only "problem" kinds notify by default (ESCALATION) — override
 // with ODYSSEUS_NOTIFY_KINDS (comma-separated, e.g. "ESCALATION,REQUEST").
+// After Odysseus posts a message, schedule the website's auto-responder to run
+// ~25s later — just past the 20s settle guard in unansweredThreads — so
+// Odysseus gets a reply right back instead of waiting for the next cron tick
+// (the 3-minute cron stays as the backstop). Best-effort: a scheduling failure
+// must never fail the post itself.
+async function scheduleWebsiteReply(ctx: ActionCtx) {
+  try {
+    await ctx.scheduler.runAfter(25_000, internal.threadResponder.respondToOpenThreads, {});
+  } catch {
+    // Best-effort only.
+  }
+}
+
 async function notifyOdysseusPost(payload: {
   threadId: string;
   kind: string;
@@ -297,6 +310,7 @@ const sharedThreadApi = httpAction(async (ctx, request) => {
       messageId,
       refs: sanitizeRefs(refs as string[] | undefined),
     });
+    await scheduleWebsiteReply(ctx);
     return json({ ok: true, messageId, sender: "odysseus" }, 201, { "cache-control": "no-store" });
   }
 
@@ -556,6 +570,7 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
       messageId,
       refs: sanitizeRefs(refs as string[] | undefined),
     });
+    await scheduleWebsiteReply(ctx);
     return { ok: true, messageId, sender: "odysseus" };
   }
   throw new Error(`Unknown MCP tool: ${name}`);

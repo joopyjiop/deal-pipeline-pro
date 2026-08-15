@@ -1,13 +1,14 @@
-# Shared code — Website ↔ Odysseus (v0 draft, co-authored)
+# Shared code — Website ↔ Odysseus (v1 draft, co-authored)
 
 A compact, unambiguous language the website and Odysseus use inside shared
 conversation threads (`docs/odysseus-briefing.md` → "Shared conversation") so
 the two sides cannot misread each other and so raw PII is not restated in the
 thread log.
 
-Status: **v0 draft**. This document evolves with Odysseus — the website posts
-proposals to `ops:shared-code` and Odysseus amends them. Both sides treat this
-file as the canonical dictionary.
+Status: **v1 draft**. Co-authored with Odysseus — v0 was posted to
+`ops:shared-code`; v1 folds in the vocabulary observed in Odysseus's real
+thread traffic (see §9). Still awaiting Odysseus's explicit confirmation of the
+open items in §8.
 
 ## 1. Thread references (unchanged)
 
@@ -20,7 +21,7 @@ deal:<leadId>   task:<stagedId>   buyer:<buyerId>   ops:<topic>
 | Verb | Meaning |
 | --- | --- |
 | `REQ` | I need you to do/answer something. |
-| `ESC` | I am blocked; here is the exact gap. |
+| `ESC` | I am blocked; here is the exact gate + missing data. |
 | `RES` | Resolved; here is the outcome. |
 | `INFO` | Status only, no action requested. |
 | `OWNER` | Owner decision required (approve / reject / dial / export). |
@@ -39,9 +40,17 @@ deal:<leadId>   task:<stagedId>   buyer:<buyerId>   ops:<topic>
 | `SIG` | Distress signal list. |
 | `VFY` | Verification status — `U`/`P`/`V`. |
 | `PIPE` | Pipeline status — `S`/`C`/`A`/`R`. |
+| `RDY` | Ready for a buyer — `0`/`1`. |
 | `ARV REP MAO ACQ SPREAD` | Underwriting numbers. |
 | `DD:T DD:S DD:C DD:O` | Due-diligence gates (see §4). |
 | `GAPS` | Count of blocking gaps. |
+| `COMPS` | Sold comparable count (0 = none). |
+| `COMPR` | Comps radius in miles. |
+| `COMPD` | Comps look-back in days. |
+| `SCORE` | Match / buyer-fit score `0-100`. |
+| `BID` | Buyer id (matches `buyer:<id>`). |
+| `BOX` | Buyer buy-box summary (budget, areas, exit). |
+| `HOT` | Hot-deals feed flag — `0`/`1`. |
 
 ## 4. Status tokens
 
@@ -76,7 +85,7 @@ CONF 0.0-1.0   0 = unverified guess · 1 = source-verified
 Plaintext fact:
 
 ```
-CTX deal:abc123 | OP REQ | F DD:T=? | CONF 0.8 | ASK pull title+liens
+CTX deal:abc123 | OP REQ | F DD:S=? | CONF 0.8 | ASK pull comps within 3mi
 ```
 
 Secret (private) fact:
@@ -95,3 +104,22 @@ owner UI decrypts it for display. Anyone without the key sees only ciphertext.
 2. Confirm the `@ref` convention for PII (vs. an encrypted inline form).
 3. Confirm AES-GCM + PBKDF2 for the secret envelope, or prefer a simple
    codebook first.
+
+## 9. v1 additions — vocabulary observed in Odysseus's threads
+
+Folded in from Odysseus's own messages (so the two sides share one dictionary
+for the things it actually asks about):
+
+| Odysseus's wording | Code |
+| --- | --- |
+| "SALE_HISTORY cannot be verified … no comps in 12 months within 3 miles" | `ESC` + `F DD:S=NO` + `F COMPR=3` + `F COMPD=365` + `F COMPS=0` |
+| "flag missing data" / "cannot verify from here" | `ESC` + the gate field (`DD:T/S/C/O`) |
+| "escalate to you when I need a capability" | `ESC` |
+| "score buyer fit" | `REQ` + `F SCORE=<0-100>` |
+| "create matches" | `OWNER` (a match needs owner approval; report it, don't create it) |
+| "which lead should I look at next" | `REQ` + `ASK next` → the website answers `RDY`/`DSTR`/`GAPS` ranked |
+| "summarize the pipeline readiness" | `REQ` + `ASK brief` → the website answers the pipeline brief |
+
+**Escalation rule (both sides):** an `ESC` must name the exact gate
+(`DD:T/S/C/O`), the missing fact, and the single thing the other side should
+do — one `ASK`, never a wish-list.

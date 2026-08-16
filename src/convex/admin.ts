@@ -5,6 +5,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import { computeStagingStatus, missingEvidenceFields, stagingScoreMismatch, TERMINAL_STAGING_STATUSES } from "./stagingEvidence";
+import { assertBuyerDealReady, assertLeadDealReady } from "./credentials";
 
 const LEADS = "leads";
 const HOT_DEALS = "hot_deals";
@@ -210,6 +211,11 @@ async function validateMatchReferences(database: Awaited<ReturnType<typeof getDa
   if (!lead || lead.fabricated === true || lead.pipelineStatus !== "APPROVED" || lead.verificationStatus !== "VERIFIED") throw new Error("Matches require a verified, approved, non-fabricated lead");
   if (!buyer || buyer.intakeStatus !== "APPROVED") throw new Error("Matches require an approved buyer");
   if (value.confidence === "HIGH" && buyer.proofOfFundsStatus !== "VERIFIED") throw new Error("High-confidence matches require verified proof of funds");
+  // Deal-credential gate: a pair only goes up for review when both sides carry
+  // the credentials to actually make a deal — enforced even for pre-existing
+  // approved rows, so no credential-less seller or buyer can be matched.
+  assertLeadDealReady(lead as unknown as Record<string, unknown>);
+  assertBuyerDealReady(buyer as unknown as Record<string, unknown>);
 }
 
 export const adminCrud = internalAction({
@@ -254,12 +260,14 @@ export const adminCrud = internalAction({
       if (args.resource === "leads") {
         validateLead(next);
         next.fabricated = next.sourceType === "SEED" || next.fabricated === true;
+        if (next.fabricated !== true && next.pipelineStatus === "APPROVED") assertLeadDealReady(next);
       } else if (args.resource === "hot-deals") {
         validateHotDeal(next);
         next.fabricated = next.sourceType === "SEED" || next.fabricated === true;
         if (next.fabricated !== true && (next.verificationStatus !== "VERIFIED" || (next.distressScore as number) < 80)) throw new Error("Hot deals require verified records with distress score 80 or higher");
       } else if (args.resource === "buyers") {
         validateBuyer(next);
+        if (next.intakeStatus === "APPROVED") assertBuyerDealReady(next);
       } else if (args.resource === "matches") {
         validateMatch(next);
         await validateMatchReferences(database, next);
@@ -290,6 +298,12 @@ export const adminCrud = internalAction({
       if (existing.fabricated === true) next.fabricated = true;
       validateLead(next);
       if (next.sourceType === "SEED") next.fabricated = true;
+      // Deal-credential gate (transition-only): blocking only the move INTO
+      // APPROVED lets the owner still complete credentials on a lead that is
+      // already approved, while preventing credential-less approvals.
+      if (next.fabricated !== true && next.pipelineStatus === "APPROVED" && existing.pipelineStatus !== "APPROVED") {
+        assertLeadDealReady(next);
+      }
     } else if (args.resource === "hot-deals") {
       if (existing.fabricated === true) next.fabricated = true;
       validateHotDeal(next);
@@ -297,6 +311,7 @@ export const adminCrud = internalAction({
       if (next.fabricated !== true && (next.verificationStatus !== "VERIFIED" || (next.distressScore as number) < 80)) throw new Error("Hot deals require verified records with distress score 80 or higher");
     } else if (args.resource === "buyers") {
       validateBuyer(next);
+      if (next.intakeStatus === "APPROVED" && existing.intakeStatus !== "APPROVED") assertBuyerDealReady(next);
     } else if (args.resource === "matches") {
       validateMatch(next);
       await validateMatchReferences(database, next);

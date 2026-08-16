@@ -24,6 +24,8 @@ import        {
  arvFromComps, median, rentalUnderwriting, repairEstimate } from "./underwriting";
 import        {
  embeddingPrompt, rankBySimilarity, type EmbeddableLead } from "./embeddings";
+import        {
+ assertBuyerDealReady, assertLeadDealReady } from "./credentials";
 import type        {
  RentalUnderwritingInput } from "./underwriting";
 import        {
@@ -1632,6 +1634,11 @@ function validateBuyer(buyer:        {
   budgetMax: number;
   proofOfFundsStatus: string;
   pofEvidenceRef?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  intakeStatus?: string;
+  targetAreas?: unknown;
 })        {
 
   if (buyer.budgetMin < 0 || buyer.budgetMax < buyer.budgetMin)        {
@@ -1641,6 +1648,14 @@ function validateBuyer(buyer:        {
   if (buyer.proofOfFundsStatus === "VERIFIED" && !buyer.pofEvidenceRef?.trim())        {
 
     throw new Error("Verified proof of funds requires an evidence reference");
+  }
+  // Deal-credential gate: no buyer reaches APPROVED without the credentials to
+  // make a deal (contact details + proof of funds). Runs on every write that
+  // produces an approved buyer (insertBuyer and updateBuyer); the admin API
+  // applies the same rule with transition-only semantics so already-approved
+  // buyers can still be completed.
+  if (buyer.intakeStatus === "APPROVED") {
+    assertBuyerDealReady(buyer as unknown as Record<string, unknown>);
   }
 }
 
@@ -1670,6 +1685,11 @@ async function validateMatch(
 
     throw new Error("High-confidence matches require verified proof of funds");
   }
+  // Deal-credential gate: a pair only goes up for review when both sides carry
+  // the credentials to actually make a deal (seller name, phone, ARV/estimate;
+  // buyer contact + proof of funds).
+  assertLeadDealReady(lead as unknown as Record<string, unknown>);
+  assertBuyerDealReady(buyer as unknown as Record<string, unknown>);
 }
 
 function validateApprovedLead(lead:        {
@@ -1717,6 +1737,13 @@ function validateApprovedLead(lead:        {
 
     throw new Error("Every distress signal needs verified, dated source evidence");
   }
+  // Deal-credential gate: no seller reaches APPROVED without the credentials to
+  // make a deal (seller name, contact phone, ARV or an offer estimate). Runs on
+  // every write that produces an approved lead — the UI approval path
+  // (updateLead) and the owner approval action (approveLead). The admin API
+  // applies the same rule with transition-only semantics so already-approved
+  // leads can still be completed.
+  assertLeadDealReady(lead as unknown as Record<string, unknown>);
 }
 
 type DueDiligenceEntry =        {

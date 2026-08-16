@@ -13,6 +13,7 @@ import type * as agents from "../agents.js";
 import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
 import type * as camofox from "../camofox.js";
+import type * as credentials from "../credentials.js";
 import type * as crons from "../crons.js";
 import type * as embeddings from "../embeddings.js";
 import type * as http from "../http.js";
@@ -45,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   "auth/emailOtp": typeof auth_emailOtp;
   camofox: typeof camofox;
+  credentials: typeof credentials;
   crons: typeof crons;
   embeddings: typeof embeddings;
   http: typeof http;

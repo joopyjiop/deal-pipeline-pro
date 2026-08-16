@@ -164,7 +164,7 @@ const adminApi = httpAction(async (ctx, request) => {
   const id = parts[1];
   const method = request.method;
   const operation = method === "GET" ? (id ? "GET" : "LIST") : method === "POST" ? "CREATE" : method === "PATCH" || method === "PUT" ? "UPDATE" : method === "DELETE" ? "DELETE" : undefined;
-  if (!operation || (operation === "CREATE" && id) || (operation !== "LIST" && operation !== "GET" && !id)) return json({ error: "Unsupported method or route shape" }, 405);
+  if (!operation || (operation === "CREATE" && id) || (operation === "LIST" && id) || (operation !== "LIST" && operation !== "GET" && operation !== "CREATE" && !id)) return json({ error: "Unsupported method or route shape" }, 405);
 
   const url = new URL(request.url);
   const filters: Record<string, unknown> = {};

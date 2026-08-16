@@ -160,6 +160,11 @@ async function loadDocContext(ctx: ActionCtx, threadId: string): Promise<string 
   if (!ref) return null;
   const resource = prefix === "deal" ? "leads" : prefix === "task" ? "import-staging" : prefix === "buyer" ? "buyers" : null;
   if (!resource) return null;
+  // Thread names like deal:salisbury-matches are conversation references, not
+  // Mongo document ids. Only load a document when the ref is a real ObjectId
+  // (24 hex chars); otherwise skip the doc context instead of crashing the
+  // responder on an invalid ObjectId cast.
+  if (!/^[0-9a-fA-F]{24}$/.test(ref)) return null;
   try {
     const result = (await ctx.runAction(internal.admin.adminCrud, {
       resource,

@@ -130,14 +130,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             <>
               <CardHeader className="text-center sm:px-8 sm:pt-8">
               <div className="flex justify-center">
-                    <img
-                      src={LogoMark}
-                      alt="Lock Icon"
-                      width={64}
-                      height={64}
-                      className="rounded-lg mb-4 mt-4 cursor-pointer"
-                      onClick={() => navigate("/")}
-                    />
+                    <div className="mb-4 mt-4 cursor-pointer rounded-lg" onClick={() => navigate("/")}>
+                      <LogoMark size="lg" />
+                    </div>
                   </div>
                 <CardTitle className="text-xl tracking-tight text-slate-900">Enter the deal room</CardTitle>
                 <CardDescription className="leading-6 text-slate-500">

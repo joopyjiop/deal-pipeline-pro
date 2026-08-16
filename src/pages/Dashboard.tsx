@@ -364,7 +364,7 @@ export default function Dashboard() {
     <main className="min-h-screen px-4 py-4 text-foreground sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-[1500px] gap-5">
         <aside className="glass-panel hidden w-[245px] shrink-0 flex-col rounded-[1.75rem] p-4 lg:flex">
-          <Link to="/" className="flex items-center gap-3 px-3 py-3"><span className="flex size-9 items-center justify-center rounded-xl bg-white/75 shadow-sm"><Landmark className="size-4 text-sky-700" /></span><div><p className="text-sm font-bold tracking-tight text-slate-800">Groundwork</p><p className="text-[0.65rem] font-medium uppercase tracking-[0.14em] text-slate-500">Owner workspace</p></div></Link>
+          <Link to="/" className="flex items-center gap-3 px-3 py-3"><span className="flex size-9 items-center justify-center rounded-xl bg-white/75 shadow-sm"><Landmark className="size-4 text-sky-700" /></span><div><p className="text-sm font-bold tracking-tight text-slate-800">Deal Pipeline Pro</p><p className="text-[0.65rem] font-medium uppercase tracking-[0.14em] text-slate-500">Owner workspace</p></div></Link>
           <div className="my-5 h-px bg-white/75" />
           <nav className="space-y-1" aria-label="Workspace navigation">
             <div className="flex items-center gap-3 rounded-xl bg-white/78 px-3 py-2.5 text-sm font-semibold text-sky-800 shadow-sm"><Home className="size-4" /> Verified leads</div>

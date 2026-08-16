@@ -27,6 +27,10 @@ HOW YOU TALK TO THE APP:
   auth: "Authorization: Bearer $ADMIN_API_KEY"
 - MCP tool server: POST https://keen-aardvark-333.convex.site/api/mcp
   auth: "Authorization: Bearer $MCP_TOOL_SERVER_SECRET"
+- Admin MCP server (full CRUD, same secret as the REST admin API):
+    POST https://keen-aardvark-333.convex.site/api/mcp/admin
+  auth: "Authorization: Bearer $ADMIN_API_KEY" (or header "x-admin-api-key")
+  20 tools: admin_{list,get,create,update,delete}_{lead,leads,buyer,buyers,match,matches,hot_deal,hot_deals}
 - Shared conversation (collaborate mid-task, don't hand off one-way):
     GET  https://keen-aardvark-333.convex.site/api/shared-thread?threadId=...
     GET  https://keen-aardvark-333.convex.site/api/shared-threads
@@ -97,7 +101,7 @@ The owner must have these set in the Convex dashboard's Keys/Environment Variabl
 - [ ] `AI_BASE_URL` + optional `AI_API_KEY` — AI gateway (default local OmniRoute `https://localhost:20128/v1`) for the consultant court, local-agents chat, and embeddings
 - [ ] Auth vars `JWKS`, `JWT_PRIVATE_KEY`, `SITE_URL` — should already be configured
 
-Verify access before doing anything else: `GET https://keen-aardvark-333.convex.site/api/admin/leads?limit=1` with the bearer key must return 200, and `tools/list` on `/api/mcp` must return the tool manifest.
+Verify access before doing anything else: `GET https://keen-aardvark-333.convex.site/api/admin/leads?limit=1` with the bearer key must return 200, `tools/list` on `/api/mcp` must return the tool manifest, and `tools/list` on `/api/mcp/admin` (with `$ADMIN_API_KEY`) must return the 20-tool admin manifest.
 
 ## Access points
 
@@ -105,6 +109,7 @@ Verify access before doing anything else: `GET https://keen-aardvark-333.convex.
 | --- | --- | --- |
 | Admin REST API | `https://keen-aardvark-333.convex.site/api/admin/...` | `Authorization: Bearer $ADMIN_API_KEY` |
 | MCP tool server (review only) | `https://keen-aardvark-333.convex.site/api/mcp` | `Authorization: Bearer $MCP_TOOL_SERVER_SECRET` or header `x-mcp-api-key` |
+| Admin MCP server (full CRUD) | `https://keen-aardvark-333.convex.site/api/mcp/admin` | `Authorization: Bearer $ADMIN_API_KEY` or header `x-admin-api-key` |
 | Shared conversation REST API | `https://keen-aardvark-333.convex.site/api/shared-thread` (+ `/api/shared-threads`) | `Authorization: Bearer $MCP_TOOL_SERVER_SECRET` |
 | n8n source queue | `https://keen-aardvark-333.convex.site/api/n8n/source` | header `x-convex-n8n-secret: $CONVEX_N8N_WEBHOOK_SECRET` |
 | Code repo | `https://github.com/joopyjiop/deal-pipeline-pro` (branch `main`) | GitHub credentials |
@@ -131,6 +136,10 @@ Server-side validation (never bypass it, and never try to disable it):
 ## MCP server — review and analysis (no writes)
 
 `POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace` (paid Searchbug reverse-address contact lookup; saves sourced phones/emails onto the lead — enrichment, never an approval), `owner_lookup` (free RentCast owner name + mailing address + absentee flag — enrichment, never an approval), `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
+
+## Admin MCP server — full CRUD through MCP (owner's key)
+
+`POST /api/mcp/admin` speaks the same JSON-RPC 2.0 MCP protocol (`initialize`, `ping`, `tools/list`, `tools/call`) but authenticates with the **owner's `ADMIN_API_KEY`** and exposes the full admin CRUD surface as 20 tools — list/get/create/update/delete for `leads`, `buyers`, `matches`, and `hot_deals` (`admin_list_leads`, `admin_get_lead`, `admin_create_lead`, `admin_update_lead`, `admin_delete_lead`, and the same five for the other three resources). Each tool maps 1:1 to the `/api/admin` REST operations and enforces the identical server-side validation listed above (evidence rules, tombstone rules, hot-deal score/verification floor, match reference checks). Tool failures return `isError: true` with the same message the REST API would return. Use this server when you need to actually write pipeline data; keep `/api/mcp` for review/recommend work.
 
 ## Shared conversation — collaborate mid-task with the website
 

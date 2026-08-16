@@ -93,6 +93,7 @@ All HTTP routes live on the Convex site URL: `https://keen-aardvark-333.convex.s
 | --- | --- | --- | --- |
 | `/api/admin/...` | GET/POST/PATCH/PUT/DELETE | `Authorization: Bearer ADMIN_API_KEY` | Full CRUD over leads, buyers, matches, hot-deals, import-staging (below) |
 | `/api/mcp` | GET/POST/OPTIONS | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` or `x-mcp-api-key` header | MCP tool server for external AI agents (22 tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace`, `owner_lookup`, `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, …). Recommendations only — never approves |
+| `/api/mcp/admin` | GET/POST/OPTIONS | `Authorization: Bearer ADMIN_API_KEY` or `x-admin-api-key` header | MCP tool server exposing the full admin CRUD surface as 20 tools (`admin_list_leads` / `admin_get_lead` / `admin_create_lead` / `admin_update_lead` / `admin_delete_lead`, and the same five for buyers, matches, hot-deals). Same server-side validation as `/api/admin` |
 | `/api/shared-thread` | GET/POST | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` | Shared-conversation REST API for Odysseus (below): read a thread, post as `odysseus` |
 | `/api/shared-threads` | GET | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` | List shared-conversation thread summaries; `?unanswered=1` returns only the open-message inbox (unanswered Odysseus requests) |
 | `/api/n8n/source` | POST | `x-convex-n8n-secret: CONVEX_N8N_WEBHOOK_SECRET` | Queue a public source URL for automated processing (n8n recurring runs) |
@@ -174,6 +175,32 @@ curl -X PATCH https://keen-aardvark-333.convex.site/api/admin/buyers/<id> \
 # List verified, approved leads
 curl "https://keen-aardvark-333.convex.site/api/admin/leads?status=APPROVED&verificationStatus=VERIFIED&limit=50" \
   -H "Authorization: Bearer $ADMIN_API_KEY"
+```
+
+---
+
+## Admin MCP server (`/api/mcp/admin`)
+
+The full admin CRUD surface as an MCP tool server, so an external agent (Odysseus, a worker script, an n8n flow) can create, read, update, and delete pipeline records through the MCP protocol without hand-building REST calls. Same protocol as `/api/mcp` (JSON-RPC 2.0 over Streamable HTTP: `initialize`, `ping`, `tools/list`, `tools/call`) and **the same secret as the admin REST API** — `Authorization: Bearer <ADMIN_API_KEY>` (canonical) or the `x-admin-api-key` header (for MCP clients that cannot set `Authorization`). Body limit 512 KB (matches `/api/admin`).
+
+20 tools — the five below for each of `leads`, `buyers`, `matches`, and `hot-deals`:
+
+| Tool family | Maps to | Notes |
+| --- | --- | --- |
+| `admin_list_<plural>` | `GET /api/admin/<plural>` | Optional filters per resource: `status`, `verificationStatus`, `minDistressScore`/`maxDistressScore`, `confidence`, `minMatchScore`, `limit` (1–500, default 200) |
+| `admin_get_<singular>` | `GET /api/admin/<plural>/{id}` | `id` = MongoDB ObjectId string |
+| `admin_create_<singular>` | `POST /api/admin/<plural>` | `data` object; validation identical to the REST API |
+| `admin_update_<singular>` | `PATCH /api/admin/<plural>/{id}` | `id` + partial `data` patch (merged with existing) |
+| `admin_delete_<singular>` | `DELETE /api/admin/<plural>/{id}` | Irreversible hard delete |
+
+Concretely: `admin_list_leads`, `admin_get_lead`, `admin_create_lead`, `admin_update_lead`, `admin_delete_lead`, and the same five for `buyers`, `matches`, `hot_deals`. Every rule in `src/convex/admin.ts` applies unchanged — `sourceType: "SEED"` / `fabricated: true` tombstones are permanent, hot deals require `VERIFIED` with `distressScore >= 80`, matches require a verified + approved non-fabricated lead and an approved buyer, and all writes are validated server-side. Tool errors are returned as MCP tool results with `isError: true` and the same message the REST API would return.
+
+**Smoke test:**
+
+```bash
+curl -X POST https://keen-aardvark-333.convex.site/api/mcp/admin \
+  -H "Authorization: Bearer $ADMIN_API_KEY" -H "content-type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 ---
@@ -300,7 +327,8 @@ The stack has two deployable parts: the Convex backend (Convex Cloud, not Render
 1. `GET https://{your-site}.onrender.com` loads the landing page.
 2. `GET https://keen-aardvark-333.convex.site/api/admin/leads?limit=1` with `Authorization: Bearer $ADMIN_API_KEY` returns 200 (or 401 without the key).
 3. `POST /api/mcp` with `{ "jsonrpc": "2.0", "method": "tools/list", "id": 1 }` returns the tool manifest.
-4. Sign in with email OTP on the deployed site.
+4. `POST /api/mcp/admin` with the same JSON-RPC body and `Authorization: Bearer $ADMIN_API_KEY` returns the 20-tool admin manifest.
+5. Sign in with email OTP on the deployed site.
 
 ---
 

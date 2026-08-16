@@ -126,6 +126,21 @@ function adminAuthorized(request: Request) {
   return Boolean(receivedSecret && constantTimeEqual(receivedSecret, expectedSecret));
 }
 
+// /api/mcp/admin uses the same ADMIN_API_KEY as the REST admin API — sent as a
+// standard Bearer token (canonical, matches /api/admin) or as the
+// x-admin-api-key header (for MCP clients that cannot set Authorization).
+function adminMcpAuthorized(request: Request) {
+  const expectedSecret = process.env.ADMIN_API_KEY;
+  if (!expectedSecret) return false;
+  const authorization = request.headers.get("authorization") ?? "";
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  const apiKey = request.headers.get("x-admin-api-key")?.trim();
+  return Boolean(
+    (bearer && constantTimeEqual(bearer, expectedSecret)) ||
+    (apiKey && constantTimeEqual(apiKey, expectedSecret)),
+  );
+}
+
 function adminErrorStatus(message: string) {
   return message.includes("not found") || message.includes("Invalid MongoDB document id") ? 404 : 422;
 }
@@ -346,15 +361,20 @@ function mcpUnauthorized() {
   });
 }
 
-const mcpGet = httpAction(async (_, request) => {
-  if (!mcpAuthorized(request)) return mcpUnauthorized();
-  const accept = request.headers.get("accept") ?? "";
-  if (!accept.includes("text/event-stream")) {
-    return json({ error: "Streamable HTTP GET requires Accept: text/event-stream" }, 406, mcpHeaders);
-  }
+function mcpGetFor(authorize: (request: Request) => boolean) {
+  return httpAction(async (_, request) => {
+    if (!authorize(request)) return mcpUnauthorized();
+    const accept = request.headers.get("accept") ?? "";
+    if (!accept.includes("text/event-stream")) {
+      return json({ error: "Streamable HTTP GET requires Accept: text/event-stream" }, 406, mcpHeaders);
+    }
 
-  return mcpEventStream(": mcp stream ready\n\n");
-});
+    return mcpEventStream(": mcp stream ready\n\n");
+  });
+}
+
+const mcpGet = mcpGetFor(mcpAuthorized);
+const adminMcpGet = mcpGetFor(adminMcpAuthorized);
 
 function mcpJsonRpcResult(id: JsonRpcId, value: unknown) {
   return json({ jsonrpc: "2.0", id, result: value }, 200, mcpHeaders);
@@ -582,40 +602,281 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
   throw new Error(`Unknown MCP tool: ${name}`);
 }
 
-const mcpToolServer = httpAction(async (ctx, request) => {
-  if (!mcpAuthorized(request)) return mcpUnauthorized();
-  const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(contentLength) && contentLength > 32_768) return json({ error: "Request body is too large" }, 413, mcpHeaders);
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return mcpError(null, -32700, "Request body must be valid JSON");
+// ── Admin MCP tool server (full CRUD, authenticated with ADMIN_API_KEY) ──────
+// Exposes every operation of the /api/admin REST API as a distinct MCP tool for
+// leads, buyers, matches, and hot deals, so an external agent can control the
+// pipeline through the MCP protocol instead of hand-building REST calls. All
+// validation and owner rules live in src/convex/admin.ts and apply unchanged.
+
+type AdminResource = "leads" | "buyers" | "matches" | "hot-deals";
+type AdminOperation = "LIST" | "GET" | "CREATE" | "UPDATE" | "DELETE";
+
+const adminSourceTypes = ["SHERIFF_SALE", "TAX_SALE", "AUCTION_COM", "PROBATE", "OFF_MARKET", "ASSESSOR", "RECORDER", "PROPSTREAM", "BATCHLEADS", "DEALMACHINE", "FORECLOSURE", "MARKETPLACE", "ASSOCIATION", "MANUAL", "SEED"] as const;
+const adminLeadStatuses = ["SOURCED", "CRITIQUED", "VERIFIED", "APPROVED", "REJECTED"] as const;
+const adminVerificationStatuses = ["UNVERIFIED", "PARTIAL", "VERIFIED"] as const;
+const adminMatchStatuses = ["CANDIDATE", "APPROVED", "REJECTED", "CONTACTED", "CLOSED"] as const;
+
+const adminListFilters: Record<AdminResource, Record<string, unknown>> = {
+  leads: {
+    status: { type: "string", enum: [...adminLeadStatuses], description: "Filter by pipelineStatus" },
+    verificationStatus: { type: "string", enum: [...adminVerificationStatuses] },
+    minDistressScore: { type: "number", minimum: 0, maximum: 100 },
+    maxDistressScore: { type: "number", minimum: 0, maximum: 100 },
+    limit: { type: "number", minimum: 1, maximum: 500, description: "Default 200" },
+  },
+  buyers: {
+    status: { type: "string", enum: ["PENDING", "APPROVED", "REJECTED"], description: "Filter by intakeStatus" },
+    proofOfFundsStatus: { type: "string", enum: ["NONE", "SELF_REPORTED", "VERIFIED"] },
+    limit: { type: "number", minimum: 1, maximum: 500, description: "Default 200" },
+  },
+  matches: {
+    status: { type: "string", enum: [...adminMatchStatuses] },
+    confidence: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] },
+    minMatchScore: { type: "number", minimum: 0, maximum: 100 },
+    limit: { type: "number", minimum: 1, maximum: 500, description: "Default 200" },
+  },
+  "hot-deals": {
+    status: { type: "string", enum: [...adminVerificationStatuses], description: "Filter by verificationStatus" },
+    minDistressScore: { type: "number", minimum: 0, maximum: 100 },
+    limit: { type: "number", minimum: 1, maximum: 500, description: "Default 200" },
+  },
+};
+
+const adminLeadFields: Record<string, unknown> = {
+  propertyAddress: { type: "string", description: "Street address of the property" },
+  city: { type: "string" },
+  state: { type: "string" },
+  zip: { type: "string" },
+  county: { type: "string" },
+  sourceType: { type: "string", enum: [...adminSourceTypes], description: "SEED forces fabricated:true" },
+  sourceUrl: { type: "string", description: "Real public source URL (https)" },
+  sourceRef: { type: "string", description: "Parcel id / case number / sale id from the source" },
+  sourceDate: { type: "string", description: "Source record date (YYYY-MM-DD, not in the future)" },
+  distressScore: { type: "number", minimum: 0, maximum: 100 },
+  distressSignals: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        type: { type: "string" },
+        weight: { type: "number", minimum: 0 },
+        evidence: { type: "string" },
+        verified: { type: "boolean" },
+        sourceUrl: { type: "string" },
+        sourceDate: { type: "string" },
+      },
+      required: ["type", "weight", "evidence", "verified", "sourceUrl", "sourceDate"],
+    },
+    description: "Evidence-backed distress signals (never invented)",
+  },
+  verificationStatus: { type: "string", enum: [...adminVerificationStatuses] },
+  pipelineStatus: { type: "string", enum: [...adminLeadStatuses] },
+  fabricated: { type: "boolean", description: "true tombstones the row forever — never set on real data and never cleared" },
+};
+
+const adminBuyerFields: Record<string, unknown> = {
+  name: { type: "string" },
+  phone: { type: "string" },
+  email: { type: "string" },
+  listSource: { type: "string", description: "Where the buyer came from (e.g. PUBLIC_INTAKE, nationalreia.org, connectedinvestors.com)" },
+  budgetMin: { type: "number", minimum: 0 },
+  budgetMax: { type: "number", minimum: 0, description: "Must be >= budgetMin" },
+  targetAreas: { type: "array", items: { type: "string" }, description: "Cities / counties the buyer targets" },
+  exitType: { type: "string", enum: ["ASSIGN", "FLIP", "BUY_HOLD"] },
+  proofOfFundsStatus: { type: "string", enum: ["NONE", "SELF_REPORTED", "VERIFIED"] },
+  pofEvidenceRef: { type: "string", description: "Required when proofOfFundsStatus is VERIFIED" },
+  intakeStatus: { type: "string", enum: ["PENDING", "APPROVED", "REJECTED"] },
+  verificationStatus: { type: "string", enum: [...adminVerificationStatuses] },
+};
+
+const adminMatchFields: Record<string, unknown> = {
+  leadId: { type: "string", description: "_id of a verified, approved, non-fabricated lead" },
+  buyerId: { type: "string", description: "_id of an approved buyer" },
+  buyBoxSummary: { type: "string" },
+  matchScore: { type: "number", minimum: 0, maximum: 100 },
+  confidence: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"], description: "HIGH requires verified proof of funds" },
+  status: { type: "string", enum: [...adminMatchStatuses] },
+};
+
+const adminHotDealFields: Record<string, unknown> = {
+  propertyAddress: { type: "string" },
+  city: { type: "string" },
+  state: { type: "string" },
+  zip: { type: "string" },
+  county: { type: "string" },
+  sourceType: { type: "string", enum: [...adminSourceTypes], description: "SEED forces fabricated:true" },
+  sourceUrl: { type: "string", description: "Real public source URL (https)" },
+  sourceRef: { type: "string", description: "Parcel id / case number / sale id from the source" },
+  sourceDate: { type: "string", description: "Source record date (YYYY-MM-DD, not in the future)" },
+  distressScore: { type: "number", minimum: 0, maximum: 100, description: "Non-fabricated hot deals require >= 80" },
+  verificationStatus: { type: "string", enum: [...adminVerificationStatuses], description: "Non-fabricated hot deals require VERIFIED" },
+  fabricated: { type: "boolean", description: "true tombstones the row forever — never set on real data and never cleared" },
+};
+
+function adminResourceTools(resource: AdminResource, spec: { singular: string; plural: string; noun: string; createDescription: string; createData: Record<string, unknown>; createRequired: string[] }) {
+  const idSchema = { type: "object", properties: { id: { type: "string", description: `MongoDB _id of the ${spec.noun}` } }, required: ["id"], additionalProperties: false };
+  const listSchema = { type: "object", properties: adminListFilters[resource], additionalProperties: false };
+  const createSchema = { type: "object", properties: { data: { type: "object", description: spec.createDescription, properties: spec.createData, required: spec.createRequired, additionalProperties: true } }, required: ["data"], additionalProperties: false };
+  const updateSchema = { type: "object", properties: { id: { type: "string", description: `MongoDB _id of the ${spec.noun}` }, data: { type: "object", description: "Partial patch — only the fields to change. Same validation rules as create.", properties: spec.createData, additionalProperties: true } }, required: ["id", "data"], additionalProperties: false };
+  return [
+    { name: `admin_list_${spec.plural}`, description: `List ${spec.plural} from the DealProof pipeline with optional filters (same as GET /api/admin/${spec.plural}). Returns { resource, count, data }.`, inputSchema: listSchema },
+    { name: `admin_get_${spec.singular}`, description: `Read one ${spec.noun} by id (same as GET /api/admin/${spec.plural}/{id}).`, inputSchema: idSchema },
+    { name: `admin_create_${spec.singular}`, description: `Create a ${spec.noun} (same as POST /api/admin/${spec.plural}). Server-side validation is identical to the REST API.`, inputSchema: createSchema },
+    { name: `admin_update_${spec.singular}`, description: `Update an existing ${spec.noun} by id with a partial patch (same as PATCH /api/admin/${spec.plural}/{id}).`, inputSchema: updateSchema },
+    { name: `admin_delete_${spec.singular}`, description: `Hard-delete a ${spec.noun} by id (same as DELETE /api/admin/${spec.plural}/{id}). Irreversible.`, inputSchema: idSchema },
+  ];
+}
+
+function adminMcpTools() {
+  return [
+    ...adminResourceTools("leads", {
+      singular: "lead",
+      plural: "leads",
+      noun: "lead",
+      createDescription: "Lead document. Required: propertyAddress, city, state, zip, county, sourceType, sourceUrl (real https public source), sourceRef (parcel id / case / sale id), sourceDate, distressScore 0-100, distressSignals[], verificationStatus, pipelineStatus. sourceType SEED or fabricated:true tombstones the row forever. Never invent addresses, PII, prices, or evidence.",
+      createData: adminLeadFields,
+      createRequired: ["propertyAddress", "city", "state", "zip", "county", "sourceType", "sourceUrl", "sourceRef", "sourceDate", "distressScore", "distressSignals", "verificationStatus", "pipelineStatus"],
+    }),
+    ...adminResourceTools("buyers", {
+      singular: "buyer",
+      plural: "buyers",
+      noun: "buyer-registry entry",
+      createDescription: "Buyer document. Required: name, phone, email, listSource, budgetMin, budgetMax (>= budgetMin), targetAreas[], exitType, proofOfFundsStatus, intakeStatus, verificationStatus; pofEvidenceRef required when proofOfFundsStatus is VERIFIED.",
+      createData: adminBuyerFields,
+      createRequired: ["name", "phone", "email", "listSource", "budgetMin", "budgetMax", "targetAreas", "exitType", "proofOfFundsStatus", "intakeStatus", "verificationStatus"],
+    }),
+    ...adminResourceTools("matches", {
+      singular: "match",
+      plural: "matches",
+      noun: "lead-to-buyer match",
+      createDescription: "Match document. Required: leadId (_id of a verified + approved + non-fabricated lead), buyerId (_id of an approved buyer), buyBoxSummary, matchScore 0-100, confidence, status. HIGH confidence requires verified proof of funds.",
+      createData: adminMatchFields,
+      createRequired: ["leadId", "buyerId", "buyBoxSummary", "matchScore", "confidence", "status"],
+    }),
+    ...adminResourceTools("hot-deals", {
+      singular: "hot_deal",
+      plural: "hot_deals",
+      noun: "hot deal",
+      createDescription: "Hot-deal document. Required: propertyAddress, city, state, zip, county, sourceType, sourceUrl, sourceRef, sourceDate, distressScore, verificationStatus. Non-fabricated hot deals require verificationStatus VERIFIED and distressScore >= 80.",
+      createData: adminHotDealFields,
+      createRequired: ["propertyAddress", "city", "state", "zip", "county", "sourceType", "sourceUrl", "sourceRef", "sourceDate", "distressScore", "verificationStatus"],
+    }),
+  ];
+}
+
+const adminToolMap: Record<string, { resource: AdminResource; operation: AdminOperation }> = {
+  admin_list_leads: { resource: "leads", operation: "LIST" },
+  admin_get_lead: { resource: "leads", operation: "GET" },
+  admin_create_lead: { resource: "leads", operation: "CREATE" },
+  admin_update_lead: { resource: "leads", operation: "UPDATE" },
+  admin_delete_lead: { resource: "leads", operation: "DELETE" },
+  admin_list_buyers: { resource: "buyers", operation: "LIST" },
+  admin_get_buyer: { resource: "buyers", operation: "GET" },
+  admin_create_buyer: { resource: "buyers", operation: "CREATE" },
+  admin_update_buyer: { resource: "buyers", operation: "UPDATE" },
+  admin_delete_buyer: { resource: "buyers", operation: "DELETE" },
+  admin_list_matches: { resource: "matches", operation: "LIST" },
+  admin_get_match: { resource: "matches", operation: "GET" },
+  admin_create_match: { resource: "matches", operation: "CREATE" },
+  admin_update_match: { resource: "matches", operation: "UPDATE" },
+  admin_delete_match: { resource: "matches", operation: "DELETE" },
+  admin_list_hot_deals: { resource: "hot-deals", operation: "LIST" },
+  admin_get_hot_deal: { resource: "hot-deals", operation: "GET" },
+  admin_create_hot_deal: { resource: "hot-deals", operation: "CREATE" },
+  admin_update_hot_deal: { resource: "hot-deals", operation: "UPDATE" },
+  admin_delete_hot_deal: { resource: "hot-deals", operation: "DELETE" },
+};
+
+async function callAdminMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) {
+  const spec = adminToolMap[name];
+  if (!spec) throw new Error(`Unknown admin MCP tool: ${name}`);
+  if (!isRecord(rawArguments)) throw new Error("Tool arguments must be an object");
+  const needsId = spec.operation === "GET" || spec.operation === "UPDATE" || spec.operation === "DELETE";
+  const needsData = spec.operation === "CREATE" || spec.operation === "UPDATE";
+  let id: string | undefined;
+  if (needsId) {
+    if (typeof rawArguments.id !== "string" || !rawArguments.id.trim()) throw new Error(`${name} requires an id`);
+    id = rawArguments.id;
   }
-  if (!isRecord(body) || body.jsonrpc !== "2.0" || typeof body.method !== "string") return mcpError(null, -32600, "Expected a JSON-RPC 2.0 request");
-  const requestId: JsonRpcId = typeof body.id === "string" || typeof body.id === "number" || body.id === null ? body.id : null;
-  const isNotification = body.id === undefined;
-  const method = body.method;
-  if (isNotification) return empty(202, mcpHeaders);
-  if (method === "initialize") return mcpJsonRpcResult(requestId, { protocolVersion: "2025-06-18", capabilities: { tools: { listChanged: false } }, serverInfo: { name: "groundwork-deal-tools", version: "1.0.0" }, instructions: "Use sourced evidence only. The owner must review and approve every deal; this server never approves leads." });
-  if (method === "ping") return mcpJsonRpcResult(requestId, {});
-  if (method === "tools/list") return mcpJsonRpcResult(requestId, { tools: mcpTools() });
-  if (method === "tools/call") {
-    if (!isRecord(body.params)) return mcpError(requestId, -32602, "tools/call requires params");
-    const params = body.params as McpToolCallParams;
-    if (typeof params.name !== "string") return mcpError(requestId, -32602, "tools/call requires a tool name");
+  let payload: unknown = {};
+  if (needsData) {
+    if (!isRecord(rawArguments.data)) throw new Error(`${name} requires a data object`);
+    payload = rawArguments.data;
+  }
+  const filters = spec.operation === "LIST" ? rawArguments : {};
+  return ctx.runAction(internal.admin.adminCrud, { resource: spec.resource, operation: spec.operation, id, payload, filters });
+}
+
+// Shared MCP server plumbing. Both /api/mcp (review-only, MCP secret) and
+// /api/mcp/admin (full CRUD, ADMIN_API_KEY) are the same JSON-RPC/Streamable
+// HTTP protocol; only auth, the tool manifest, and the dispatch table differ.
+function createMcpToolServer(options: {
+  authorize: (request: Request) => boolean;
+  serverInfo: { name: string; version: string };
+  instructions: string;
+  tools: () => Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>;
+  callTool: (ctx: ActionCtx, name: string, rawArguments: unknown) => Promise<unknown>;
+  assertAccess?: (ctx: ActionCtx) => Promise<void>;
+  maxBodyBytes?: number;
+}) {
+  const maxBodyBytes = options.maxBodyBytes ?? 32_768;
+  return httpAction(async (ctx, request) => {
+    if (!options.authorize(request)) return mcpUnauthorized();
+    const contentLength = Number(request.headers.get("content-length") ?? "0");
+    if (Number.isFinite(contentLength) && contentLength > maxBodyBytes) return json({ error: "Request body is too large" }, 413, mcpHeaders);
+    let body: unknown;
     try {
-      await ctx.runAction(internal.mongodb.mcpAssertAiAccess, {});
-      const value = await callMcpTool(ctx, params.name, params.arguments ?? {});
-      return mcpToolResult(requestId, value);
-    } catch (error) {
-      return mcpToolResult(requestId, { isError: true, error: error instanceof Error ? error.message : "Tool call failed" });
+      body = await request.json();
+    } catch {
+      return mcpError(null, -32700, "Request body must be valid JSON");
     }
-  }
-  return mcpError(requestId, -32601, `Method not found: ${method}`);
+    if (!isRecord(body) || body.jsonrpc !== "2.0" || typeof body.method !== "string") return mcpError(null, -32600, "Expected a JSON-RPC 2.0 request");
+    const requestId: JsonRpcId = typeof body.id === "string" || typeof body.id === "number" || body.id === null ? body.id : null;
+    const isNotification = body.id === undefined;
+    const method = body.method;
+    if (isNotification) return empty(202, mcpHeaders);
+    if (method === "initialize") return mcpJsonRpcResult(requestId, { protocolVersion: "2025-06-18", capabilities: { tools: { listChanged: false } }, serverInfo: options.serverInfo, instructions: options.instructions });
+    if (method === "ping") return mcpJsonRpcResult(requestId, {});
+    if (method === "tools/list") return mcpJsonRpcResult(requestId, { tools: options.tools() });
+    if (method === "tools/call") {
+      if (!isRecord(body.params)) return mcpError(requestId, -32602, "tools/call requires params");
+      const params = body.params as McpToolCallParams;
+      if (typeof params.name !== "string") return mcpError(requestId, -32602, "tools/call requires a tool name");
+      try {
+        if (options.assertAccess) await options.assertAccess(ctx);
+        const value = await options.callTool(ctx, params.name, params.arguments ?? {});
+        return mcpToolResult(requestId, value);
+      } catch (error) {
+        return mcpToolResult(requestId, { isError: true, error: error instanceof Error ? error.message : "Tool call failed" });
+      }
+    }
+    return mcpError(requestId, -32601, `Method not found: ${method}`);
+  });
+}
+
+const mcpToolServer = createMcpToolServer({
+  authorize: mcpAuthorized,
+  serverInfo: { name: "dealproof-deal-tools", version: "1.0.0" },
+  instructions: "Use sourced evidence only. The owner must review and approve every deal; this server never approves leads.",
+  tools: mcpTools,
+  callTool: callMcpTool,
+  assertAccess: async (ctx) => {
+    await ctx.runAction(internal.mongodb.mcpAssertAiAccess, {});
+  },
 });
 
-const mcpOptions = httpAction(async () => empty(204, { ...mcpHeaders, "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "authorization, content-type, x-mcp-api-key, mcp-session-id" }));
+const adminMcpToolServer = createMcpToolServer({
+  authorize: adminMcpAuthorized,
+  serverInfo: { name: "dealproof-admin-tools", version: "1.0.0" },
+  instructions: "Full CRUD over the DealProof pipeline (leads, buyers, matches, hot deals) using the same ADMIN_API_KEY as /api/admin. Server-side rules match the REST API exactly: SEED sourceType forces fabricated:true, fabricated rows are tombstoned forever, live leads require real sourceUrl/sourceRef/sourceDate evidence, hot deals require verificationStatus VERIFIED with distressScore >= 80, and matches require a verified + approved non-fabricated lead and an approved buyer. Never invent PII, prices, comps, or verification status.",
+  tools: adminMcpTools,
+  callTool: callAdminMcpTool,
+  maxBodyBytes: 512_000,
+});
+
+const mcpOptionsFor = (extraHeaders: string[]) => httpAction(async () => empty(204, { ...mcpHeaders, "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": ["authorization", "content-type", "mcp-session-id", ...extraHeaders].join(", ") }));
+const mcpOptions = mcpOptionsFor(["x-mcp-api-key"]);
+const adminMcpOptions = mcpOptionsFor(["x-admin-api-key"]);
 
 auth.addHttpRoutes(http);
 
@@ -628,6 +889,10 @@ for (const method of ["GET", "POST", "PATCH", "PUT", "DELETE"] as const) {
 http.route({ path: "/api/mcp", method: "GET", handler: mcpGet });
 http.route({ path: "/api/mcp", method: "POST", handler: mcpToolServer });
 http.route({ path: "/api/mcp", method: "OPTIONS", handler: mcpOptions });
+
+http.route({ path: "/api/mcp/admin", method: "GET", handler: adminMcpGet });
+http.route({ path: "/api/mcp/admin", method: "POST", handler: adminMcpToolServer });
+http.route({ path: "/api/mcp/admin", method: "OPTIONS", handler: adminMcpOptions });
 
 http.route({ path: "/api/shared-thread", method: "GET", handler: sharedThreadApi });
 http.route({ path: "/api/shared-thread", method: "POST", handler: sharedThreadApi });

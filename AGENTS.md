@@ -45,6 +45,7 @@ Never run interactive `bun convex dev` (no `--once`) — it hangs in non-interac
 
 - `https://keen-aardvark-333.convex.site/api/admin/...` — full CRUD (leads, buyers, matches, hot-deals, import-staging; users read-only) — `Authorization: Bearer $ADMIN_API_KEY`
 - `POST /api/mcp` — MCP tool server (review/recommend only, never approves) — `$MCP_TOOL_SERVER_SECRET`
+- `POST /api/mcp/admin` — MCP tool server exposing the admin CRUD surface (20 tools: list/get/create/update/delete for leads, buyers, matches, hot-deals) — `Authorization: Bearer $ADMIN_API_KEY` (or `x-admin-api-key` header)
 - `GET /api/shared-thread?threadId=...` + `POST /api/shared-thread` + `GET /api/shared-threads` — shared-conversation REST API (Odysseus posts as `odysseus` server-side) — `$MCP_TOOL_SERVER_SECRET`
 - `POST /api/n8n/source` — automation queue — header `x-convex-n8n-secret: $CONVEX_N8N_WEBHOOK_SECRET`
 - Convex deployment: `keen-aardvark-333` (client URL `.convex.cloud`, HTTP routes `.convex.site`)

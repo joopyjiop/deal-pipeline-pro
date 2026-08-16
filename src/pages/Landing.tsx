@@ -15,7 +15,7 @@ import {
   Users,
 } from "lucide-react";
 import { Link } from "react-router";
-import logo from "@/assets/logo.svg";
+import { Logo } from "@/components/Logo";
 
 const trustChips = [
   { icon: BadgeCheck, label: "0 fabricated records" },
@@ -67,7 +67,7 @@ const steps = [
     step: "01",
     title: "Capture a real source",
     description:
-      "Start with a public auction, county, assessor, or recorder page. DealProof keeps the URL, reference, and date attached from the start.",
+      "Start with a public auction, county, assessor, or recorder page. DealForge keeps the URL, reference, and date attached from the start.",
   },
   {
     icon: BadgeCheck,
@@ -90,7 +90,7 @@ const features = [
     icon: FileText,
     title: "The evidence chain is the product",
     description:
-      "A lead isn't a lead without its source. DealProof carries the URL, reference, and date on every record so you always know what you're acting on.",
+      "A lead isn't a lead without its source. DealForge carries the URL, reference, and date on every record so you always know what you're acting on.",
   },
   {
     icon: LockKeyhole,
@@ -117,12 +117,7 @@ export default function Landing() {
     <main className="min-h-screen overflow-hidden px-5 py-5 text-foreground sm:px-8 lg:px-10">
       <div className="mx-auto max-w-7xl">
         <nav className="flex items-center justify-between py-3" aria-label="Main navigation">
-          <Link to="/" className="flex items-center gap-3" aria-label="DealProof home">
-            <span className="flex size-10 items-center justify-center rounded-xl border border-navy-900/10 bg-white shadow-[0_1px_2px_rgb(23_32_63_/_0.06),0_8px_24px_rgb(23_32_63_/_0.08)]">
-              <img src={logo} alt="" className="size-6 rounded-lg" />
-            </span>
-            <span className="text-base font-bold tracking-tight text-slate-900">DealProof</span>
-          </Link>
+          <Link to="/" className="flex items-center gap-3" aria-label="DealForge home"><Logo size="md" /></Link>
           <div className="hidden items-center gap-7 text-sm font-medium text-slate-600 md:flex">
             <a href="#why" className="transition-colors hover:text-emerald-700">Why it matters</a>
             <a href="#how" className="transition-colors hover:text-emerald-700">How it works</a>
@@ -145,7 +140,7 @@ export default function Landing() {
               className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-900/15 bg-emerald-50/80 px-3.5 py-2 text-xs font-semibold text-emerald-800"
             >
               <Sparkles className="size-3.5 text-emerald-600" />
-              Source-verified wholesale pipeline
+              Wholesale deals, forged fast
             </motion.div>
             <motion.h1
               initial={{ opacity: 0, y: 18 }}
@@ -161,7 +156,7 @@ export default function Landing() {
               transition={{ delay: 0.16, duration: 0.6 }}
               className="mt-7 max-w-xl text-lg leading-8 text-slate-600 sm:text-xl"
             >
-              DealProof turns public records into verified leads with a real evidence trail — so every call, offer, and match starts from something you can stand behind.
+              DealForge turns public records into verified leads with a real evidence trail — so every call, offer, and match starts from something you can stand behind.
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 18 }}
@@ -317,7 +312,7 @@ export default function Landing() {
                 Most lead lists are fiction with a logo.
               </h2>
               <p className="mt-4 text-base leading-7 text-slate-600">
-                Invented names, fake phone numbers, and distress scores nobody can trace. That waste is expensive — and dialing made-up numbers is a real compliance risk. DealProof replaces the guesswork with a paper trail.
+                Invented names, fake phone numbers, and distress scores nobody can trace. That waste is expensive — and dialing made-up numbers is a real compliance risk. DealForge replaces the guesswork with a paper trail.
               </p>
               <Link
                 to="/auth"
@@ -389,7 +384,7 @@ export default function Landing() {
           <div className="max-w-2xl">
             <p className="eyebrow">What you get</p>
             <h2 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-              Built for one wholesaler who wants it honest.
+              Built for wholesalers who demand proof.
             </h2>
           </div>
           <div className="mt-10 grid gap-4 md:grid-cols-3">
@@ -421,7 +416,7 @@ export default function Landing() {
             <div className="pointer-events-none absolute -bottom-24 -left-24 size-72 rounded-full bg-emerald-500/10 blur-3xl" />
             <div className="relative flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-emerald-300">Built for one wholesaler</p>
+                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-indigo-300">Built for wholesalers who demand proof</p>
                 <h2 className="mt-3 max-w-2xl text-3xl font-bold tracking-tight sm:text-4xl">
                   Start with the records you can stand behind.
                 </h2>

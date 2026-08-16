@@ -14,6 +14,7 @@ import "./types/global.d.ts";
 import { CONVEX_URL } from "./lib/convex-url";
 
 import Landing from "./pages/Landing";
+import { AppShell } from "@/components/AppShell";
 import AuthPage from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import BuyerIntake from "./pages/BuyerIntake";

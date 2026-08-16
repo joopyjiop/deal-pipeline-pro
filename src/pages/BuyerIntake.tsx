@@ -56,9 +56,9 @@ export default function BuyerIntake() {
     <main className="min-h-screen px-5 py-5 text-foreground sm:px-8 lg:px-10">
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between py-3">
-          <Link to="/" className="flex items-center gap-3" aria-label="DealProof home">
+          <Link to="/" className="flex items-center gap-3" aria-label="DealForge home">
             <span className="flex size-10 items-center justify-center rounded-2xl border border-white/90 bg-white/70 text-emerald-700 shadow-sm backdrop-blur-xl"><Landmark className="size-5" /></span>
-            <span className="text-base font-bold tracking-tight text-slate-800">DealProof</span>
+            <span className="text-base font-bold tracking-tight text-slate-800">DealForge</span>
           </Link>
           <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 transition-colors hover:text-emerald-700"><ArrowLeft className="size-4" /> Back home</Link>
         </header>
@@ -81,7 +81,7 @@ export default function BuyerIntake() {
                 <p className="eyebrow mt-6">Pending review</p>
                 <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Your buyer profile is queued.</h2>
                 <p className="mt-3 max-w-md text-sm leading-6 text-slate-500">The owner will review your details before approving your profile for any future matching.</p>
-                <Link to="/" className="mt-7 inline-flex rounded-full bg-navy-900 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-navy-800">Return to DealProof</Link>
+                <Link to="/" className="mt-7 inline-flex rounded-full bg-navy-900 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-navy-800">Return to DealForge</Link>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="grid gap-5">

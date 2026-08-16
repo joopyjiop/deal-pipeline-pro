@@ -719,7 +719,7 @@ function adminResourceTools(resource: AdminResource, spec: { singular: string; p
   const createSchema = { type: "object", properties: { data: { type: "object", description: spec.createDescription, properties: spec.createData, required: spec.createRequired, additionalProperties: true } }, required: ["data"], additionalProperties: false };
   const updateSchema = { type: "object", properties: { id: { type: "string", description: `MongoDB _id of the ${spec.noun}` }, data: { type: "object", description: "Partial patch — only the fields to change. Same validation rules as create.", properties: spec.createData, additionalProperties: true } }, required: ["id", "data"], additionalProperties: false };
   return [
-    { name: `admin_list_${spec.plural}`, description: `List ${spec.plural} from the DealProof pipeline with optional filters (same as GET /api/admin/${spec.plural}). Returns { resource, count, data }.`, inputSchema: listSchema },
+    { name: `admin_list_${spec.plural}`, description: `List ${spec.plural} from the DealForge pipeline with optional filters (same as GET /api/admin/${spec.plural}). Returns { resource, count, data }.`, inputSchema: listSchema },
     { name: `admin_get_${spec.singular}`, description: `Read one ${spec.noun} by id (same as GET /api/admin/${spec.plural}/{id}).`, inputSchema: idSchema },
     { name: `admin_create_${spec.singular}`, description: `Create a ${spec.noun} (same as POST /api/admin/${spec.plural}). Server-side validation is identical to the REST API.`, inputSchema: createSchema },
     { name: `admin_update_${spec.singular}`, description: `Update an existing ${spec.noun} by id with a partial patch (same as PATCH /api/admin/${spec.plural}/{id}).`, inputSchema: updateSchema },
@@ -856,7 +856,7 @@ function createMcpToolServer(options: {
 
 const mcpToolServer = createMcpToolServer({
   authorize: mcpAuthorized,
-  serverInfo: { name: "dealproof-deal-tools", version: "1.0.0" },
+  serverInfo: { name: "dealforge-deal-tools", version: "1.0.0" },
   instructions: "Use sourced evidence only. The owner must review and approve every deal; this server never approves leads.",
   tools: mcpTools,
   callTool: callMcpTool,
@@ -867,8 +867,8 @@ const mcpToolServer = createMcpToolServer({
 
 const adminMcpToolServer = createMcpToolServer({
   authorize: adminMcpAuthorized,
-  serverInfo: { name: "dealproof-admin-tools", version: "1.0.0" },
-  instructions: "Full CRUD over the DealProof pipeline (leads, buyers, matches, hot deals) using the same ADMIN_API_KEY as /api/admin. Server-side rules match the REST API exactly: SEED sourceType forces fabricated:true, fabricated rows are tombstoned forever, live leads require real sourceUrl/sourceRef/sourceDate evidence, hot deals require verificationStatus VERIFIED with distressScore >= 80, and matches require a verified + approved non-fabricated lead and an approved buyer. Never invent PII, prices, comps, or verification status.",
+  serverInfo: { name: "dealforge-admin-tools", version: "1.0.0" },
+  instructions: "Full CRUD over the DealForge pipeline (leads, buyers, matches, hot deals) using the same ADMIN_API_KEY as /api/admin. Server-side rules match the REST API exactly: SEED sourceType forces fabricated:true, fabricated rows are tombstoned forever, live leads require real sourceUrl/sourceRef/sourceDate evidence, hot deals require verificationStatus VERIFIED with distressScore >= 80, and matches require a verified + approved non-fabricated lead and an approved buyer. Never invent PII, prices, comps, or verification status.",
   tools: adminMcpTools,
   callTool: callAdminMcpTool,
   maxBodyBytes: 512_000,

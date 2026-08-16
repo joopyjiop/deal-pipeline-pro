@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/input-otp";
 
 import { useAuth } from "@/hooks/use-auth";
-import logo from "@/assets/logo.svg";
+import { Logo, LogoMark } from "@/components/Logo";
 import { ArrowRight, Loader2, Mail, UserX } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -141,7 +141,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   </div>
                 <CardTitle className="text-xl tracking-tight text-slate-900">Enter the deal room</CardTitle>
                 <CardDescription className="leading-6 text-slate-500">
-                  Sign in to DealProof—your source-first verified lead workspace.
+                  Sign in to DealForge—your verified wholesale deal workspace.
                 </CardDescription>
               </CardHeader>
               <form onSubmit={handleEmailSubmit}>

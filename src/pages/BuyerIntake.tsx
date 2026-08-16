@@ -56,9 +56,9 @@ export default function BuyerIntake() {
     <main className="min-h-screen px-5 py-5 text-foreground sm:px-8 lg:px-10">
       <div className="mx-auto max-w-6xl">
         <header className="flex items-center justify-between py-3">
-          <Link to="/" className="flex items-center gap-3" aria-label="Deal Pipeline Pro home">
+          <Link to="/" className="flex items-center gap-3" aria-label="DealProof home">
             <span className="flex size-10 items-center justify-center rounded-2xl border border-white/90 bg-white/70 text-emerald-700 shadow-sm backdrop-blur-xl"><Landmark className="size-5" /></span>
-            <span className="text-base font-bold tracking-tight text-slate-800">Deal Pipeline Pro</span>
+            <span className="text-base font-bold tracking-tight text-slate-800">DealProof</span>
           </Link>
           <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 transition-colors hover:text-emerald-700"><ArrowLeft className="size-4" /> Back home</Link>
         </header>
@@ -81,14 +81,14 @@ export default function BuyerIntake() {
                 <p className="eyebrow mt-6">Pending review</p>
                 <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Your buyer profile is queued.</h2>
                 <p className="mt-3 max-w-md text-sm leading-6 text-slate-500">The owner will review your details before approving your profile for any future matching.</p>
-                <Link to="/" className="mt-7 inline-flex rounded-full bg-emerald-700 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-emerald-800">Return to Deal Pipeline Pro</Link>
+                <Link to="/" className="mt-7 inline-flex rounded-full bg-navy-900 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-navy-800">Return to DealProof</Link>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="grid gap-5">
                 <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Contact</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><Input required value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Full name" className="rounded-xl border-white/85 bg-white/65" /><Input required type="email" value={form.email} onChange={(event) => update("email", event.target.value)} placeholder="Email address" className="rounded-xl border-white/85 bg-white/65" /><Input required type="tel" value={form.phone} onChange={(event) => update("phone", event.target.value)} placeholder="Phone number" className="rounded-xl border-white/85 bg-white/65 sm:col-span-2" /></div></div>
                 <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Your buy box</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><Input required type="number" min="0" value={form.budgetMin} onChange={(event) => update("budgetMin", event.target.value)} placeholder="Minimum purchase budget" className="rounded-xl border-white/85 bg-white/65" /><Input required type="number" min="0" value={form.budgetMax} onChange={(event) => update("budgetMax", event.target.value)} placeholder="Maximum purchase budget" className="rounded-xl border-white/85 bg-white/65" /><Input required value={form.targetAreas} onChange={(event) => update("targetAreas", event.target.value)} placeholder="Target areas, separated by commas" className="rounded-xl border-white/85 bg-white/65 sm:col-span-2" /><label className="grid gap-1.5 text-xs font-semibold text-slate-600 sm:col-span-2"><span>Exit strategy</span><select value={form.exitType} onChange={(event) => update("exitType", event.target.value)} className="h-10 rounded-xl border border-white/85 bg-white/70 px-3 text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500/30"><option value="ASSIGN">Assign the contract</option><option value="FLIP">Fix and flip</option><option value="BUY_HOLD">Buy and hold</option></select></label></div></div>
                 <div className="rounded-2xl border border-emerald-100/80 bg-emerald-50/55 p-4 text-xs leading-5 text-slate-600">By submitting, you’re asking to be considered as a buyer. Your profile will remain <strong className="text-slate-800">pending + unverified</strong> until the owner reviews it.</div>
-                <Button type="submit" disabled={isSubmitting} className="h-11 rounded-xl bg-emerald-700 text-sm font-semibold hover:bg-emerald-800">{isSubmitting ? <><Loader2 className="size-4 animate-spin" /> Submitting</> : "Submit buyer profile"}</Button>
+                <Button type="submit" disabled={isSubmitting} className="h-11 rounded-xl bg-navy-900 text-sm font-semibold hover:bg-navy-800">{isSubmitting ? <><Loader2 className="size-4 animate-spin" /> Submitting</> : "Submit buyer profile"}</Button>
               </form>
             )}
           </div>

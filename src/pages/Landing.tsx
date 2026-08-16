@@ -89,11 +89,11 @@ export default function Landing() {
     <main className="min-h-screen overflow-hidden px-5 py-5 text-foreground sm:px-8 lg:px-10">
       <div className="mx-auto max-w-7xl">
         <nav className="flex items-center justify-between py-3" aria-label="Main navigation">
-          <Link to="/" className="flex items-center gap-3" aria-label="Deal Pipeline Pro home">
+          <Link to="/" className="flex items-center gap-3" aria-label="DealProof home">
             <span className="flex size-10 items-center justify-center rounded-xl border border-emerald-900/10 bg-white shadow-[0_1px_2px_rgb(16_60_40_/_0.06),0_8px_24px_rgb(16_60_40_/_0.08)]">
               <img src={logo} alt="" className="size-6 rounded-lg" />
             </span>
-            <span className="text-base font-bold tracking-tight text-slate-900">Deal Pipeline Pro</span>
+            <span className="text-base font-bold tracking-tight text-slate-900">DealProof</span>
           </Link>
           <div className="hidden items-center gap-7 text-sm font-medium text-slate-600 md:flex">
             <a href="#principles" className="transition-colors hover:text-emerald-700">Why it works</a>
@@ -103,7 +103,7 @@ export default function Landing() {
           </div>
           <div className="flex items-center gap-2 md:hidden">
             <Link to="/buyers" className="rounded-lg border border-emerald-900/10 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">I'm a buyer</Link>
-            <Link to="/auth" className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_22px_rgb(6_95_70_/_0.24)] transition-all hover:-translate-y-0.5 hover:bg-emerald-800">Open workspace</Link>
+            <Link to="/auth" className="rounded-lg bg-navy-900 px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_22px_rgb(23_32_63_/_0.28)] transition-all hover:-translate-y-0.5 hover:bg-navy-800">Open workspace</Link>
           </div>
         </nav>
 
@@ -133,7 +133,7 @@ export default function Landing() {
               transition={{ delay: 0.16, duration: 0.6 }}
               className="mt-7 max-w-xl text-lg leading-8 text-slate-600 sm:text-xl"
             >
-              Deal Pipeline Pro is a source-first workspace for verified wholesale leads—built to replace invented details with records you can review, trust, and act on.
+              DealProof is a source-first workspace for verified wholesale leads—built to replace invented details with records you can review, trust, and act on.
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 18 }}
@@ -143,7 +143,7 @@ export default function Landing() {
             >
               <Link
                 to="/auth"
-                className="group inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-5 py-3.5 text-sm font-semibold text-white shadow-[0_12px_28px_rgb(6_95_70_/_0.24)] transition-all hover:-translate-y-0.5 hover:bg-emerald-800"
+                className="group inline-flex items-center justify-center gap-2 rounded-lg bg-navy-900 px-5 py-3.5 text-sm font-semibold text-white shadow-[0_12px_28px_rgb(23_32_63_/_0.28)] transition-all hover:-translate-y-0.5 hover:bg-navy-800"
               >
                 Open the owner workspace
                 <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
@@ -284,19 +284,19 @@ export default function Landing() {
               );
             })}
           </div>
-          <div className="glass-panel-strong flex flex-col gap-6 rounded-[1.75rem] bg-emerald-900 p-7 text-white sm:p-10 lg:flex-row lg:items-center lg:justify-between">
+          <div className="glass-panel-strong flex flex-col gap-6 rounded-[1.75rem] bg-navy-900 p-7 text-white sm:p-10 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-emerald-200">Built for one wholesaler</p>
+              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-emerald-300">Built for one wholesaler</p>
               <h2 className="mt-3 max-w-2xl text-3xl font-semibold tracking-tight">
                 Start with the records you can stand behind.
               </h2>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-emerald-100/90">
+              <p className="mt-3 max-w-xl text-sm leading-6 text-navy-100/80">
                 Connect your owner workspace, capture verified public-record leads, and keep the pipeline honest from day one.
               </p>
             </div>
             <Link
               to="/auth"
-              className="group inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-white px-5 py-3.5 text-sm font-semibold text-emerald-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-emerald-50"
+              className="group inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-white px-5 py-3.5 text-sm font-semibold text-navy-900 shadow-lg transition-all hover:-translate-y-0.5 hover:bg-emerald-50"
             >
               Get started
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />

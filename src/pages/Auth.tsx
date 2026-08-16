@@ -141,7 +141,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   </div>
                 <CardTitle className="text-xl tracking-tight text-slate-900">Enter the deal room</CardTitle>
                 <CardDescription className="leading-6 text-slate-500">
-                  Sign in to Deal Pipeline Pro—your source-first verified lead workspace.
+                  Sign in to DealProof—your source-first verified lead workspace.
                 </CardDescription>
               </CardHeader>
               <form onSubmit={handleEmailSubmit}>

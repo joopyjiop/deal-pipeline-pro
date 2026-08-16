@@ -27,7 +27,7 @@ export function median(values: number[]): number | undefined {
 
 // Repair estimate by tier ($/SF): BASE $15, MEDIUM $30, GUT $50. Pre-1960
 // properties carry a 10% age adjustment. Output shape mirrors the historic
-// Groundwork estimator so existing callers keep the same contract.
+// DealProof estimator so existing callers keep the same contract.
 export function repairEstimate(squareFeet: number, tier: RepairTier, yearBuilt?: number) {
   const tierRate = { BASE: 15, MEDIUM: 30, GUT: 50 }[tier];
   const ageAdjustment = yearBuilt !== undefined && yearBuilt < 1960 ? 1.1 : 1;

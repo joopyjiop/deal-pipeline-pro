@@ -148,6 +148,6 @@ export { Toaster } from "./sonner"; // ~8KB - Toast notifications
  *    - Use <button> instead of Button for basic buttons
  *    - Use these components when you need the styling/accessibility features
  */
-export { Logo, LogoMark } from "./Logo";
-export { AppSidebar } from "../AppSidebar";
-export { AppShell } from "../AppShell";
+export { Logo, LogoMark } from "../Logo";
+export { AppSidebar } from "../../components/AppSidebar";
+export { AppShell } from "../../components/AppShell";

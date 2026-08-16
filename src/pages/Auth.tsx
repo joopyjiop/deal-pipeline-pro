@@ -131,7 +131,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               <CardHeader className="text-center sm:px-8 sm:pt-8">
               <div className="flex justify-center">
                     <img
-                      src={logo}
+                      src={LogoMark}
                       alt="Lock Icon"
                       width={64}
                       height={64}

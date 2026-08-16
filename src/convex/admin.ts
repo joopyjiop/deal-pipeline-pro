@@ -91,7 +91,7 @@ function enumValue(value: Record<string, unknown>, key: string, allowed: readonl
   if (typeof value[key] !== "string" || !allowed.includes(value[key])) throw new Error(`${key} must be one of ${allowed.join(", ")}`);
 }
 
-const sourceTypes = ["SHERIFF_SALE", "TAX_SALE", "AUCTION_COM", "PROBATE", "OFF_MARKET", "ASSESSOR", "RECORDER", "PROPSTREAM", "BATCHLEADS", "DEALMACHINE", "MANUAL", "SEED"] as const;
+const sourceTypes = ["SHERIFF_SALE", "TAX_SALE", "AUCTION_COM", "PROBATE", "OFF_MARKET", "ASSESSOR", "RECORDER", "PROPSTREAM", "BATCHLEADS", "DEALMACHINE", "FORECLOSURE", "MARKETPLACE", "ASSOCIATION", "MANUAL", "SEED"] as const;
 const verificationStatuses = ["UNVERIFIED", "PARTIAL", "VERIFIED"] as const;
 const leadStatuses = ["SOURCED", "CRITIQUED", "VERIFIED", "APPROVED", "REJECTED"] as const;
 const matchStatuses = ["CANDIDATE", "APPROVED", "REJECTED", "CONTACTED", "CLOSED"] as const;

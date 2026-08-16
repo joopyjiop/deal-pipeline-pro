@@ -315,6 +315,9 @@ const sourceTypeValidator = v.union(
   v.literal("PROPSTREAM"),
   v.literal("BATCHLEADS"),
   v.literal("DEALMACHINE"),
+  v.literal("FORECLOSURE"),
+  v.literal("MARKETPLACE"),
+  v.literal("ASSOCIATION"),
   v.literal("MANUAL"),
   v.literal("SEED"),
 );
@@ -749,6 +752,30 @@ const OFF_MARKET_SOURCE_PRESETS = [
     name: "Bid4Assets county tax & government-seized property auctions",
     url: "https://www.bid4assets.com/",
     sourceType: "OFF_MARKET" as const,
+  },
+         {
+
+    name: "Fannie Mae HomePath REO listings",
+    url: "https://www.homepath.fanniemae.com/",
+    sourceType: "FORECLOSURE" as const,
+  },
+         {
+
+    name: "Foreclosure.com foreclosure listings",
+    url: "https://www.foreclosure.com/",
+    sourceType: "FORECLOSURE" as const,
+  },
+         {
+
+    name: "Connected Investors off-market marketplace",
+    url: "https://connectedinvestors.com/",
+    sourceType: "MARKETPLACE" as const,
+  },
+         {
+
+    name: "National REIA investor association",
+    url: "https://nationalreia.org/",
+    sourceType: "ASSOCIATION" as const,
   },
 ] as const;
 

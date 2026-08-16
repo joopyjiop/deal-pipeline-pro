@@ -23,6 +23,9 @@ export const sourceTypeValidator = v.union(
   v.literal("OFF_MARKET"),
   v.literal("ASSESSOR"),
   v.literal("RECORDER"),
+  v.literal("FORECLOSURE"),
+  v.literal("MARKETPLACE"),
+  v.literal("ASSOCIATION"),
   v.literal("MANUAL"),
   v.literal("SEED"),
 );

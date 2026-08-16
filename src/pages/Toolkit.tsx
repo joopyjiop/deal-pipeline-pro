@@ -158,11 +158,25 @@ type CrawlResult = {
   stagingFailed?: Array<{ url: string; error: string }>;
 };
 
+type SourceTypeValue =
+  | "SHERIFF_SALE"
+  | "TAX_SALE"
+  | "AUCTION_COM"
+  | "PROBATE"
+  | "OFF_MARKET"
+  | "ASSESSOR"
+  | "RECORDER"
+  | "FORECLOSURE"
+  | "MARKETPLACE"
+  | "ASSOCIATION"
+  | "MANUAL";
+
 type DefaultDealSource = {
   id: string;
   name: string;
   domain: string;
   description: string;
+  sourceType: SourceTypeValue;
   urls: string[];
 };
 
@@ -340,6 +354,9 @@ const sourceTypes = [
   ["OFF_MARKET", "Off-market evidence"],
   ["ASSESSOR", "Assessor"],
   ["RECORDER", "Recorder"],
+  ["FORECLOSURE", "Foreclosure / REO listing"],
+  ["MARKETPLACE", "Investor marketplace"],
+  ["ASSOCIATION", "Investor association"],
   ["MANUAL", "Manual source"],
 ] as const;
 
@@ -352,7 +369,40 @@ const defaultDealSources: DefaultDealSource[] = [
     name: "Auction.com",
     domain: "auction.com",
     description: "Public foreclosure and auction catalog",
+    sourceType: "AUCTION_COM",
     urls: ["https://www.auction.com/", "https://www.auction.com/residential/"],
+  },
+  {
+    id: "homepath",
+    name: "Fannie Mae HomePath",
+    domain: "homepath.fanniemae.com",
+    description: "Fannie Mae REO and foreclosure listings",
+    sourceType: "FORECLOSURE",
+    urls: ["https://www.homepath.fanniemae.com/"],
+  },
+  {
+    id: "foreclosure-com",
+    name: "Foreclosure.com",
+    domain: "foreclosure.com",
+    description: "Foreclosure and pre-foreclosure listings",
+    sourceType: "FORECLOSURE",
+    urls: ["https://www.foreclosure.com/"],
+  },
+  {
+    id: "connected-investors",
+    name: "Connected Investors",
+    domain: "connectedinvestors.com",
+    description: "Off-market distressed property marketplace",
+    sourceType: "MARKETPLACE",
+    urls: ["https://connectedinvestors.com/"],
+  },
+  {
+    id: "national-reia",
+    name: "National REIA",
+    domain: "nationalreia.org",
+    description: "Investor association and chapter network",
+    sourceType: "ASSOCIATION",
+    urls: ["https://nationalreia.org/"],
   },
 ];
 
@@ -668,7 +718,7 @@ export default function Toolkit() {
     );
   };
 
-  const executeCrawl = async (urls: string[], sourceLabel?: string) => {
+  const executeCrawl = async (urls: string[], sourceType: SourceTypeValue = "AUCTION_COM", sourceLabel?: string) => {
     const uniqueUrls = Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean)));
     if (uniqueUrls.length === 0) {
       toast.error("Select at least one default website or add a URL below.");
@@ -693,7 +743,7 @@ export default function Toolkit() {
         try {
           result = await crawlWithFirecrawl({
             urls: uniqueUrls,
-            sourceType: "AUCTION_COM",
+            sourceType,
             maxPages: Number(crawlMaxPages),
           }) as CrawlResult;
           provider = "firecrawl";
@@ -710,7 +760,7 @@ export default function Toolkit() {
           try {
             const captured = await stageCamofoxEvidence({
               url: page.finalUrl || page.url,
-              sourceType: "AUCTION_COM",
+              sourceType,
               title: page.finalUrl || page.url,
               excerpt: page.snapshot,
               links: page.discoveredLinks,
@@ -742,8 +792,9 @@ export default function Toolkit() {
 
   const findDealsFromDefaults = async () => {
     const selectedSources = defaultDealSources.filter((source) => selectedDefaultSourceIds.includes(source.id));
-    const urls = selectedSources.flatMap((source) => source.urls);
-    await executeCrawl(urls, selectedSources.map((source) => source.name).join(" + "));
+    for (const source of selectedSources) {
+      await executeCrawl(source.urls, source.sourceType, source.name);
+    }
   };
 
   const useAuctionCatalogPreset = () => {

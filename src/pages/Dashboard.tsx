@@ -42,6 +42,9 @@ const SOURCE_TYPES = [
   { value: "OFF_MARKET", label: "Off-market evidence" },
   { value: "ASSESSOR", label: "Assessor" },
   { value: "RECORDER", label: "Recorder" },
+  { value: "FORECLOSURE", label: "Foreclosure / REO listing" },
+  { value: "MARKETPLACE", label: "Investor marketplace" },
+  { value: "ASSOCIATION", label: "Investor association" },
   { value: "MANUAL", label: "Manual record" },
 ] as const;
 

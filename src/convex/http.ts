@@ -14,6 +14,9 @@ const n8nSourceTypes = [
   "OFF_MARKET",
   "ASSESSOR",
   "RECORDER",
+  "FORECLOSURE",
+  "MARKETPLACE",
+  "ASSOCIATION",
 ] as const;
 type N8nSourceType = (typeof n8nSourceTypes)[number];
 
@@ -28,6 +31,9 @@ const mcpSourceTypes = [
   "PROPSTREAM",
   "BATCHLEADS",
   "DEALMACHINE",
+  "FORECLOSURE",
+  "MARKETPLACE",
+  "ASSOCIATION",
 ] as const;
 type McpSourceType = (typeof mcpSourceTypes)[number];
 

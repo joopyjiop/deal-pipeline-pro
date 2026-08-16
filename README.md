@@ -59,7 +59,7 @@ Defined with `defineSchema`; `schemaValidation: false`. Every table has `_id` an
 
 **Auto-responder:** the website actively answers open Odysseus messages. Each Odysseus post (REST or MCP) schedules an immediate reply (~30s later, past the settle guard), with a 3-minute cron (`answer open shared threads`) as backstop — both run `src/convex/threadResponder.ts`: it finds threads whose latest message is an unanswered Odysseus `REQUEST`/`ESCALATION` or question, grounds a reply in real app data (the referenced lead/staged-source/buyer document, or the pipeline brief for `ops:` threads), and posts it as sender `website` with `metadata.auto: true` (shown as an "Auto" badge in the UI). Auto-replies never fabricate, never approve a deal, and defer owner-only decisions with the exact owner step named. It skips when the Toolkit "AI access" switch is off or `AI_BASE_URL` is unset; model is `OLLAMA_MODEL` (default `gpt-oss:20b`). See README → "Website auto-responder" below.
 
-`sourceType` enum: `SHERIFF_SALE` \| `TAX_SALE` \| `AUCTION_COM` \| `PROBATE` \| `OFF_MARKET` \| `ASSESSOR` \| `RECORDER` \| `MANUAL` \| `SEED`.
+`sourceType` enum: `SHERIFF_SALE` \| `TAX_SALE` \| `AUCTION_COM` \| `PROBATE` \| `OFF_MARKET` \| `ASSESSOR` \| `RECORDER` \| `FORECLOSURE` \| `MARKETPLACE` \| `ASSOCIATION` \| `MANUAL` \| `SEED`.
 
 Plus `authTables` from `@convex-dev/auth/server` (auth accounts/sessions/verification codes — do not edit).
 

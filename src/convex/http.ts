@@ -3,6 +3,7 @@ import { httpAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { auth } from "./auth";
 import { messageContent, normalizeThreadId, sanitizeRefs, shouldNotifyOwner } from "./sharedConversation";
+import { assertPublicOutboundUrl, clientIpFromRequest, constantTimeEqual, isIpAllowed } from "./networkGuard";
 
 const http = httpRouter();
 
@@ -62,15 +63,6 @@ function isMcpSourceType(value: unknown): value is McpSourceType {
   return typeof value === "string" && mcpSourceTypes.includes(value as McpSourceType);
 }
 
-function constantTimeEqual(left: string, right: string) {
-  const length = Math.max(left.length, right.length);
-  let difference = left.length ^ right.length;
-  for (let index = 0; index < length; index += 1) {
-    difference |= (left.charCodeAt(index % Math.max(left.length, 1)) || 0) ^ (right.charCodeAt(index % Math.max(right.length, 1)) || 0);
-  }
-  return difference === 0;
-}
-
 const queueN8nSource = httpAction(async (ctx, request) => {
   const expectedSecret = process.env.CONVEX_N8N_WEBHOOK_SECRET;
   const receivedSecret = request.headers.get("x-convex-n8n-secret");
@@ -118,9 +110,19 @@ const queueN8nSource = httpAction(async (ctx, request) => {
 const adminResourceNames = new Set(["leads", "buyers", "matches", "hot-deals", "import-staging", "users"]);
 const adminNumberFilters = new Set(["limit", "minDistressScore", "maxDistressScore", "minMatchScore"]);
 
+// Optional IP allow-list for the admin surface (ADMIN_ALLOWED_IPS, comma-
+// separated IPs or IPv4 CIDRs). Off by default; when set, a request whose
+// client IP is not on the list is denied even with a valid key.
+function adminIpAllowed(request: Request) {
+  const allowlist = process.env.ADMIN_ALLOWED_IPS;
+  if (!allowlist || !allowlist.trim()) return true;
+  return isIpAllowed(clientIpFromRequest(request), allowlist);
+}
+
 function adminAuthorized(request: Request) {
   const expectedSecret = process.env.ADMIN_API_KEY;
   if (!expectedSecret) return false;
+  if (!adminIpAllowed(request)) return false;
   const authorization = request.headers.get("authorization") ?? "";
   const receivedSecret = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   return Boolean(receivedSecret && constantTimeEqual(receivedSecret, expectedSecret));
@@ -132,6 +134,7 @@ function adminAuthorized(request: Request) {
 function adminMcpAuthorized(request: Request) {
   const expectedSecret = process.env.ADMIN_API_KEY;
   if (!expectedSecret) return false;
+  if (!adminIpAllowed(request)) return false;
   const authorization = request.headers.get("authorization") ?? "";
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   const apiKey = request.headers.get("x-admin-api-key")?.trim();
@@ -231,8 +234,18 @@ async function notifyOdysseusPost(payload: {
   const url = process.env.ODYSSEUS_NOTIFY_WEBHOOK_URL?.trim();
   if (!url) return;
   if (!shouldNotifyOwner(payload.kind, process.env.ODYSSEUS_NOTIFY_KINDS)) return;
+  let target: URL;
   try {
-    await fetch(url, {
+    target = assertPublicOutboundUrl(url);
+  } catch (error) {
+    // Owner-configured webhook pointed at a non-public/unsafe URL: refuse to
+    // fetch it (SSRF guard) and surface the reason in logs instead of leaking
+    // the request to an internal target.
+    console.warn(`[odysseus-notify] skipped webhook: ${error instanceof Error ? error.message : error}`);
+    return;
+  }
+  try {
+    await fetch(target.toString(), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

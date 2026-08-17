@@ -26,6 +26,8 @@ import        {
  embeddingPrompt, rankBySimilarity, type EmbeddableLead } from "./embeddings";
 import        {
  assertBuyerDealReady, assertLeadDealReady } from "./credentials";
+import        {
+ assertPublicOutboundUrl } from "./networkGuard";
 import type        {
  RentalUnderwritingInput } from "./underwriting";
 import        {
@@ -1502,28 +1504,10 @@ function calculateEstimatedProfit(value:        {
 
 function assertPublicHttpUrl(value: string)        {
 
-  let parsed: URL;
-  try        {
-
-    parsed = new URL(value);
-  } catch        {
-
-    throw new Error("Enter a valid public http(s) URL");
-  }
-  const hostname = parsed.hostname.toLowerCase();
-  const blocked =
-    parsed.protocol !== "http:" && parsed.protocol !== "https:" ||
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "0.0.0.0" ||
-    hostname === "::1" ||
-    hostname.endsWith(".local") ||
-    hostname.startsWith("10.") ||
-    hostname.startsWith("192.168.") ||
-    hostname.startsWith("169.254.") ||
-    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname);
-  if (blocked) throw new Error("Only public http(s) source URLs are allowed");
-  return parsed;
+  // Delegates to the shared, tested SSRF guard in networkGuard.ts (blocks
+  // loopback/private/link-local/metadata targets plus IP-literal tricks like
+  // decimal/hex/octal IPv4 and IPv6-mapped addresses).
+  return assertPublicOutboundUrl(value);
 }
 
 function assertAuctionComSourceUrl(parsed: URL, sourceType: string)        {

@@ -1,0 +1,44 @@
+# Security gates that run before any commit can merge.
+# - gitleaks scans the full git history for committed secrets (API keys,
+#   tokens, private keys) on every push and pull request.
+# - the integrity job installs with --frozen-lockfile so a dependency change
+#   without a checked-in lockfile change fails the build (prevents a
+#   compromised/renamed package from sneaking in), then runs typecheck + tests.
+name: security
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  secret-scan:
+    name: Scan for committed secrets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  integrity:
+    name: Lockfile integrity + typecheck + tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install from lockfile (fails if out of sync)
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun tsc -b --noEmit
+      - name: Unit tests
+        run: bun test tests

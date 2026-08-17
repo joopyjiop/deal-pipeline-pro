@@ -268,6 +268,7 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 | --- | --- | --- |
 | `MONGODB_URI` | ✅ | MongoDB connection string for the primary data store. A Convex-stored fallback (`mongoUri` setting) is used when the env var is absent/unreachable |
 | `ADMIN_API_KEY` | ✅ (if using admin API) | Bearer key for `/api/admin/*` |
+| `ADMIN_ALLOWED_IPS` | optional | Comma-separated client IPs or IPv4 CIDRs allowed to call `/api/admin*` and `/api/mcp/admin` (e.g. `203.0.113.0/24`). Off by default (allow all). Read from `x-forwarded-for` / `x-real-ip` / `cf-connecting-ip`, so put the authoritative allow-list at your proxy/edge for hard enforcement |
 | `MCP_TOOL_SERVER_SECRET` | ✅ (if using MCP or shared thread API) | Bearer / `x-mcp-api-key` for `/api/mcp` and `/api/shared-thread(s)` |
 | `CONVEX_N8N_WEBHOOK_SECRET` | n8n only | `x-convex-n8n-secret` for `/api/n8n/source` |
 | `JWKS` | auth | Auth JSON Web Key Set |
@@ -283,7 +284,7 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 | `SKIPTRACE_API_KEY` | Skip trace (optional, paid) | Searchbug API password (`PASS`) for the reverse-address people search. Phone numbers are licensed per-record and need a funded Searchbug prepaid balance |
 | `SKIPTRACE_ACCOUNT_ID` | Skip trace (optional, paid) | Searchbug account/company code (`CO_CODE`) for the reverse-address people search |
 | `AI_BASE_URL` | AI features | OpenAI-compatible AI gateway base for chat (consultant court + local agents) and embeddings. Default `https://localhost:20128/v1` (local OmniRoute). Chat no longer calls Ollama Cloud directly — `OLLAMA_API_KEY` is not used |
-| `ODYSSEUS_NOTIFY_WEBHOOK_URL` | optional | When set, the backend `POST`s an `odysseus_post` event to this URL whenever Odysseus posts a notifying kind (default: `ESCALATION` only; best-effort, 5s timeout). Point it at n8n/Slack/email |
+| `ODYSSEUS_NOTIFY_WEBHOOK_URL` | optional | When set, the backend `POST`s an `odysseus_post` event to this URL whenever Odysseus posts a notifying kind (default: `ESCALATION` only; best-effort, 5s timeout). Point it at n8n/Slack/email. The URL must be a **public** http(s) URL — localhost/private/LAN targets are rejected by the SSRF guard |
 | `ODYSSEUS_NOTIFY_KINDS` | optional | Comma-separated message kinds that trigger the notify webhook (default `ESCALATION`, e.g. `ESCALATION,REQUEST`). Set it so you are only pinged for the problems you care about |
 | `AI_API_KEY` | optional | Bearer key sent to the AI gateway (some local gateways expect one) |
 | `OLLAMA_MODEL` | optional | Chat model-name selector routed through the gateway (default `gpt-oss:20b`) |
@@ -295,6 +296,16 @@ Two contact-data paths, both stored with source evidence and never invented:
 
 - **Owner enrichment — free.** The "Pull owner" button (and the MCP tool `owner_lookup`) reads the current owner's **name, entity type, and mailing address** from RentCast's `/properties` record (sourced from public county records) using the existing `RENTCAST_API_KEY`. No per-record fee. It writes `ownerNames`, `ownerType`, `ownerMailingAddress`, `ownerLookup` (provider + source URL/date), and `absenteeOwner` (owner-occupied = false) onto the lead. Mailing address is the TCPA-safe outreach channel (direct mail).
 - **Skip trace — paid.** Phone numbers are licensed per-record and cannot be sourced free. The "Run skip trace" button / `skip_trace` MCP tool calls Searchbug (requires a funded prepaid balance via `SKIPTRACE_API_KEY` + `SKIPTRACE_ACCOUNT_ID`), and free manual lookups are available as TruePeopleSearch / PeopleFinders deep-links on the lead dossier. Owner approval still gates any dial/export.
+
+---
+
+## Security hardening
+
+- **Constant-time secret checks.** Every secret header (`ADMIN_API_KEY`, `MCP_TOOL_SERVER_SECRET`, `CONVEX_N8N_WEBHOOK_SECRET`) is compared with `constantTimeEqual` (in `src/convex/networkGuard.ts`), never `===`, so the comparison does not leak the match position through timing.
+- **SSRF guard.** Every server-side fetch of an attacker-influenceable URL (source scrape, sitemap discovery, Firecrawl/ScrapeGraphAI, n8n source queue) and the `ODYSSEUS_NOTIFY_WEBHOOK_URL` webhook run through `assertPublicOutboundUrl` — it rejects non-http(s) schemes, localhost/`.local`, loopback/private/link-local/cloud-metadata targets, and IP-literal tricks (decimal/hex/octal IPv4, IPv6-mapped). Residual risk: DNS rebinding (a hostname that resolves to a private IP after the check) — use an egress proxy if that threat model matters.
+- **Admin IP allow-list.** Optional `ADMIN_ALLOWED_IPS` (above) denies non-listed client IPs on `/api/admin*` and `/api/mcp/admin`. It reads proxy headers, which a direct client can spoof, so treat it as defense-in-depth; `ADMIN_API_KEY` remains the primary control and the authoritative IP gate belongs at the DNS/proxy/edge layer.
+- **Dependency pinning.** `bun.lock` and `package-lock.json` are checked in and not gitignored. CI installs with `bun install --frozen-lockfile`, so a dependency change without a matching lockfile change fails the build.
+- **CI secrets scan.** `.github/workflows/security.yml` runs gitleaks over the full git history plus lockfile-integrity, typecheck, and tests on every push and pull request. Run gitleaks locally before committing (`gitleaks detect --source .`).
 
 ---
 

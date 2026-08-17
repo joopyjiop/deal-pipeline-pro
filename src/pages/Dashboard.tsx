@@ -209,6 +209,17 @@ export default function Dashboard() {
   const enrichOwnerFromRentCast = useAction(api.mongodb.enrichOwnerFromRentCast);
   const [workspace, setWorkspace] = useState<MongoWorkspace>();
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Close the mobile navigation drawer on Escape.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileNavOpen]);
   const isOwner = Boolean(
     user &&
       (user.role === "admin" || user.email?.trim().toLowerCase() === "jacobvierra8@gmail.com"),
@@ -379,7 +390,7 @@ export default function Dashboard() {
         </aside>
 
         <section className="min-w-0 flex-1">
-          <header className="glass-panel flex items-center justify-between rounded-[1.75rem] px-4 py-3 sm:px-6"><div className="flex items-center gap-3"><button type="button" className="flex size-9 items-center justify-center rounded-xl border border-white/80 bg-white/60 text-slate-600 lg:hidden" aria-label="Open navigation"><Menu className="size-4" /></button><div><p className="eyebrow">Verified lead workspace</p><h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Your deal room, grounded.</h1></div></div><div className="flex items-center gap-3"><div className="hidden text-right sm:block"><p className="text-xs font-semibold text-slate-700">{user?.name || user?.email || "Owner"}</p><p className="text-[0.68rem] text-slate-500">{isOwner ? "Permanent owner" : "Read-only viewer"}</p></div><div className="flex size-9 items-center justify-center rounded-full border border-white/90 bg-sky-100/80 text-xs font-bold text-sky-800">{(user?.name || user?.email || "OW").slice(0, 2).toUpperCase()}</div></div></header>
+          <header className="glass-panel flex items-center justify-between rounded-[1.75rem] px-4 py-3 sm:px-6"><div className="flex items-center gap-3"><button type="button" onClick={() => setMobileNavOpen(true)} className="flex size-9 items-center justify-center rounded-xl border border-white/80 bg-white/60 text-slate-600 lg:hidden" aria-label="Open navigation"><Menu className="size-4" /></button><div><p className="eyebrow">Verified lead workspace</p><h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Your deal room, grounded.</h1></div></div><div className="flex items-center gap-3"><div className="hidden text-right sm:block"><p className="text-xs font-semibold text-slate-700">{user?.name || user?.email || "Owner"}</p><p className="text-[0.68rem] text-slate-500">{isOwner ? "Permanent owner" : "Read-only viewer"}</p></div><div className="flex size-9 items-center justify-center rounded-full border border-white/90 bg-sky-100/80 text-xs font-bold text-sky-800">{(user?.name || user?.email || "OW").slice(0, 2).toUpperCase()}</div></div></header>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">Approved leads</p><ClipboardCheck className="size-4 text-teal-600" /></div><p className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">{leads.length}</p><p className="mt-1 text-xs text-slate-500">Verified + non-fabricated</p></div>
@@ -399,6 +410,23 @@ export default function Dashboard() {
           </div>
         </section>
       </div>
+
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+          <div className="absolute inset-0 bg-slate-900/25 backdrop-blur-[2px]" onClick={() => setMobileNavOpen(false)} />
+          <div className="glass-panel-strong absolute inset-y-3 left-3 flex w-[280px] max-w-[85vw] flex-col overflow-y-auto rounded-[1.75rem] p-4">
+            <div className="flex items-center justify-between gap-3"><Link to="/" onClick={() => setMobileNavOpen(false)} className="flex items-center gap-3 px-3 py-3"><span className="flex size-9 items-center justify-center rounded-xl bg-white/75 shadow-sm"><Landmark className="size-4 text-sky-700" /></span><div><p className="text-sm font-bold tracking-tight text-slate-800">DealProof</p><p className="text-[0.65rem] font-medium uppercase tracking-[0.14em] text-slate-500">Owner workspace</p></div></Link><button type="button" onClick={() => setMobileNavOpen(false)} className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-white/80 bg-white/60 text-slate-500" aria-label="Close navigation"><X className="size-4" /></button></div>
+            <div className="my-3 h-px bg-white/75" />
+            <nav className="space-y-1" aria-label="Workspace navigation">
+              <div className="flex items-center gap-3 rounded-xl bg-white/78 px-3 py-2.5 text-sm font-semibold text-sky-800 shadow-sm"><Home className="size-4" /> Verified leads</div>
+              <Link to="/operations" onClick={() => setMobileNavOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><BarChart3 className="size-4" /> Buyers & matches <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Open</Badge></Link>
+              <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500"><Database className="size-4" /> Source registry <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-400">Soon</Badge></div>
+            </nav>
+            <div className="mt-auto rounded-2xl border border-teal-100/90 bg-teal-50/55 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-teal-800"><ShieldCheck className="size-4" /> Integrity mode on</div><p className="mt-2 text-xs leading-5 text-teal-900/65">Only verified, non-fabricated records are surfaced.</p></div>
+            <button type="button" onClick={handleSignOut} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/65 hover:text-slate-800"><LogOut className="size-4" /> Sign out</button>
+          </div>
+        </div>
+      )}
 
       {selectedLead && <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/10 p-3 backdrop-blur-[2px]" onClick={(event) => { if (event.target === event.currentTarget) setSelectedLeadId(null); }}><aside className="glass-panel-strong h-full w-full max-w-md overflow-y-auto rounded-[1.75rem] p-5 sm:p-6"><div className="flex items-center justify-between"><div><p className="eyebrow">Lead dossier</p><h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Verified record</h2></div><button type="button" onClick={() => setSelectedLeadId(null)} className="flex size-9 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500 hover:text-slate-800" aria-label="Close lead details"><X className="size-4" /></button></div><div className="mt-6 overflow-hidden rounded-[1.5rem] border border-white/85 bg-white/55"><div className="bg-gradient-to-br from-sky-50/90 via-white/35 to-teal-50/70 p-5"><div className="flex items-start justify-between gap-4"><div className="flex items-start gap-3"><div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-white/90 bg-white/80 text-sky-700 shadow-sm"><MapPin className="size-5" /></div><div><p className="text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-sky-700/75">Property profile</p><p className="mt-1.5 text-lg font-semibold leading-6 tracking-tight text-slate-900">{selectedLead.propertyAddress}</p><p className="mt-1 text-sm text-slate-500">{selectedLead.city}, {selectedLead.state} {selectedLead.zip}</p><p className="mt-1 text-xs font-medium text-slate-400">{selectedLead.county} County</p></div></div><Badge className="shrink-0 border-0 bg-teal-100/85 text-[0.65rem] text-teal-800"><Check className="mr-1 size-3" />Verified</Badge></div><div className="mt-5 flex flex-wrap items-center gap-2 text-[0.68rem] font-medium text-slate-500"><span className="rounded-full border border-white/90 bg-white/65 px-2.5 py-1">{sourceLabel(selectedLead.sourceType)}</span><span className="rounded-full border border-white/90 bg-white/65 px-2.5 py-1">{selectedLead.pipelineStatus}</span>{selectedLead.parcelId && <span className="rounded-full border border-white/90 bg-white/65 px-2.5 py-1">Parcel {selectedLead.parcelId}</span>}</div></div><div className="grid grid-cols-2 divide-x divide-white/75 border-t border-white/75 bg-white/35"><div className="p-3.5"><p className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-slate-400">Last verified</p><p className="mt-1 text-xs font-semibold text-slate-700">{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(
                     typeof selectedLead.lastVerifiedAt === "string"

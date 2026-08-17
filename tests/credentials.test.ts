@@ -3,8 +3,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   assertBuyerDealReady,
+  assertHotDealDealReady,
   assertLeadDealReady,
   missingBuyerDealCredentials,
+  missingHotDealDealCredentials,
   missingLeadDealCredentials,
 } from "../src/convex/credentials";
 
@@ -132,5 +134,36 @@ describe("assertBuyerDealReady", () => {
     expect(() => assertBuyerDealReady({ name: "Bob", phone: "555-0100", email: "b@e.com", proofOfFundsStatus: "NONE", targetAreas: ["NC"] })).toThrow(
       /proof of funds/,
     );
+  });
+});
+
+describe("missingHotDealDealCredentials", () => {
+  test("returns [] for a hot deal with ARV", () => {
+    expect(missingHotDealDealCredentials({ arv: 180000, repairs: 20000 })).toEqual([]);
+  });
+
+  test("accepts any offer estimate when ARV is absent", () => {
+    for (const field of ["repairs", "mao", "acquisitionPrice"]) {
+      expect(missingHotDealDealCredentials({ [field]: 45000 })).toEqual([]);
+    }
+  });
+
+  test("flags a hot deal with no pricing", () => {
+    const missing = missingHotDealDealCredentials({ propertyAddress: "123 Main St" });
+    expect(missing.some((item) => item.includes("arv"))).toBe(true);
+  });
+
+  test("flags a zero ARV with no estimate", () => {
+    expect(missingHotDealDealCredentials({ arv: 0 })).not.toEqual([]);
+  });
+});
+
+describe("assertHotDealDealReady", () => {
+  test("does not throw for a priced hot deal", () => {
+    expect(() => assertHotDealDealReady({ arv: 180000 })).not.toThrow();
+  });
+
+  test("throws for an unpriced hot deal", () => {
+    expect(() => assertHotDealDealReady({})).toThrow(/arv/);
   });
 });

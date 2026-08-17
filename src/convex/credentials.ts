@@ -74,3 +74,25 @@ export function assertBuyerDealReady(buyer: Record<string, unknown>): void {
     throw new Error(`Buyer cannot be approved without deal credentials: ${missing.join(", ")}`);
   }
 }
+
+/** Which deal-credential fields a hot deal is missing. The hot-deal model
+ * carries no seller name or phone, so the pricing side (ARV or an offer
+ * estimate) is what gates it — a deal without pricing can't be presented. */
+export function missingHotDealDealCredentials(deal: Record<string, unknown>): string[] {
+  const missing: string[] = [];
+  const arv = typeof deal.arv === "number" ? deal.arv : Number.NaN;
+  const hasArv = Number.isFinite(arv) && arv > 0;
+  const hasEstimate = [deal.repairs, deal.mao, deal.acquisitionPrice].some(
+    (value) => typeof value === "number" && Number.isFinite(value) && value > 0,
+  );
+  if (!hasArv && !hasEstimate) missing.push("arv or an offer estimate (arv/repairs/mao/acquisitionPrice)");
+  return missing;
+}
+
+/** Throws unless the hot deal carries pricing credentials. */
+export function assertHotDealDealReady(deal: Record<string, unknown>): void {
+  const missing = missingHotDealDealCredentials(deal);
+  if (missing.length > 0) {
+    throw new Error(`Hot deal cannot be surfaced without deal credentials: ${missing.join(", ")}`);
+  }
+}

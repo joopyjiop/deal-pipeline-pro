@@ -5,7 +5,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import { computeStagingStatus, missingEvidenceFields, stagingScoreMismatch, TERMINAL_STAGING_STATUSES } from "./stagingEvidence";
-import { assertBuyerDealReady, assertLeadDealReady } from "./credentials";
+import { assertBuyerDealReady, assertHotDealDealReady, assertLeadDealReady } from "./credentials";
 
 const LEADS = "leads";
 const HOT_DEALS = "hot_deals";
@@ -265,6 +265,7 @@ export const adminCrud = internalAction({
         validateHotDeal(next);
         next.fabricated = next.sourceType === "SEED" || next.fabricated === true;
         if (next.fabricated !== true && (next.verificationStatus !== "VERIFIED" || (next.distressScore as number) < 80)) throw new Error("Hot deals require verified records with distress score 80 or higher");
+        if (next.fabricated !== true) assertHotDealDealReady(next);
       } else if (args.resource === "buyers") {
         validateBuyer(next);
         if (next.intakeStatus === "APPROVED") assertBuyerDealReady(next);
@@ -309,6 +310,7 @@ export const adminCrud = internalAction({
       validateHotDeal(next);
       if (next.sourceType === "SEED") next.fabricated = true;
       if (next.fabricated !== true && (next.verificationStatus !== "VERIFIED" || (next.distressScore as number) < 80)) throw new Error("Hot deals require verified records with distress score 80 or higher");
+      if (next.fabricated !== true) assertHotDealDealReady(next);
     } else if (args.resource === "buyers") {
       validateBuyer(next);
       if (next.intakeStatus === "APPROVED" && existing.intakeStatus !== "APPROVED") assertBuyerDealReady(next);

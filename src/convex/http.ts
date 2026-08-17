@@ -974,4 +974,38 @@ const spaHandler = httpAction(async (ctx, request) => {
 http.route({ path: "/", method: "GET", handler: spaHandler });
 http.route({ path: "/{*any}", method: "GET", handler: spaHandler });
 
+
+const SPA_HTML = `<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="DealForge — Wholesale deals, forged fast. Source-verified leads, evidence chains, and buyer matching without fabricated data." />
+  <title>DealForge — Wholesale Deals, Forged Fast</title>
+  <script type="module" crossorigin src="/assets/index-CG7k_dIi.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/react-vendor-CyyHX-xR.js">
+  <link rel="modulepreload" crossorigin href="/assets/framer-motion-DFOSl-E0.js">
+  <link rel="modulepreload" crossorigin href="/assets/radix-ui-9N12fl3T.js">
+  <link rel="modulepreload" crossorigin href="/assets/charts-9ukDj5My.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-DzEKs1NS.css">
+</head>
+
+
+<body>
+  <div id="root"></div>
+</body>
+
+</html>
+`;
+const spaHandler = httpAction(async (ctx, request) => {
+  const url = new URL(request.url);
+  if (url.pathname.startsWith("/api/")) { return new Response("Not found", { status: 404 }); }
+  return new Response(SPA_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+});
+http.route({ path: "/", method: "GET", handler: spaHandler });
+http.route({ path: "/{*any}", method: "GET", handler: spaHandler });
+
 export default http;

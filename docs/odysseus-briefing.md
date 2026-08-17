@@ -55,8 +55,8 @@ YOUR MISSION — actively make the website better, not just observe:
    leads, missing source evidence, bad distress scores, buyer boxes with
    no matches, underwriting gaps.
 2. Use the MCP tools to pull real data (property_data, sitemap_discover,
-   scrape_source, semantic_search, estimate_deal, consultant_court) and
-   propose source-verified additions to the queue.
+   web_intel, scrape_source, semantic_search, estimate_deal, consultant_court)
+   and propose source-verified additions to the queue.
 3. Make website-side improvements where you can: file precise, actionable
    recommendations for the human owner; propose data/UI fixes with exact
    files and diffs.
@@ -135,7 +135,7 @@ Server-side validation (never bypass it, and never try to disable it):
 
 ## MCP server — review and analysis (no writes)
 
-`POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace` (paid Searchbug reverse-address contact lookup; saves sourced phones/emails onto the lead — enrichment, never an approval), `owner_lookup` (free RentCast owner name + mailing address + absentee flag — enrichment, never an approval), `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
+`POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `web_intel` (one-shot discovery + fetch with Firecrawl render fallback + ScrapeGraphAI extraction; Camofox stays owner-only), `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace` (paid Searchbug reverse-address contact lookup; saves sourced phones/emails onto the lead — enrichment, never an approval), `owner_lookup` (free RentCast owner name + mailing address + absentee flag — enrichment, never an approval), `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
 
 ## Admin MCP server — full CRUD through MCP (owner's key)
 

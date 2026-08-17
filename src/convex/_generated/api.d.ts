@@ -33,6 +33,8 @@ import type * as stagingEvidence from "../stagingEvidence.js";
 import type * as threadResponder from "../threadResponder.js";
 import type * as underwriting from "../underwriting.js";
 import type * as users from "../users.js";
+import type * as webIntel from "../webIntel.js";
+import type * as webIntelCore from "../webIntelCore.js";
 
 import type {
   ApiFromModules,
@@ -66,6 +68,8 @@ declare const fullApi: ApiFromModules<{
   threadResponder: typeof threadResponder;
   underwriting: typeof underwriting;
   users: typeof users;
+  webIntel: typeof webIntel;
+  webIntelCore: typeof webIntelCore;
 }>;
 
 /**

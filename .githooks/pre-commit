@@ -11,7 +11,10 @@ set -euo pipefail
 
 if ! command -v gitleaks >/dev/null 2>&1; then
   echo "⚠️  gitleaks not found — skipping local secret scan." >&2
-  echo "    Install: brew install gitleaks   (or: go install github.com/gitleaks/gitleaks/v8@latest)" >&2
+  echo "    Install:" >&2
+  echo "      macOS:    brew install gitleaks" >&2
+  echo "      Windows:  winget install Gitleaks.Gitleaks   (or choco install gitleaks)" >&2
+  echo "      any OS:   go install github.com/gitleaks/gitleaks/v8@latest" >&2
   echo "    CI (.github/workflows/security.yml) still enforces the scan on push/PR." >&2
   exit 0
 fi

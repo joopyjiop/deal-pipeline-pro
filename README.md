@@ -306,6 +306,8 @@ Two contact-data paths, both stored with source evidence and never invented:
 - **Admin IP allow-list.** Optional `ADMIN_ALLOWED_IPS` (above) denies non-listed client IPs on `/api/admin*` and `/api/mcp/admin`. It reads proxy headers, which a direct client can spoof, so treat it as defense-in-depth; `ADMIN_API_KEY` remains the primary control and the authoritative IP gate belongs at the DNS/proxy/edge layer.
 - **Dependency pinning.** `bun.lock` and `package-lock.json` are checked in and not gitignored. CI installs with `bun install --frozen-lockfile`, so a dependency change without a matching lockfile change fails the build.
 - **CI secrets scan.** `.github/workflows/security.yml` runs gitleaks over the full git history plus lockfile-integrity, typecheck, and tests on every push and pull request. Run gitleaks locally before committing (`gitleaks detect --source .`).
+- **Pre-commit secret hook.** `.githooks/pre-commit` runs gitleaks on staged changes before every local commit (warns — doesn't block — if gitleaks isn't installed; CI remains the enforcement gate). Enable once per clone: `git config core.hooksPath .githooks`.
+- **Owner-only hardening runbook.** `docs/security-hardening.md` has the step-by-step for the infrastructure items only you can configure: DNS CAA records, separate registrar MFA, canary tokens, edge IP allow-listing, and the session-binding options.
 
 ---
 

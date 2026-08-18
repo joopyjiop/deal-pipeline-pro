@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Pre-commit hook — blocks commits that contain secrets.
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+#
+# CI enforces the same scan on every push/PR (.github/workflows/security.yml),
+# so this hook is fast local feedback, not the only gate. If gitleaks is not
+# installed the hook warns and lets the commit proceed — CI still catches it.
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "⚠️  gitleaks not found — skipping local secret scan." >&2
+  echo "    Install: brew install gitleaks   (or: go install github.com/gitleaks/gitleaks/v8@latest)" >&2
+  echo "    CI (.github/workflows/security.yml) still enforces the scan on push/PR." >&2
+  exit 0
+fi
+
+echo "🔍 gitleaks: scanning staged changes for secrets..."
+# `protect --staged` is the long-standing documented form; gitleaks >= 8.19
+# also accepts `gitleaks git pre-commit --staged`.
+gitleaks protect --staged --verbose

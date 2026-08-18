@@ -956,7 +956,12 @@ const spaHandler = httpAction(async (ctx, request) => {
   if (url.pathname.startsWith("/api/")) { return new Response("Not found", { status: 404 }); }
   return new Response(SPA_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
 });
-http.route({ path: "/", method: "GET", handler: spaHandler });
+// SPA routes — explicit paths for common pages
+const spaRoutes = ["/", "/auth", "/dashboard", "/leads", "/pipeline", "/operations", "/toolkit", "/buyers", "/shared"];
+for (const p of spaRoutes) {
+  http.route({ path: p, method: "GET", handler: spaHandler });
+}
+// Catch-all for any other SPA route
 http.route({ path: "/{*any}", method: "GET", handler: spaHandler });
 
 export default http;

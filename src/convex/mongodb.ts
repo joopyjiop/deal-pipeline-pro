@@ -1432,6 +1432,11 @@ export const semanticSearchLeads = action({
 
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Authentication required");
+    const [searchUserId] = (identity.subject ?? "").split("|");
+    if (searchUserId) {
+      const searchUser = await ctx.runQuery(internal.users.getUserBySubject, { subject: searchUserId });
+      if (searchUser?.isAnonymous) throw new Error("Guest accounts cannot search leads");
+    }
     const owner = await isOwnerIdentity(ctx);
     const query = args.query.trim();
     if (!query || query.length > 500) throw new Error("Enter a search query (max 500 characters)");

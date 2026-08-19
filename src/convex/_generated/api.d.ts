@@ -24,6 +24,8 @@ import type * as emailDeliveryCore from "../emailDeliveryCore.js";
 import type * as embeddings from "../embeddings.js";
 import type * as http from "../http.js";
 import type * as leads from "../leads.js";
+import type * as marketplace from "../marketplace.js";
+import type * as marketplaceCore from "../marketplaceCore.js";
 import type * as mongodb from "../mongodb.js";
 import type * as networkGuard from "../networkGuard.js";
 import type * as ollama from "../ollama.js";
@@ -68,6 +70,8 @@ declare const fullApi: ApiFromModules<{
   embeddings: typeof embeddings;
   http: typeof http;
   leads: typeof leads;
+  marketplace: typeof marketplace;
+  marketplaceCore: typeof marketplaceCore;
   mongodb: typeof mongodb;
   networkGuard: typeof networkGuard;
   ollama: typeof ollama;

@@ -43,6 +43,12 @@ Browser (React) ── Convex client ──> Convex Cloud (keen-aardvark-333)
 
 The Convex `users`, `appSettings`, and a `leads` table live in Convex itself (see below); the operational pipeline data lives in MongoDB.
 
+### Web access model (who sees what in the app)
+
+- **Signed-out visitors:** marketing pages only (landing, demo, legal, buyer intake form). No lead/buyer/match data is queryable — `marketplaceOverview` rejects anonymous identities server-side, and `semanticSearchLeads` requires a signed-in user.
+- **Signed-in non-owners:** the **read-only marketplace** (`src/convex/marketplace.ts` + `MarketplaceView.tsx`) — approved sellers (verified, non-fabricated leads with PII scrubbed), approved buyers (contact PII stripped), and matches. No write paths, no owner buttons, no lead dossiers, no owner workspace. Guest/anonymous accounts are not offered and are rejected server-side.
+- **Owner (permanent owner email or `role: admin`):** the full workspace — verified-lead dossiers with owner/skip-trace PII, add/edit/delete, approvals, API access, AI usage, and the owner-only routes (`/operations`, `/toolkit`, `/local-agents`, `/shared-conversation` wrapped in `OwnerOnly`).
+
 ---
 
 ## Convex schema (`src/convex/schema.ts`)
@@ -104,7 +110,7 @@ All HTTP routes live on the Convex site URL: `https://keen-aardvark-333.convex.s
 | `/api/stripe/webhook` | POST | Stripe signature (`stripe-signature` header, HMAC-SHA256 verified against `STRIPE_WEBHOOK_SECRET`) | Stripe subscription events (`checkout.session.completed`, `customer.subscription.created/updated/deleted`) → upsert the user's subscription row; `checkout.session.completed` also schedules the purchase-confirmation email with the customer's matched-leads CSV attachment (via Resend) |
 | `/api/admin/email-deliveries` | GET | `Authorization: Bearer ADMIN_API_KEY` **or a registry credential with `admin` scope** | Purchase-confirmation delivery log (status SENT/FAILED, attempts, error, lead count) from the `email_deliveries` collection — no CSV payloads |
 | `/api/admin/email-deliveries/retry` | POST | `Authorization: Bearer ADMIN_API_KEY` **or a registry credential with `admin` scope** | Manually trigger the failed-delivery retry pass (same as the 15-minute cron; resends the stored CSV) |
-| `/api/auth/*` | — | Convex Auth | Email OTP + anonymous sign-in |
+| `/api/auth/*` | — | Convex Auth | Email OTP sign-in only (guest/anonymous accounts are not offered and are rejected server-side — they get no data) |
 
 ### API access registry (who may call the API)
 
@@ -278,7 +284,7 @@ Every model call — customer semantic-search embeddings, local-agents chat, thr
 - **Per-user limits:** signed-in users are rate-limited (`AI_RATE_LIMIT_PER_MINUTE`, default 6 requests/min) and capped at `AI_USER_DAILY_CAP_TOKENS` (default 200k estimated tokens/day). Any user can read their own usage via the `myAiUsage` query.
 - **App-wide budget:** `AI_DAILY_BUDGET_TOKENS` (default 1,000,000 estimated tokens/day) bounds **everyone**, including system actors (`court`, `thread-responder`, `agent`, `indexing`) that skip the per-user caps so automation keeps working.
 - **Charging is atomic:** a single internal mutation (`consumeAiUsage`) does the read-modify-write of the actor row + the `global` row per UTC day, so concurrent requests can't race past a cap. Exceeded budgets throw a clear error (with `retryAfterMs` for rate limits).
-- **Owner visibility:** the owner-only `getAiUsage` action returns the current limits plus today's per-actor and global usage. All limits are set in the Convex Keys panel — no code change needed to tune them.
+- **Owner visibility:** the owner-only `getAiUsage` action returns the current limits plus today's per-actor and global usage, surfaced in the Dashboard's **AI usage** panel (owner-only nav item). All limits are set in the Convex Keys panel — no code change needed to tune them.
 - **Court charging note:** the consultant-court chain in `mongodb.ts` predates the guard and its call site can't be edited with this repo's tooling, so court runs are charged at their entry points instead: the MCP `consultant_court` dispatch charges one `COURT_RUN_ESTIMATE_TOKENS` (24,000) before running, and the automation cron (`runAutomationCycleWithCharge`) charges `24,000 × ai.completed` after each cycle.
 
 ---

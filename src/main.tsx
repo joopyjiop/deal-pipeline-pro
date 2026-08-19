@@ -1,6 +1,7 @@
 import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
+import { OwnerOnly } from "@/components/OwnerOnly";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { InstrumentationProvider } from "@/instrumentation.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
@@ -81,33 +82,33 @@ createRoot(document.getElementById("root")!).render(
             <Route
               path="/operations"
               element={
-                <RequireAuth>
+                <OwnerOnly>
                   <Operations />
-                </RequireAuth>
+                </OwnerOnly>
               }
             />
             <Route
               path="/toolkit"
               element={
-                <RequireAuth>
+                <OwnerOnly>
                   <Toolkit />
-                </RequireAuth>
+                </OwnerOnly>
               }
             />
             <Route
               path="/local-agents"
               element={
-                <RequireAuth>
+                <OwnerOnly>
                   <LocalAgents />
-                </RequireAuth>
+                </OwnerOnly>
               }
             />
             <Route
               path="/shared-conversation"
               element={
-                <RequireAuth>
+                <OwnerOnly>
                   <SharedConversation />
-                </RequireAuth>
+                </OwnerOnly>
               }
             />
             <Route path="*" element={<NotFound />} />

@@ -1,10 +1,12 @@
 import { api } from "@/convex/_generated/api";
+import { MarketplaceView } from "@/components/MarketplaceView";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
 import { useAction } from "convex/react";
 import {
+  Activity,
   ArrowUpRight,
   BarChart3,
   Building2,
@@ -241,6 +243,7 @@ export default function Dashboard() {
   const renewApiCredential = useAction(api.apiAccess.renewApiCredential);
   const approveApiCredential = useAction(api.apiAccess.approveApiCredential);
   const deleteApiCredential = useAction(api.apiAccess.deleteApiCredential);
+  const getAiUsage = useAction(api.aiUsage.getAiUsage);
   const [workspace, setWorkspace] = useState<MongoWorkspace>();
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -250,6 +253,15 @@ export default function Dashboard() {
   const [apiNewName, setApiNewName] = useState("");
   const [apiNewScopes, setApiNewScopes] = useState<string[]>(["threads"]);
   const [apiRevealed, setApiRevealed] = useState<{ id: string; token: string; tokenPrefix: string } | null>(null);
+  const [showAiUsage, setShowAiUsage] = useState(false);
+  const [aiUsageLoading, setAiUsageLoading] = useState(false);
+  const [aiUsageData, setAiUsageData] = useState<{
+    limits: { ratePerMinute: number; userDailyCap: number; globalDailyCap: number };
+    today: {
+      globalTokens: number;
+      actors: Array<{ actor: string; requests: number; tokens: number }>;
+    };
+  } | null>(null);
 
   // Close the mobile navigation drawer on Escape.
   useEffect(() => {
@@ -266,6 +278,7 @@ export default function Dashboard() {
   );
 
   useEffect(() => {
+    if (!isOwner) return;
     let cancelled = false;
     listLeads({
       search: search.trim() || undefined,
@@ -286,7 +299,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [listLeads, refreshVersion, search, minScore, sourceType]);
+  }, [isOwner, listLeads, refreshVersion, search, minScore, sourceType]);
 
   const leads = workspace?.leads ?? [];
   const selectedLead = leads.find((lead) => lead._id === selectedLeadId);
@@ -313,6 +326,18 @@ export default function Dashboard() {
       setApiLoading(false);
     }
   }, [listApiCredentials]);
+
+  const loadAiUsage = useCallback(async () => {
+    setAiUsageLoading(true);
+    try {
+      const result = await getAiUsage();
+      setAiUsageData(result);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not load AI usage.");
+    } finally {
+      setAiUsageLoading(false);
+    }
+  }, [getAiUsage]);
 
   const pendingCreds = apiCreds.filter((cred) => cred.status === "PENDING");
 
@@ -506,6 +531,33 @@ export default function Dashboard() {
     }
   };
 
+  // Non-owners never see the owner workspace: no lead list, no owner buttons,
+  // no write paths. They get the scrubbed read-only marketplace only.
+  if (!isOwner) {
+    return (
+      <main className="min-h-screen px-4 py-4 text-foreground sm:px-6 lg:px-8">
+        <div className="mx-auto w-full max-w-[1500px]">
+          <header className="glass-panel flex items-center justify-between gap-3 rounded-[1.75rem] px-4 py-3 sm:px-6">
+            <div>
+              <p className="eyebrow">DealProof marketplace</p>
+              <h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Verified deals, read-only</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="hidden text-right sm:block">
+                <p className="text-xs font-semibold text-slate-700">{user?.name || user?.email || "Viewer"}</p>
+                <p className="text-[0.68rem] text-slate-500">Read-only viewer</p>
+              </div>
+              <Button type="button" variant="outline" onClick={handleSignOut} className="h-9 gap-2 rounded-xl border-white/85 bg-white/60 text-slate-600 hover:text-sky-800">
+                <LogOut className="size-4" /> Sign out
+              </Button>
+            </div>
+          </header>
+          <MarketplaceView />
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen px-4 py-4 text-foreground sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-[1500px] gap-5">
@@ -517,6 +569,7 @@ export default function Dashboard() {
             <Link to="/operations" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><BarChart3 className="size-4" /> Buyers & matches <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Open</Badge></Link>
             <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500"><Database className="size-4" /> Source registry <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-400">Soon</Badge></div>
             {isOwner && <button type="button" onClick={() => { setShowApiAccess(true); void loadApiCredentials(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><KeyRound className="size-4" /> API access <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
+            {isOwner && <button type="button" onClick={() => { setShowAiUsage(true); void loadAiUsage(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Activity className="size-4" /> AI usage <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
           </nav>
           <div className="mt-auto rounded-2xl border border-teal-100/90 bg-teal-50/55 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-teal-800"><ShieldCheck className="size-4" /> Integrity mode on</div><p className="mt-2 text-xs leading-5 text-teal-900/65">Only verified, non-fabricated records are surfaced.</p></div>
           <button type="button" onClick={handleSignOut} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/65 hover:text-slate-800"><LogOut className="size-4" /> Sign out</button>
@@ -555,9 +608,80 @@ export default function Dashboard() {
               <Link to="/operations" onClick={() => setMobileNavOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><BarChart3 className="size-4" /> Buyers & matches <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Open</Badge></Link>
               <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500"><Database className="size-4" /> Source registry <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-400">Soon</Badge></div>
               {isOwner && <button type="button" onClick={() => { setMobileNavOpen(false); setShowApiAccess(true); void loadApiCredentials(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><KeyRound className="size-4" /> API access <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
+              {isOwner && <button type="button" onClick={() => { setMobileNavOpen(false); setShowAiUsage(true); void loadAiUsage(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Activity className="size-4" /> AI usage <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
             </nav>
             <div className="mt-auto rounded-2xl border border-teal-100/90 bg-teal-50/55 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-teal-800"><ShieldCheck className="size-4" /> Integrity mode on</div><p className="mt-2 text-xs leading-5 text-teal-900/65">Only verified, non-fabricated records are surfaced.</p></div>
             <button type="button" onClick={handleSignOut} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/65 hover:text-slate-800"><LogOut className="size-4" /> Sign out</button>
+          </div>
+        </div>
+      )}
+
+      {showAiUsage && isOwner && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/15 p-3 backdrop-blur-sm sm:items-center" onClick={(event) => { if (event.target === event.currentTarget) setShowAiUsage(false); }}>
+          <div className="glass-panel-strong max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-[1.75rem] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-5">
+              <div>
+                <p className="eyebrow">Owner control</p>
+                <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">AI usage guard</h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Every AI call is clamped and charged against these caps before the gateway is hit — per user, and app-wide. Change the limits in the Keys panel; no code changes needed.</p>
+              </div>
+              <button type="button" onClick={() => setShowAiUsage(false)} className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500" aria-label="Close AI usage"><X className="size-4" /></button>
+            </div>
+
+            {aiUsageLoading ? (
+              <div className="mt-8 flex items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="size-5 animate-spin text-sky-600" /> Loading usage…</div>
+            ) : !aiUsageData ? (
+              <p className="mt-8 text-sm leading-6 text-slate-500">Could not load AI usage. Confirm you are signed in as the owner.</p>
+            ) : (
+              <>
+                <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                  <div className="glass-inset rounded-2xl p-4">
+                    <p className="text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-slate-500">Requests / min</p>
+                    <p className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{aiUsageData.limits.ratePerMinute || "Off"}</p>
+                    <p className="mt-1 text-[0.65rem] text-slate-500">per user · AI_RATE_LIMIT_PER_MINUTE</p>
+                  </div>
+                  <div className="glass-inset rounded-2xl p-4">
+                    <p className="text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-slate-500">User daily cap</p>
+                    <p className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{new Intl.NumberFormat().format(aiUsageData.limits.userDailyCap)}</p>
+                    <p className="mt-1 text-[0.65rem] text-slate-500">tokens / day · AI_USER_DAILY_CAP_TOKENS</p>
+                  </div>
+                  <div className="glass-inset rounded-2xl p-4">
+                    <p className="text-[0.62rem] font-semibold uppercase tracking-[0.13em] text-slate-500">App-wide budget</p>
+                    <p className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{new Intl.NumberFormat().format(aiUsageData.limits.globalDailyCap)}</p>
+                    <p className="mt-1 text-[0.65rem] text-slate-500">tokens / day · AI_DAILY_BUDGET_TOKENS</p>
+                  </div>
+                </div>
+
+                <div className="mt-6 rounded-2xl border border-white/80 bg-white/45 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Today's spend</p>
+                    <span className={`text-xs font-bold ${aiUsageData.limits.globalDailyCap > 0 && aiUsageData.today.globalTokens / aiUsageData.limits.globalDailyCap > 0.8 ? "text-amber-700" : "text-teal-700"}`}>
+                      {new Intl.NumberFormat().format(aiUsageData.today.globalTokens)} / {new Intl.NumberFormat().format(aiUsageData.limits.globalDailyCap)} tokens
+                    </span>
+                  </div>
+                  {aiUsageData.limits.globalDailyCap > 0 && (
+                    <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-white/80">
+                      <div className="h-full rounded-full bg-gradient-to-r from-sky-500 to-teal-500 transition-all" style={{ width: `${Math.min(100, (aiUsageData.today.globalTokens / aiUsageData.limits.globalDailyCap) * 100)}%` }} />
+                    </div>
+                  )}
+                  {aiUsageData.today.actors.length === 0 ? (
+                    <p className="mt-4 text-xs leading-5 text-slate-500">No AI calls charged yet today — the guard is armed and ready.</p>
+                  ) : (
+                    <div className="mt-4 space-y-2">
+                      {aiUsageData.today.actors.map((row) => (
+                        <div key={row.actor} className="flex items-center justify-between gap-3 rounded-xl border border-white/85 bg-white/55 px-3 py-2">
+                          <p className="truncate font-mono text-xs font-semibold text-slate-700">{row.actor}</p>
+                          <div className="flex shrink-0 items-center gap-4 text-right">
+                            <span className="text-[0.65rem] text-slate-500">{row.requests} req</span>
+                            <span className="text-xs font-semibold text-slate-700">{new Intl.NumberFormat().format(row.tokens)} tokens</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

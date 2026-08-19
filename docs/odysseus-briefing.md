@@ -137,7 +137,23 @@ Server-side validation (never bypass it, and never try to disable it):
 
 ## MCP server — review and analysis (no writes)
 
-`POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `web_intel` (one-shot discovery + fetch with Firecrawl render fallback + ScrapeGraphAI extraction; Camofox stays owner-only), `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace` (paid Searchbug reverse-address contact lookup; saves sourced phones/emails onto the lead — enrichment, never an approval), `owner_lookup` (free RentCast owner name + mailing address + absentee flag — enrichment, never an approval), `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, `request_api_access` (request a scoped registry credential — creates a PENDING entry the owner approves or denies in the Dashboard's **API access** panel; no token is issued until approval), and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
+`POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `list_sources` (the canonical, deduplicated source registry — call it first to discover the owner-approved sites to scrape instead of guessing), `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `web_intel` (one-shot discovery + fetch with Firecrawl render fallback + ScrapeGraphAI extraction; Camofox stays owner-only), `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace` (paid Searchbug reverse-address contact lookup; saves sourced phones/emails onto the lead — enrichment, never an approval), `owner_lookup` (free RentCast owner name + mailing address + absentee flag — enrichment, never an approval), `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, `request_api_access` (request a scoped registry credential — creates a PENDING entry the owner approves or denies in the Dashboard's **API access** panel; no token is issued until approval), and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
+
+### Source registry (call `list_sources`; canonical list below)
+
+The owner-approved public sources used to find leads live in **one canonical, deduplicated registry** (`src/convex/sourceRegistry.ts`), surfaced to you through the `list_sources` MCP tool, shown in the Toolkit's Camofox "Default deal websites", and mirrored here. Use these URLs as seeds for `scrape_source`, `sitemap_discover`, `web_intel`, or `queue_source` — do not invent sites:
+
+| Source | URL(s) | sourceType |
+| --- | --- | --- |
+| Auction.com | `https://www.auction.com/` · `https://www.auction.com/residential/` | `AUCTION_COM` |
+| Fannie Mae HomePath | `https://www.homepath.fanniemae.com/` | `FORECLOSURE` |
+| Foreclosure.com | `https://www.foreclosure.com/` | `FORECLOSURE` |
+| Connected Investors | `https://connectedinvestors.com/` | `MARKETPLACE` |
+| National REIA | `https://nationalreia.org/` | `ASSOCIATION` |
+| Allen County sheriff sales | `https://www.allencountysheriff.org/2026-sheriff-sales/` | `SHERIFF_SALE` |
+| Allen County tax sale | `https://www.allencounty.in.gov/270/Tax-Sale` | `TAX_SALE` |
+
+The registry is deduplicated by normalized URL (https, lowercase host, no trailing slash). If you discover a genuinely useful new public source, request it through a shared-conversation `REQUEST` rather than adding sites on your own.
 
 ## Admin MCP server — full CRUD through MCP (owner's key)
 

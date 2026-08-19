@@ -1,4 +1,5 @@
 import { api } from "@/convex/_generated/api";
+import { SOURCE_REGISTRY } from "@/convex/sourceRegistry";
 import { CONVEX_SITE_URL } from "@/lib/convex-url";
 import { OwnerNav } from "@/components/OwnerNav";
 import { Badge } from "@/components/ui/badge";
@@ -385,51 +386,11 @@ const sourceTypes = [
   ["MANUAL", "Manual source"],
 ] as const;
 
-// Built-in, owner-reviewed starting points. Add another site here only after
-// confirming its public pages and crawl permissions; custom URLs remain
+// Built-in, owner-reviewed starting points, sourced from the canonical registry
+// (src/convex/sourceRegistry.ts) so the UI, the MCP `list_sources` tool, and
+// the agent briefing stay in sync and duplicate-free. Custom URLs remain
 // available below for sources that are not part of the default registry.
-const defaultDealSources: DefaultDealSource[] = [
-  {
-    id: "auction-com",
-    name: "Auction.com",
-    domain: "auction.com",
-    description: "Public foreclosure and auction catalog",
-    sourceType: "AUCTION_COM",
-    urls: ["https://www.auction.com/", "https://www.auction.com/residential/"],
-  },
-  {
-    id: "homepath",
-    name: "Fannie Mae HomePath",
-    domain: "homepath.fanniemae.com",
-    description: "Fannie Mae REO and foreclosure listings",
-    sourceType: "FORECLOSURE",
-    urls: ["https://www.homepath.fanniemae.com/"],
-  },
-  {
-    id: "foreclosure-com",
-    name: "Foreclosure.com",
-    domain: "foreclosure.com",
-    description: "Foreclosure and pre-foreclosure listings",
-    sourceType: "FORECLOSURE",
-    urls: ["https://www.foreclosure.com/"],
-  },
-  {
-    id: "connected-investors",
-    name: "Connected Investors",
-    domain: "connectedinvestors.com",
-    description: "Off-market distressed property marketplace",
-    sourceType: "MARKETPLACE",
-    urls: ["https://connectedinvestors.com/"],
-  },
-  {
-    id: "national-reia",
-    name: "National REIA",
-    domain: "nationalreia.org",
-    description: "Investor association and chapter network",
-    sourceType: "ASSOCIATION",
-    urls: ["https://nationalreia.org/"],
-  },
-];
+const defaultDealSources: DefaultDealSource[] = SOURCE_REGISTRY;
 
 const currency = new Intl.NumberFormat("en-US", {
   style: "currency",

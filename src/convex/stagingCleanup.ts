@@ -6,6 +6,14 @@ import { action, internalAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { isEmptyStagingRow, type StagedRowLike } from "./stagingCleanupCore";
 
+// Mirrors mongodb.ts's URI resolution: prefer the MONGODB_URI env var only
+// when it carries credentials; otherwise use the owner-saved fallback URI
+// stored in Convex appSettings (the Toolkit's "MongoDB Atlas" panel), which is
+// the effective connection on managed deployments where the env value is a
+// credential-less Atlas SQL endpoint.
+const MONGO_URI_SETTING_KEY = "mongoUri";
+const URI_WITH_CREDENTIALS = /^mongodb(\+srv)?:\/\/[^/@]+@/;
+
 /**
  * Staged-source cleanup — removes the "untitled empty garbage" rows from the
  * import-staging review queue.
@@ -23,22 +31,34 @@ import { isEmptyStagingRow, type StagedRowLike } from "./stagingCleanupCore";
 const IMPORT_STAGING = "import_staging";
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
 
-let clientPromise: Promise<MongoClient> | null = null;
+let clientState: { uri: string; promise: Promise<MongoClient> } | null = null;
 
-function getMongoClient() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error("MONGODB_URI is not configured");
-  if (!clientPromise) {
-    clientPromise = new MongoClient(uri).connect().catch((error) => {
-      clientPromise = null;
-      throw error;
-    });
-  }
-  return clientPromise;
+async function resolveMongoUri(ctx: ActionCtx): Promise<string> {
+  const envUri = process.env.MONGODB_URI;
+  const envUsable = envUri && URI_WITH_CREDENTIALS.test(envUri) ? envUri : null;
+  if (envUsable) return envUsable;
+  const stored = (await ctx.runQuery(internal.settings.getByKey, { key: MONGO_URI_SETTING_KEY })) as string | null;
+  if (stored) return stored;
+  if (envUri) return envUri;
+  throw new Error("MONGODB_URI is not configured");
 }
 
-async function getDatabase() {
-  return (await getMongoClient()).db();
+async function getMongoClient(ctx: ActionCtx) {
+  const uri = await resolveMongoUri(ctx);
+  if (!clientState || clientState.uri !== uri) {
+    clientState = {
+      uri,
+      promise: new MongoClient(uri).connect().catch((error) => {
+        clientState = null;
+        throw error;
+      }),
+    };
+  }
+  return clientState.promise;
+}
+
+async function getDatabase(ctx: ActionCtx) {
+  return (await getMongoClient(ctx)).db();
 }
 
 // Same owner convention as the rest of the app (role "admin" OR the permanent
@@ -53,8 +73,8 @@ async function requireOwner(ctx: ActionCtx) {
   throw new Error("Owner access required");
 }
 
-async function purgeEmptyStagedSourcesImpl(): Promise<{ deleted: number }> {
-  const database = await getDatabase();
+async function purgeEmptyStagedSourcesImpl(ctx: ActionCtx): Promise<{ deleted: number }> {
+  const database = await getDatabase(ctx);
   // Narrow with Mongo first (rows with no top-level sourceUrl), then finish
   // the emptiness check in JS where rawJson nesting is visible.
   const candidates = await database
@@ -81,7 +101,7 @@ export const purgeEmptyStagedSources = action({
   args: {},
   handler: async (ctx): Promise<{ deleted: number }> => {
     await requireOwner(ctx);
-    return purgeEmptyStagedSourcesImpl();
+    return purgeEmptyStagedSourcesImpl(ctx);
   },
 });
 
@@ -90,10 +110,12 @@ export const deleteStagedSource = action({
   args: { stagedId: v.string() },
   handler: async (ctx, args): Promise<{ deleted: boolean }> => {
     await requireOwner(ctx);
-    const database = await getDatabase();
-    const id = ObjectId.isValid(args.stagedId) ? new ObjectId(args.stagedId) : null;
-    if (!id) throw new Error("Invalid staged source id");
-    const result = await database.collection(IMPORT_STAGING).deleteOne({ _id: id });
+    const database = await getDatabase(ctx);
+    // Most rows have ObjectId _ids; a few (admin/manual imports) may carry a
+    // string id. Match whichever shape the stored row actually uses.
+    const filter: Record<string, unknown> =
+      ObjectId.isValid(args.stagedId) ? { _id: new ObjectId(args.stagedId) } : { _id: args.stagedId };
+    const result = await database.collection(IMPORT_STAGING).deleteOne(filter);
     return { deleted: result.deletedCount > 0 };
   },
 });
@@ -101,7 +123,7 @@ export const deleteStagedSource = action({
 /** Cron wrapper (daily sweep) — no owner gate; runs server-side. */
 export const sweepEmptyStagedSources = internalAction({
   args: {},
-  handler: async (): Promise<{ deleted: number }> => {
-    return purgeEmptyStagedSourcesImpl();
+  handler: async (ctx): Promise<{ deleted: number }> => {
+    return purgeEmptyStagedSourcesImpl(ctx);
   },
 });

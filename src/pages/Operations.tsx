@@ -353,8 +353,12 @@ export default function Operations() {
     const label = (staged.title ?? staged.sourceUrl ?? staged.rawJson?.url ?? "").slice(0, 60);
     if (!window.confirm(`Remove this staged source${label ? ` (${label})` : ""}? This cannot be undone.`)) return;
     try {
-      await deleteStaged({ stagedId: staged._id });
-      toast.success("Staged source removed.");
+      const result = await deleteStaged({ stagedId: staged._id });
+      if (!result.deleted) {
+        toast.warning("That staged source was not found — it may already be gone. Refreshing…");
+      } else {
+        toast.success("Staged source removed.");
+      }
       refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not remove this staged source.");

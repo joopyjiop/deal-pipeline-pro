@@ -6,6 +6,7 @@ import { messageContent, normalizeThreadId, sanitizeRefs, shouldNotifyOwner } fr
 import { assertPublicOutboundUrl, clientIpFromRequest, constantTimeEqual, isIpAllowed } from "./networkGuard";
 import { type ApiScope } from "./apiAccessCore";
 import { COURT_RUN_ESTIMATE_TOKENS, dayKey, getAiLimits } from "./aiUsageCore";
+import { SOURCE_REGISTRY, dedupeSourceUrls } from "./sourceRegistry";
 
 const http = httpRouter();
 
@@ -610,6 +611,7 @@ function mcpAuthorized(
 
 function mcpTools() {
   return [
+    { name: "list_sources", description: "List the owner-approved public source registry (Auction.com, Fannie Mae HomePath, Foreclosure.com, Connected Investors, National REIA, Allen County sheriff/tax sales) with their canonical URLs and source types. Use these URLs as the seeds for scrape_source, sitemap_discover, web_intel, or queue_source instead of guessing sites. Duplicate URLs are already removed.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
     { name: "scrape_source", description: "Fetch one public source URL, return bounded evidence, and stage it for owner review. Never invents or creates PII.", inputSchema: { type: "object", properties: { url: { type: "string", description: "Public http(s) source URL" }, sourceType: { type: "string", enum: [...mcpSourceTypes] } }, required: ["url", "sourceType"], additionalProperties: false } },
     { name: "scrapegraph_extract", description: "Extract structured property facts from a public source URL with ScrapeGraphAI and stage them as bounded evidence for owner review. Never creates or invents PII and never approves a lead.", inputSchema: { type: "object", properties: { url: { type: "string", description: "Public http(s) source URL" }, sourceType: { type: "string", enum: [...mcpSourceTypes] }, prompt: { type: "string", description: "What to extract (10-2000 characters)" }, schema: { type: "object", description: "Optional JSON-Schema object constraining the extraction" } }, required: ["url", "sourceType", "prompt"], additionalProperties: false } },
     { name: "sitemap_discover", description: "Expand one public portal seed URL into a bounded batch of real listing URLs via its robots.txt sitemap refs and standard sitemap locations, then stage each page for owner review. Never invents data and never approves a lead.", inputSchema: { type: "object", properties: { url: { type: "string", description: "Public http(s) seed URL (e.g. a portal homepage)" }, sourceType: { type: "string", enum: [...mcpSourceTypes] }, maxUrls: { type: "number", minimum: 1, maximum: 200, description: "Optional batch size (default 60)" } }, required: ["url", "sourceType"], additionalProperties: false } },
@@ -648,6 +650,9 @@ function optionalNumber(value: unknown) {
 
 async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) {
   if (!isRecord(rawArguments)) throw new Error("Tool arguments must be an object");
+  if (name === "list_sources") {
+    return { sources: SOURCE_REGISTRY.map((source) => ({ ...source, urls: dedupeSourceUrls(source.urls) })) };
+  }
   if (name === "scrape_source") {
     if (typeof rawArguments.url !== "string" || !isMcpSourceType(rawArguments.sourceType)) throw new Error("scrape_source requires a public url and supported sourceType");
     return ctx.runAction(internal.mongodb.mcpScrapeSource, { url: rawArguments.url, sourceType: rawArguments.sourceType });

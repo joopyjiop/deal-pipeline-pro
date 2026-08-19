@@ -32,7 +32,7 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 
@@ -40,6 +40,33 @@ type ToolAccess = {
   scraperEnabled: boolean;
   estimatorEnabled: boolean;
   aiEnabled: boolean;
+};
+
+type ToolTab = "sourcing" | "underwriting" | "automation";
+
+const TOOL_TABS: Array<{ key: ToolTab; label: string }> = [
+  { key: "sourcing", label: "Sourcing" },
+  { key: "underwriting", label: "Underwriting" },
+  { key: "automation", label: "Automation" },
+];
+
+// Maps each tool section's unique .eyebrow label to its tab. The sections
+// live below this file's editable reach, so the tab filter (useLayoutEffect
+// below) walks the rendered DOM and hides every section whose mapped tab is
+// not active. Sections without a mapping (the access/status strips) stay
+// visible on all tabs.
+const SECTION_TAB_BY_EYEBROW: Record<string, ToolTab> = {
+  "Semantic lead search": "sourcing",
+  "Coordinated agent team": "underwriting",
+  "ScrapeGraphAI extraction": "sourcing",
+  "Sitemap discovery": "sourcing",
+  "RentCast property data": "underwriting",
+  "Managed automation": "automation",
+  "Camofox link crawler": "sourcing",
+  "Source scraper": "sourcing",
+  "Deal estimator": "underwriting",
+  "External AI connection": "automation",
+  "AI connector handoff": "automation",
 };
 
 type AutomationConfig = {
@@ -458,6 +485,20 @@ export default function Toolkit() {
   const indexLeadEmbeddingsAction = useAction(api.mongodb.indexLeadEmbeddings);
   const semanticSearchAction = useAction(api.mongodb.semanticSearchLeads);
   const listLeadsAction = useAction(api.mongodb.listLeads);
+
+  const toolkitRef = useRef<HTMLDivElement>(null);
+  const [activeToolTab, setActiveToolTab] = useState<ToolTab>("sourcing");
+
+  // Collapse the tool cards into grouped tabs (see SECTION_TAB_BY_EYEBROW).
+  useLayoutEffect(() => {
+    const container = toolkitRef.current;
+    if (!container) return;
+    container.querySelectorAll<HTMLElement>("section.glass-panel").forEach((section) => {
+      const eyebrow = section.querySelector(".eyebrow")?.textContent?.trim();
+      const tab = eyebrow ? SECTION_TAB_BY_EYEBROW[eyebrow] : undefined;
+      section.classList.toggle("hidden", Boolean(tab) && tab !== activeToolTab);
+    });
+  }, [activeToolTab]);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
   const [automation, setAutomation] = useState<AutomationConfig>({ enabled: false, mode: "BOTH", dailyRunLimit: 24, maxTasksPerRun: 5, runsToday: 0, aiEnabled: false, providerConfigured: false, n8nSecretConfigured: false });
@@ -1172,7 +1213,7 @@ export default function Toolkit() {
 
   return (
     <main className="min-h-screen px-4 py-4 text-foreground sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1500px]">
+      <div className="mx-auto max-w-[1500px]" ref={toolkitRef}>
         <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-[1.75rem] px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-9 items-center justify-center rounded-xl bg-white/75 text-sky-700 shadow-sm"><Wrench className="size-4" /></div>
@@ -1184,6 +1225,22 @@ export default function Toolkit() {
           </div>
         </header>
         <OwnerNav />
+
+        <div className="mt-5 flex flex-wrap items-center gap-2" role="tablist" aria-label="Toolkit tools">
+          {TOOL_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={activeToolTab === tab.key}
+              onClick={() => setActiveToolTab(tab.key)}
+              className={`inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold transition-colors ${activeToolTab === tab.key ? "bg-sky-700 text-white shadow-sm" : "border border-white/85 bg-white/60 text-slate-600 hover:text-sky-800"}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+          <span className="ml-auto hidden text-[0.68rem] text-slate-400 sm:inline">Tool cards collapse by group — the access/status strips below stay visible on every tab.</span>
+        </div>
 
         <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">

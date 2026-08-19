@@ -138,6 +138,25 @@ const schema = defineSchema(
       .index("by_verification_status", ["verificationStatus"])
       .index("by_source_type", ["sourceType"])
       .index("by_parcel_id", ["parcelId"]),
+
+    // Stripe subscription state (Deal Forge marketing site). Written only by
+    // the verified Stripe webhook (/api/stripe/webhook); keyed by the Convex
+    // user id so the signed-in user can read their own status.
+    subscriptions: defineTable({
+      // Convex auth subject / user id the subscription belongs to.
+      userId: v.string(),
+      email: v.optional(v.string()),
+      stripeCustomerId: v.optional(v.string()),
+      stripeSubscriptionId: v.optional(v.string()),
+      priceId: v.optional(v.string()),
+      // Stripe subscription status: active | trialing | past_due | unpaid |
+      // incomplete | incomplete_expired | canceled.
+      status: v.string(),
+      // End of the current billing period (ms epoch), when known.
+      currentPeriodEnd: v.optional(v.number()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_user", ["userId"]),
   },
   {
     schemaValidation: false,

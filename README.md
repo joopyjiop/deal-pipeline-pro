@@ -23,6 +23,7 @@ Full-stack wholesale real-estate deal-finding and deal-making platform. It sourc
 - **Package manager:** Bun (`bun install`, `bun test`, `bun run build`)
 - **AI:** every model call (consultant court, local-agents chat, semantic-search embeddings) routes through the OpenAI-compatible AI gateway via `AI_BASE_URL` (default: local OmniRoute at `https://localhost:20128/v1`, optional `AI_API_KEY` bearer). Embedding model: `text-embedding-3-small`
 - **Data providers:** RentCast (property data/rent/AVM), Firecrawl (crawl), ScrapeGraphAI (extract), Camofox browser proxy (anti-detection fetch), n8n (recurring source runs)
+- **Billing:** Stripe (monthly subscription Checkout Sessions + webhook) for the Deal Forge marketing site's pricing page
 
 ---
 
@@ -54,6 +55,7 @@ Defined with `defineSchema`; `schemaValidation: false`. Every table has `_id` an
 | `appSettings` | `key`, `value`, `updatedAt` | `by_key` (`key`) |
 | `leads` | `propertyAddress`, `city`, `state`, `zip`, `county`, `parcelId?`, `ownerMailingAddress?`, `sourceType` (enum), `sourceUrl`, `sourceRef`, `sourceDate`, `distressScore` (0–100), `distressSignals[]` (`{type, weight, evidence, verified, sourceUrl, sourceDate}`), `verificationStatus` (`UNVERIFIED`\|`PARTIAL`\|`VERIFIED`), `pipelineStatus` (`SOURCED`\|`CRITIQUED`\|`VERIFIED`\|`APPROVED`\|`REJECTED`), `fabricated`, `absenteeOwner`, `needsSkipTrace`, `listedPhone`, `lastVerifiedAt`, `arv?`, `repairs?`, `mao?`, `notes?`, `createdAt`, `updatedAt` | `by_pipeline_status`, `by_verification_status`, `by_source_type`, `by_parcel_id` |
 | `sharedConversations` | `threadId` (conversation/task ref, e.g. `deal:<leadId>`), `sender` (`website` \| `odysseus`), `kind` (`MESSAGE` \| `REQUEST` \| `ESCALATION` \| `RESOLUTION`), `content`, `refs?[]`, `metadata?`, `sentAt` (ms epoch) | `by_thread` (`threadId`), `by_thread_time` (`threadId`, `sentAt`) |
+| `subscriptions` | Stripe subscription state (Deal Forge marketing site): `userId`, `email?`, `stripeCustomerId?`, `stripeSubscriptionId?`, `priceId?`, `status`, `currentPeriodEnd?`, `createdAt`, `updatedAt`. Written only by the verified Stripe webhook | `by_user` (`userId`) |
 
 `sharedConversations` is the mid-task collaboration thread between the website and the external Odysseus harness. The website writes via the owner-gated `postSharedMessage` mutation and reads via `getSharedThread`/`listSharedThreads` (UI: `/shared-conversation`); Odysseus writes/reads via the MCP tools `shared_thread_post` / `shared_thread_read` / `shared_threads_list`. Sender is forced server-side — the website can never impersonate Odysseus and vice versa. Protocol: either side posts `REQUEST`/`ESCALATION` when it hits something outside its strengths (see `src/convex/sharedConversation.ts` and `docs/odysseus-briefing.md`).
 
@@ -98,6 +100,7 @@ All HTTP routes live on the Convex site URL: `https://keen-aardvark-333.convex.s
 | `/api/shared-thread` | GET/POST | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` **or a registry credential with `threads` scope** | Shared-conversation REST API for Odysseus (below): read a thread, post as `odysseus` |
 | `/api/shared-threads` | GET | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` **or a registry credential with `threads` scope** | List shared-conversation thread summaries; `?unanswered=1` returns only the open-message inbox (unanswered Odysseus requests) |
 | `/api/n8n/source` | POST | `x-convex-n8n-secret: CONVEX_N8N_WEBHOOK_SECRET` **or a registry credential with `n8n` scope (same header)** | Queue a public source URL for automated processing (n8n recurring runs) |
+| `/api/stripe/webhook` | POST | Stripe signature (`stripe-signature` header, HMAC-SHA256 verified against `STRIPE_WEBHOOK_SECRET`) | Stripe subscription events (`checkout.session.completed`, `customer.subscription.created/updated/deleted`) → upsert the user's subscription row |
 | `/api/auth/*` | — | Convex Auth | Email OTP + anonymous sign-in |
 
 ### API access registry (who may call the API)
@@ -294,6 +297,9 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 | `CAMOFOX_API_KEY` | Camofox features | Bearer key for the camofox proxy |
 | `SGAI_API_KEY` | ScrapeGraphAI | `SGAI-APIKEY` header for `v2-api.scrapegraphai.com` |
 | `FIRECRAWL_API_KEY` | Firecrawl | Firecrawl API key |
+| `STRIPE_SECRET_KEY` | Stripe billing | Server-side secret key for creating subscription Checkout Sessions (`src/convex/stripe.ts`) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe billing | Signing secret for the `/api/stripe/webhook` endpoint (records subscription state) |
+| `STRIPE_PUBLISHABLE_KEY` | Stripe billing | Optional — publishable key if you add client-side Stripe.js later (not currently used) |
 | `SKIPTRACE_API_KEY` | Skip trace (optional, paid) | Searchbug API password (`PASS`) for the reverse-address people search. Phone numbers are licensed per-record and need a funded Searchbug prepaid balance |
 | `SKIPTRACE_ACCOUNT_ID` | Skip trace (optional, paid) | Searchbug account/company code (`CO_CODE`) for the reverse-address people search |
 | `AI_BASE_URL` | AI features | OpenAI-compatible AI gateway base for chat (consultant court + local agents) and embeddings. Default `https://localhost:20128/v1` (local OmniRoute). Chat no longer calls Ollama Cloud directly — `OLLAMA_API_KEY` is not used |

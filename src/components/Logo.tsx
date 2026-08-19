@@ -8,7 +8,7 @@ export function Logo({ className = "", size = "md" }: { className?: string; size
   };
   const s = sizes[size];
   return (
-    <Link to="/" className={`flex items-center gap-2 ${className}`} aria-label="DealForge home">
+    <Link to="/" className={`flex items-center gap-2 ${className}`} aria-label="Deal Forge home">
       <span className={`flex items-center justify-center rounded-xl border border-indigo-900/10 bg-white shadow-sm ${s.box}`}>
         <svg viewBox="0 0 24 24" fill="none" className={`${s.icon} text-indigo-600`} aria-hidden="true">
           {/* Anvil shape + checkmark forming a "D" */}
@@ -17,7 +17,7 @@ export function Logo({ className = "", size = "md" }: { className?: string; size
           <path d="M9 12l3 3 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </span>
-      <span className={`font-bold tracking-tight text-slate-900 dark:text-slate-100 ${s.text}`}>DealForge</span>
+      <span className={`font-bold tracking-tight text-slate-900 dark:text-slate-100 ${s.text}`}>Deal Forge</span>
     </Link>
   );
 }

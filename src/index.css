@@ -194,3 +194,14 @@
     @apply text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-indigo-700;
   }
 }
+
+/* Smooth in-page anchor scrolling (used by the footer's legal links and the
+   landing page section links). scroll-margin keeps anchored sections clear of
+   the fixed marketing nav. */
+html {
+  scroll-behavior: smooth;
+}
+
+[id] {
+  scroll-margin-top: 5.5rem;
+}

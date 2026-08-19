@@ -64,6 +64,118 @@ function isMcpSourceType(value: unknown): value is McpSourceType {
   return typeof value === "string" && mcpSourceTypes.includes(value as McpSourceType);
 }
 
+// ── Stripe subscription webhook ────────────────────────────────────────────
+// Verifies the Stripe signature (HMAC-SHA256 over "<t>.<payload>", compared
+// constant-time) and records subscription state for the user who checked out.
+// The signature check is the only auth: anyone without a valid Stripe-signed
+// payload is rejected before any write happens. The write itself is an
+// internal mutation, so the client can never call it directly.
+
+function stripeEventString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function stripeEventNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+async function verifyStripeSignature(payload: string, signatureHeader: string | null, secret: string): Promise<boolean> {
+  if (!signatureHeader) return false;
+  const parts = signatureHeader.split(",").map((part) => part.trim());
+  const timestamp = parts.find((part) => part.startsWith("t="))?.slice(2);
+  const signature = parts.find((part) => part.startsWith("v1="))?.slice(3);
+  if (!timestamp || !signature) return false;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${timestamp}.${payload}`),
+  );
+  const hex = Array.from(new Uint8Array(mac))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return constantTimeEqual(hex, signature);
+}
+
+const stripeWebhook = httpAction(async (ctx, request) => {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) {
+    return json({ error: "STRIPE_WEBHOOK_SECRET is not configured" }, 500);
+  }
+  const payload = await request.text();
+  const valid = await verifyStripeSignature(payload, request.headers.get("stripe-signature"), secret);
+  if (!valid) {
+    return json({ error: "Invalid signature" }, 400);
+  }
+
+  let event: Record<string, unknown>;
+  try {
+    event = JSON.parse(payload) as Record<string, unknown>;
+  } catch {
+    return json({ error: "Invalid JSON payload" }, 400);
+  }
+
+  const type = stripeEventString(event.type);
+  const data = event.data && typeof event.data === "object" ? (event.data as Record<string, unknown>) : {};
+  const object = data.object && typeof data.object === "object" ? (data.object as Record<string, unknown>) : {};
+  const metadata = object.metadata && typeof object.metadata === "object" ? (object.metadata as Record<string, unknown>) : {};
+  const userId = stripeEventString(metadata.userId) ?? stripeEventString(object.client_reference_id);
+  const subscriptionId = stripeEventString(object.subscription) ?? stripeEventString(object.id);
+  const items = object.items && typeof object.items === "object" ? (object.items as Record<string, unknown>) : {};
+  const itemList = Array.isArray(items.data) ? (items.data as Array<Record<string, unknown>>) : [];
+  const priceId = stripeEventString(itemList[0]?.price && typeof itemList[0].price === "object" ? (itemList[0].price as Record<string, unknown>).id : undefined);
+
+  const record = async (status: string, currentPeriodEnd?: number) => {
+    if (!userId) return;
+    await ctx.runMutation(internal.subscriptions.upsertSubscription, {
+      userId,
+      email: stripeEventString(object.customer_email),
+      stripeCustomerId: stripeEventString(object.customer),
+      stripeSubscriptionId: subscriptionId,
+      priceId,
+      status,
+      currentPeriodEnd,
+    });
+  };
+
+  switch (type) {
+    case "checkout.session.completed": {
+      // The subscription itself is created a moment later; record the session
+      // so the user sees active status immediately, then let the
+      // subscription.created/updated events keep it in sync.
+      await record("active");
+      break;
+    }
+    case "customer.subscription.created":
+    case "customer.subscription.updated": {
+      const raw = stripeEventString(object.status);
+      const status =
+        raw === "active" || raw === "trialing" || raw === "past_due" || raw === "unpaid" || raw === "incomplete" || raw === "incomplete_expired"
+          ? raw
+          : "canceled";
+      const periodEnd = stripeEventNumber(object.current_period_end);
+      await record(status, periodEnd !== undefined ? periodEnd * 1000 : undefined);
+      break;
+    }
+    case "customer.subscription.deleted": {
+      await record("canceled");
+      break;
+    }
+    default:
+      break;
+  }
+
+  return json({ received: true });
+});
+
+http.route({ path: "/api/stripe/webhook", method: "POST", handler: stripeWebhook });
+
 const queueN8nSource = httpAction(async (ctx, request) => {
   const expectedSecret = process.env.CONVEX_N8N_WEBHOOK_SECRET;
   const receivedSecret = request.headers.get("x-convex-n8n-secret");

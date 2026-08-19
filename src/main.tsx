@@ -14,6 +14,7 @@ import "./types/global.d.ts";
 import { CONVEX_URL } from "./lib/convex-url";
 
 import Landing from "./pages/Landing";
+import Legal from "./pages/Legal";
 import { AppShell } from "@/components/AppShell";
 import AuthPage from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -61,6 +62,7 @@ createRoot(document.getElementById("root")!).render(
           <RouteSyncer />
           <Routes>
             <Route path="/" element={<Landing />} />
+            <Route path="/legal" element={<Legal />} />
             <Route
               path="/auth"
               element={<AuthPage redirectAfterAuth="/dashboard" />}

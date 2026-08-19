@@ -33,6 +33,8 @@ import type * as sharedConversation from "../sharedConversation.js";
 import type * as sitemap from "../sitemap.js";
 import type * as skiptrace from "../skiptrace.js";
 import type * as stagingEvidence from "../stagingEvidence.js";
+import type * as stripe from "../stripe.js";
+import type * as subscriptions from "../subscriptions.js";
 import type * as threadResponder from "../threadResponder.js";
 import type * as underwriting from "../underwriting.js";
 import type * as users from "../users.js";
@@ -71,6 +73,8 @@ declare const fullApi: ApiFromModules<{
   sitemap: typeof sitemap;
   skiptrace: typeof skiptrace;
   stagingEvidence: typeof stagingEvidence;
+  stripe: typeof stripe;
+  subscriptions: typeof subscriptions;
   threadResponder: typeof threadResponder;
   underwriting: typeof underwriting;
   users: typeof users;

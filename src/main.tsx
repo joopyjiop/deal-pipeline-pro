@@ -15,6 +15,7 @@ import { CONVEX_URL } from "./lib/convex-url";
 
 import Landing from "./pages/Landing";
 import Legal from "./pages/Legal";
+import Demo from "./pages/Demo";
 import { AppShell } from "@/components/AppShell";
 import AuthPage from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -63,6 +64,7 @@ createRoot(document.getElementById("root")!).render(
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/legal" element={<Legal />} />
+            <Route path="/demo" element={<Demo />} />
             <Route
               path="/auth"
               element={<AuthPage redirectAfterAuth="/dashboard" />}

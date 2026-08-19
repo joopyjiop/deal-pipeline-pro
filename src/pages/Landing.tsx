@@ -17,6 +17,7 @@ import {
   Lock,
   Mail,
   MapPin,
+  Play,
   RefreshCcw,
   Search,
   ShieldCheck,
@@ -296,12 +297,12 @@ export default function Landing() {
                 >
                   Subscribe now <ArrowRight className="size-5" />
                 </a>
-                <a
-                  href="#how-it-works"
+                <Link
+                  to="/demo"
                   className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-7 py-3.5 text-base font-semibold text-slate-700 transition-colors hover:border-indigo-300 hover:text-indigo-600 sm:w-auto"
                 >
-                  See how it works
-                </a>
+                  <Play className="size-4" /> Watch demo
+                </Link>
               </div>
               <div className="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-slate-500">
                 <span className="inline-flex items-center gap-1.5">

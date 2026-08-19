@@ -40,7 +40,7 @@ const BUYERS = "buyers";
 const MATCHES = "property_matches";
 const KIND_PURCHASE = "PURCHASE_CONFIRMATION";
 const RESEND_API = "https://api.resend.com/emails";
-const SUPPORT_EMAIL = "support@dealforge.io";
+const SUPPORT_EMAIL = "support@dealforge.homes";
 
 let clientPromise: Promise<MongoClient> | null = null;
 

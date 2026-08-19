@@ -302,7 +302,7 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 | `STRIPE_SECRET_KEY` | Stripe billing | Server-side secret key for creating subscription Checkout Sessions (`src/convex/stripe.ts`) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe billing | Signing secret for the `/api/stripe/webhook` endpoint (records subscription state) |
 | `RESEND_API_KEY` | Purchase emails | Resend API key for the purchase-confirmation email sent on `checkout.session.completed` with the customer's matched-leads CSV attachment (`src/convex/emailDelivery.ts`). Without it the email fails and is logged for retry |
-| `PURCHASE_EMAIL_FROM` | Purchase emails | Optional — `From` address for the purchase-confirmation email (default `Deal Forge <support@dealforge.io>`; must be a domain verified in Resend) |
+| `PURCHASE_EMAIL_FROM` | Purchase emails | Optional — `From` address for the purchase-confirmation email (default `Deal Forge <support@dealforge.homes>`; must be a domain verified in Resend) |
 | `STRIPE_PUBLISHABLE_KEY` | Stripe billing | Optional — publishable key if you add client-side Stripe.js later (not currently used) |
 | `SKIPTRACE_API_KEY` | Skip trace (optional, paid) | Searchbug API password (`PASS`) for the reverse-address people search. Phone numbers are licensed per-record and need a funded Searchbug prepaid balance |
 | `SKIPTRACE_ACCOUNT_ID` | Skip trace (optional, paid) | Searchbug account/company code (`CO_CODE`) for the reverse-address people search |

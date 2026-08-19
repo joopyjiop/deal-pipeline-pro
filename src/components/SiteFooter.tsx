@@ -3,7 +3,7 @@ import { Logo } from "@/components/Logo";
 import { Mail, MapPin } from "lucide-react";
 
 /** Public business contact for the Deal Forge marketing site. */
-export const CONTACT_EMAIL = "support@dealforge.io";
+export const CONTACT_EMAIL = "support@dealforge.homes";
 export const SUPPORT_ADDRESS = "Deal Forge LLC · 100 Congress Ave, Suite 1100 · Austin, TX 78701";
 
 /**

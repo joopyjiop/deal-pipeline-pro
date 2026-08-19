@@ -116,6 +116,8 @@ Verify access before doing anything else: `GET https://keen-aardvark-333.convex.
 
 The secret *values* are set by the owner in the Convex dashboard's Keys/Environment Variables panel (and the Freebuff Keys UI). You never hardcode or invent them — if a key is missing, ask the owner to paste it into the Keys panel, never into chat or code.
 
+**API access registry.** The API is closed by default: only the owner's master keys plus scoped credentials the owner issues from the Dashboard's **API access** panel (owner-only) can call it. Scopes: `admin` (`/api/admin/*`), `threads` (`/api/shared-thread(s)`), `n8n` (`/api/n8n/source`). The MCP tool servers (`/api/mcp`, `/api/mcp/admin`) accept only the owner's master secrets. If you want a dedicated scoped credential instead of the shared secret, call the `request_api_access` MCP tool on `/api/mcp` — it creates a PENDING request that only the owner can approve in the Dashboard; no token is issued until then. Tokens are shown exactly once and stop working the instant the owner revokes them.
+
 ## Admin API — full write access (owner's key)
 
 Resources: `leads`, `buyers`, `matches`, `hot-deals`, `import-staging` (full CRUD), `users` (read-only LIST).
@@ -135,7 +137,7 @@ Server-side validation (never bypass it, and never try to disable it):
 
 ## MCP server — review and analysis (no writes)
 
-`POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `web_intel` (one-shot discovery + fetch with Firecrawl render fallback + ScrapeGraphAI extraction; Camofox stays owner-only), `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace` (paid Searchbug reverse-address contact lookup; saves sourced phones/emails onto the lead — enrichment, never an approval), `owner_lookup` (free RentCast owner name + mailing address + absentee flag — enrichment, never an approval), `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
+`POST /api/mcp` with JSON-RPC 2.0: `initialize`, `ping`, `tools/list`, `tools/call`. Tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `web_intel` (one-shot discovery + fetch with Firecrawl render fallback + ScrapeGraphAI extraction; Camofox stays owner-only), `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace` (paid Searchbug reverse-address contact lookup; saves sourced phones/emails onto the lead — enrichment, never an approval), `owner_lookup` (free RentCast owner name + mailing address + absentee flag — enrichment, never an approval), `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, `request_api_access` (request a scoped registry credential — creates a PENDING entry the owner approves or denies in the Dashboard's **API access** panel; no token is issued until approval), and more. All MCP tools are read/recommend only — they never approve leads. Owner approval is required for approvals and for anything that surfaces a deal as ready.
 
 ## Admin MCP server — full CRUD through MCP (owner's key)
 

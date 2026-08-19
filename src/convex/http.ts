@@ -163,15 +163,19 @@ async function adminAuthorized(ctx: ActionCtx, request: Request) {
 // /api/mcp/admin uses the same ADMIN_API_KEY as the REST admin API — sent as a
 // standard Bearer token (canonical, matches /api/admin) or as the
 // x-admin-api-key header (for MCP clients that cannot set Authorization).
-async function adminMcpAuthorized(ctx: ActionCtx, request: Request) {
+// This surface stays owner-key-only (no registry scope): the MCP tool-server
+// plumbing calls it synchronously, so it cannot run the async registry check.
+function adminMcpAuthorized(request: Request) {
   const expectedSecret = process.env.ADMIN_API_KEY;
   if (!expectedSecret) return false;
   if (!adminIpAllowed(request)) return false;
   const authorization = request.headers.get("authorization") ?? "";
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   const apiKey = request.headers.get("x-admin-api-key")?.trim();
-  if ((bearer && constantTimeEqual(bearer, expectedSecret)) || (apiKey && constantTimeEqual(apiKey, expectedSecret))) return true;
-  return registryAuthorized(ctx, request, "admin", ["authorization", "x-admin-api-key"]);
+  return Boolean(
+    (bearer && constantTimeEqual(bearer, expectedSecret)) ||
+    (apiKey && constantTimeEqual(apiKey, expectedSecret)),
+  );
 }
 
 function adminErrorStatus(message: string) {
@@ -416,8 +420,8 @@ function mcpGetFor(authorize: (ctx: ActionCtx, request: Request) => Promise<bool
   });
 }
 
-const mcpGet = mcpGetFor(async (ctx, request) => mcpAuthorized(ctx, request, "mcp"));
-const adminMcpGet = mcpGetFor(adminMcpAuthorized);
+const mcpGet = mcpGetFor(async (_ctx, request) => mcpAuthorized(request));
+const adminMcpGet = mcpGetFor(async (_ctx, request) => adminMcpAuthorized(request));
 
 function mcpJsonRpcResult(id: JsonRpcId, value: unknown) {
   return json({ jsonrpc: "2.0", id, result: value }, 200, mcpHeaders);
@@ -434,14 +438,28 @@ function mcpError(id: JsonRpcId, code: number, message: string) {
   return json({ jsonrpc: "2.0", id, error: { code, message } }, 200, mcpHeaders);
 }
 
-async function mcpAuthorized(ctx: ActionCtx, request: Request, scope: ApiScope = "mcp") {
+// Overloaded: the MCP tool-server plumbing (/api/mcp) calls authorize with only
+// the request, synchronously, so this surface stays owner-key-only. The async
+// (ctx, request, scope) form powers the shared-conversation routes, which DO
+// accept registry credentials scoped to "threads".
+function mcpAuthorized(request: Request): boolean;
+function mcpAuthorized(ctx: ActionCtx, request: Request, scope: ApiScope): Promise<boolean>;
+function mcpAuthorized(
+  first: ActionCtx | Request,
+  request?: Request,
+  scope: ApiScope = "threads",
+): boolean | Promise<boolean> {
   const expectedSecret = process.env.MCP_TOOL_SERVER_SECRET;
   if (!expectedSecret) return false;
-  const authorization = request.headers.get("authorization") ?? "";
+  const req = request ?? (first as Request);
+  const authorization = req.headers.get("authorization") ?? "";
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
-  const apiKey = request.headers.get("x-mcp-api-key")?.trim();
-  if ((bearer && constantTimeEqual(bearer, expectedSecret)) || (apiKey && constantTimeEqual(apiKey, expectedSecret))) return true;
-  return registryAuthorized(ctx, request, scope, ["authorization", "x-mcp-api-key"]);
+  const apiKey = req.headers.get("x-mcp-api-key")?.trim();
+  if ((bearer && constantTimeEqual(bearer, expectedSecret)) || (apiKey && constantTimeEqual(apiKey, expectedSecret))) {
+    return true;
+  }
+  if (!request) return false; // sync form: master key only
+  return registryAuthorized(first as ActionCtx, req, scope, ["authorization", "x-mcp-api-key"]);
 }
 
 function mcpTools() {
@@ -466,7 +484,7 @@ function mcpTools() {
     { name: "shared_threads_list", description: "List every shared conversation thread with message count, last sender, last kind, and last content preview. Use it to discover the threadId to read or continue.", inputSchema: { type: "object", properties: { limit: { type: "number", minimum: 1, maximum: 100 } }, additionalProperties: false } },
     { name: "shared_thread_read", description: "Read the full shared conversation thread (oldest first) between Odysseus and the website. Thread ids follow the convention deal:<leadId>, task:<stagedId>, buyer:<buyerId>, or ops:<topic>.", inputSchema: { type: "object", properties: { threadId: { type: "string", description: "e.g. deal:<leadId> or task:<stagedId>" }, limit: { type: "number", minimum: 1, maximum: 500 } }, required: ["threadId"], additionalProperties: false } },
     { name: "shared_thread_post", description: "Post a message to a shared conversation thread as Odysseus. Use it when you hit something outside your strengths and need the website or owner (REQUEST), when you are blocked (ESCALATION), when you resolve an open item (RESOLUTION), or for a general note (MESSAGE). Never paste secrets or unnecessary PII; never claim verification that did not happen. Threads recommend and coordinate — they never approve a deal.", inputSchema: { type: "object", properties: { threadId: { type: "string", description: "e.g. deal:<leadId> or task:<stagedId>" }, content: { type: "string", description: "Message body (max 8000 chars)" }, kind: { type: "string", enum: ["MESSAGE", "REQUEST", "ESCALATION", "RESOLUTION"] }, refs: { type: "array", items: { type: "string" }, description: "Optional context: lead/staged/buyer ids or URLs" } }, required: ["threadId", "content"], additionalProperties: false } },
-    { name: "request_api_access", description: "Request a scoped API credential for this agent instead of sharing the master secret. Creates a PENDING request that only the owner can approve in the Dashboard; no token is issued until approval. Scopes: mcp (agent tools), threads (shared conversations), admin (full CRUD), n8n (automation queue).", inputSchema: { type: "object", properties: { name: { type: "string", description: "Agent or integration name, e.g. 'Odysseus' or 'n8n'" }, scopes: { type: "array", items: { type: "string", enum: ["mcp", "threads", "admin", "n8n"] }, description: "What this credential may call" }, note: { type: "string", description: "Optional note for the owner" } }, required: ["name", "scopes"], additionalProperties: false } },
+    { name: "request_api_access", description: "Request a scoped API credential for this agent instead of sharing the master secret. Creates a PENDING request that only the owner can approve in the Dashboard; no token is issued until approval. Scopes: threads (shared conversations), admin (REST admin CRUD), n8n (automation queue). The MCP tool servers themselves stay protected by the owner's master secrets.", inputSchema: { type: "object", properties: { name: { type: "string", description: "Agent or integration name, e.g. 'Odysseus' or 'n8n'" }, scopes: { type: "array", items: { type: "string", enum: ["threads", "admin", "n8n"] }, description: "What this credential may call" }, note: { type: "string", description: "Optional note for the owner" } }, required: ["name", "scopes"], additionalProperties: false } },
   ];
 }
 
@@ -657,7 +675,7 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
   }
   if (name === "request_api_access") {
     if (typeof rawArguments.name !== "string" || !rawArguments.name.trim()) throw new Error("request_api_access requires a name");
-    if (!Array.isArray(rawArguments.scopes) || rawArguments.scopes.length === 0) throw new Error("request_api_access requires at least one scope (mcp, threads, admin, n8n)");
+    if (!Array.isArray(rawArguments.scopes) || rawArguments.scopes.length === 0) throw new Error("request_api_access requires at least one scope (threads, admin, n8n)");
     const note = optionalString(rawArguments.note);
     if (note === "__invalid__") throw new Error("note must be a string when provided");
     return ctx.runAction(internal.apiAccess.requestApiAccess, {

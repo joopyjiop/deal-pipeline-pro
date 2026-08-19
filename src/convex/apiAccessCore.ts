@@ -15,8 +15,14 @@
 
 import { createHash, randomBytes } from "node:crypto";
 
-/** The four API surfaces a credential can be scoped to. */
-export const API_SCOPES = ["mcp", "threads", "admin", "n8n"] as const;
+/**
+ * The API surfaces a credential can be scoped to. Each scope maps to a surface
+ * whose HTTP handler performs an async registry check: REST admin CRUD
+ * (`admin`), shared conversations (`threads`), and the automation queue
+ * (`n8n`). The MCP tool servers (/api/mcp, /api/mcp/admin) are intentionally
+ * NOT scope-gated — they stay protected by the owner's master secrets only.
+ */
+export const API_SCOPES = ["admin", "threads", "n8n"] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
 
 export const CREDENTIAL_STATUSES = ["ACTIVE", "PENDING", "REVOKED"] as const;
@@ -32,12 +38,10 @@ export function isApiScope(value: unknown): value is ApiScope {
 
 export function scopeLabel(scope: ApiScope): string {
   switch (scope) {
-    case "mcp":
-      return "Agent tools (/api/mcp)";
+    case "admin":
+      return "Admin CRUD (/api/admin/*)";
     case "threads":
       return "Shared conversations (/api/shared-thread)";
-    case "admin":
-      return "Full admin CRUD (/api/admin + /api/mcp/admin)";
     case "n8n":
       return "Automation queue (/api/n8n/source)";
   }
@@ -50,7 +54,7 @@ export function scopeLabel(scope: ApiScope): string {
  */
 export function normalizeScopes(value: unknown): ApiScope[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("At least one API scope is required (mcp, threads, admin, n8n)");
+    throw new Error("At least one API scope is required (admin, threads, n8n)");
   }
   const scopes: ApiScope[] = [];
   for (const entry of value) {

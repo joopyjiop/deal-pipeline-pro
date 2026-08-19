@@ -82,6 +82,7 @@ Managed from Convex actions (`src/convex/mongodb.ts`, `src/convex/admin.ts`).
 | `tool_access` | Singleton doc `_id: "admin_tools"` — feature toggles (`scraperEnabled`, `estimatorEnabled`, `aiEnabled`, `automationEnabled`, `automationMode`, `dailyRunLimit`, `runsToday`, `usageDay`) |
 | `automation_tasks` | Queued automation runs (`SCRAPE` / `ESTIMATE`, status `PENDING`\|`RUNNING`\|`COMPLETED`\|`FAILED`) |
 | `integration_checks` | Health-check results for connected providers |
+| `api_credentials` | API access registry (owner-managed, scoped, revocable agent credentials): `name`, `scopes` (`admin`\|`threads`\|`n8n`), `tokenHash` (SHA-256 — the plaintext is never stored), `tokenPrefix`, `status` (`ACTIVE`\|`PENDING`\|`REVOKED`), `createdBy`, `createdAt`, `lastUsedAt?`, `note?` |
 
 ---
 
@@ -91,13 +92,25 @@ All HTTP routes live on the Convex site URL: `https://keen-aardvark-333.convex.s
 
 | Route | Method | Auth | Purpose |
 | --- | --- | --- | --- |
-| `/api/admin/...` | GET/POST/PATCH/PUT/DELETE | `Authorization: Bearer ADMIN_API_KEY` | Full CRUD over leads, buyers, matches, hot-deals, import-staging (below) |
-| `/api/mcp` | GET/POST/OPTIONS | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` or `x-mcp-api-key` header | MCP tool server for external AI agents (23 tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `web_intel` (one-shot discovery + fetch/Firecrawl fallback + ScrapeGraphAI extraction over sitemap, Firecrawl, ScrapeGraphAI, and the owner-only Camofox escalation), `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace`, `owner_lookup`, `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, …). Recommendations only — never approves |
+| `/api/admin/...` | GET/POST/PATCH/PUT/DELETE | `Authorization: Bearer ADMIN_API_KEY` **or a registry credential with `admin` scope** | Full CRUD over leads, buyers, matches, hot-deals, import-staging (below) |
+| `/api/mcp` | GET/POST/OPTIONS | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` or `x-mcp-api-key` header (master key only — no registry scope) | MCP tool server for external AI agents (24 tools: `scrape_source`, `scrapegraph_extract`, `sitemap_discover`, `web_intel` (one-shot discovery + fetch/Firecrawl fallback + ScrapeGraphAI extraction over sitemap, Firecrawl, ScrapeGraphAI, and the owner-only Camofox escalation), `property_data`, `queue_source`, `list_pipeline`, `list_staged_sources`, `list_buyer_buy_boxes`, `list_match_board`, `estimate_deal`, `consultant_court`, `run_agent_team`, `list_pipeline_brief`, `semantic_search`, `skip_trace`, `owner_lookup`, `shared_threads_list`, `shared_thread_read`, `shared_thread_post`, `request_api_access` (requests a scoped registry credential; the owner approves in the Dashboard — no token is issued until then), …). Recommendations only — never approves |
 | `/api/mcp/admin` | GET/POST/OPTIONS | `Authorization: Bearer ADMIN_API_KEY` or `x-admin-api-key` header | MCP tool server exposing the full admin CRUD surface as 20 tools (`admin_list_leads` / `admin_get_lead` / `admin_create_lead` / `admin_update_lead` / `admin_delete_lead`, and the same five for buyers, matches, hot-deals). Same server-side validation as `/api/admin` |
-| `/api/shared-thread` | GET/POST | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` | Shared-conversation REST API for Odysseus (below): read a thread, post as `odysseus` |
-| `/api/shared-threads` | GET | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` | List shared-conversation thread summaries; `?unanswered=1` returns only the open-message inbox (unanswered Odysseus requests) |
-| `/api/n8n/source` | POST | `x-convex-n8n-secret: CONVEX_N8N_WEBHOOK_SECRET` | Queue a public source URL for automated processing (n8n recurring runs) |
+| `/api/shared-thread` | GET/POST | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` **or a registry credential with `threads` scope** | Shared-conversation REST API for Odysseus (below): read a thread, post as `odysseus` |
+| `/api/shared-threads` | GET | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` **or a registry credential with `threads` scope** | List shared-conversation thread summaries; `?unanswered=1` returns only the open-message inbox (unanswered Odysseus requests) |
+| `/api/n8n/source` | POST | `x-convex-n8n-secret: CONVEX_N8N_WEBHOOK_SECRET` **or a registry credential with `n8n` scope (same header)** | Queue a public source URL for automated processing (n8n recurring runs) |
 | `/api/auth/*` | — | Convex Auth | Email OTP + anonymous sign-in |
+
+### API access registry (who may call the API)
+
+Every API surface is closed by default: only the owner's master keys (`ADMIN_API_KEY`, `MCP_TOOL_SERVER_SECRET`, `CONVEX_N8N_WEBHOOK_SECRET`) work, plus scoped credentials the owner issues from the **API access** panel in the Dashboard (owner-only; backed by `src/convex/apiAccess.ts` + the `api_credentials` collection). Tokens are 256-bit random, `dp_`-prefixed, stored **only as SHA-256 hashes**, shown exactly once at issue/rotate time, and stop working instantly when revoked.
+
+| Scope | Grants |
+| --- | --- |
+| `admin` | `/api/admin/*` (REST CRUD) |
+| `threads` | `/api/shared-thread` + `/api/shared-threads` |
+| `n8n` | `/api/n8n/source` |
+
+The MCP tool servers (`/api/mcp`, `/api/mcp/admin`) are intentionally **not** scope-gated: their plumbing authenticates synchronously, so they accept only the owner's master secrets (`MCP_TOOL_SERVER_SECRET` / `ADMIN_API_KEY`). Agents use `request_api_access` on `/api/mcp` to request a scoped credential (creates a `PENDING` entry); the owner approves or denies it in the Dashboard's **API access** panel, which is also where the owner can create, rotate, revoke, re-enable, or delete credentials directly. Revoking a credential is instant — the token is checked against the registry on every request (`checkApiCredential` internal action) and `lastUsedAt` is recorded for audit.
 
 ---
 
@@ -302,6 +315,7 @@ Two contact-data paths, both stored with source evidence and never invented:
 ## Security hardening
 
 - **Constant-time secret checks.** Every secret header (`ADMIN_API_KEY`, `MCP_TOOL_SERVER_SECRET`, `CONVEX_N8N_WEBHOOK_SECRET`) is compared with `constantTimeEqual` (in `src/convex/networkGuard.ts`), never `===`, so the comparison does not leak the match position through timing.
+- **API access registry.** The API is closed by default — only the owner's master keys plus scoped, revocable per-agent credentials (Dashboard → **API access**, or `request_api_access` on `/api/mcp` with owner approval) can call it. Credentials are scoped (`admin` / `threads` / `n8n`), stored as SHA-256 hashes only, audited with `lastUsedAt`, and revoked instantly (see "API access registry" above).
 - **SSRF guard.** Every server-side fetch of an attacker-influenceable URL (source scrape, sitemap discovery, Firecrawl/ScrapeGraphAI, n8n source queue) and the `ODYSSEUS_NOTIFY_WEBHOOK_URL` webhook run through `assertPublicOutboundUrl` — it rejects non-http(s) schemes, localhost/`.local`, loopback/private/link-local/cloud-metadata targets, and IP-literal tricks (decimal/hex/octal IPv4, IPv6-mapped). Residual risk: DNS rebinding (a hostname that resolves to a private IP after the check) — use an egress proxy if that threat model matters.
 - **Admin IP allow-list.** Optional `ADMIN_ALLOWED_IPS` (above) denies non-listed client IPs on `/api/admin*` and `/api/mcp/admin`. It reads proxy headers, which a direct client can spoof, so treat it as defense-in-depth; `ADMIN_API_KEY` remains the primary control and the authoritative IP gate belongs at the DNS/proxy/edge layer.
 - **Dependency pinning.** `bun.lock` and `package-lock.json` are checked in and not gitignored. CI installs with `bun install --frozen-lockfile`, so a dependency change without a matching lockfile change fails the build.

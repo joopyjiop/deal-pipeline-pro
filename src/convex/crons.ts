@@ -24,4 +24,15 @@ crons.interval(
   {},
 );
 
+// Retry failed purchase-confirmation emails (Stripe checkout → CSV delivery).
+// Each delivery allows MAX_DELIVERY_ATTEMPTS with escalating backoff; a
+// permanently failed send stays visible in the email_deliveries log for
+// owner review via GET /api/admin/email-deliveries.
+crons.interval(
+  "retry failed purchase emails",
+  { minutes: 15 },
+  internal.emailDelivery.retryFailedDeliveries,
+  {},
+);
+
 export default crons;

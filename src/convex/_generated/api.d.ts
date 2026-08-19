@@ -17,6 +17,8 @@ import type * as auth_emailOtp from "../auth/emailOtp.js";
 import type * as camofox from "../camofox.js";
 import type * as credentials from "../credentials.js";
 import type * as crons from "../crons.js";
+import type * as emailDelivery from "../emailDelivery.js";
+import type * as emailDeliveryCore from "../emailDeliveryCore.js";
 import type * as embeddings from "../embeddings.js";
 import type * as http from "../http.js";
 import type * as leads from "../leads.js";
@@ -57,6 +59,8 @@ declare const fullApi: ApiFromModules<{
   camofox: typeof camofox;
   credentials: typeof credentials;
   crons: typeof crons;
+  emailDelivery: typeof emailDelivery;
+  emailDeliveryCore: typeof emailDeliveryCore;
   embeddings: typeof embeddings;
   http: typeof http;
   leads: typeof leads;

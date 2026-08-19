@@ -100,7 +100,9 @@ All HTTP routes live on the Convex site URL: `https://keen-aardvark-333.convex.s
 | `/api/shared-thread` | GET/POST | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` **or a registry credential with `threads` scope** | Shared-conversation REST API for Odysseus (below): read a thread, post as `odysseus` |
 | `/api/shared-threads` | GET | `Authorization: Bearer MCP_TOOL_SERVER_SECRET` **or a registry credential with `threads` scope** | List shared-conversation thread summaries; `?unanswered=1` returns only the open-message inbox (unanswered Odysseus requests) |
 | `/api/n8n/source` | POST | `x-convex-n8n-secret: CONVEX_N8N_WEBHOOK_SECRET` **or a registry credential with `n8n` scope (same header)** | Queue a public source URL for automated processing (n8n recurring runs) |
-| `/api/stripe/webhook` | POST | Stripe signature (`stripe-signature` header, HMAC-SHA256 verified against `STRIPE_WEBHOOK_SECRET`) | Stripe subscription events (`checkout.session.completed`, `customer.subscription.created/updated/deleted`) → upsert the user's subscription row |
+| `/api/stripe/webhook` | POST | Stripe signature (`stripe-signature` header, HMAC-SHA256 verified against `STRIPE_WEBHOOK_SECRET`) | Stripe subscription events (`checkout.session.completed`, `customer.subscription.created/updated/deleted`) → upsert the user's subscription row; `checkout.session.completed` also schedules the purchase-confirmation email with the customer's matched-leads CSV attachment (via Resend) |
+| `/api/admin/email-deliveries` | GET | `Authorization: Bearer ADMIN_API_KEY` **or a registry credential with `admin` scope** | Purchase-confirmation delivery log (status SENT/FAILED, attempts, error, lead count) from the `email_deliveries` collection — no CSV payloads |
+| `/api/admin/email-deliveries/retry` | POST | `Authorization: Bearer ADMIN_API_KEY` **or a registry credential with `admin` scope** | Manually trigger the failed-delivery retry pass (same as the 15-minute cron; resends the stored CSV) |
 | `/api/auth/*` | — | Convex Auth | Email OTP + anonymous sign-in |
 
 ### API access registry (who may call the API)
@@ -299,6 +301,8 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 | `FIRECRAWL_API_KEY` | Firecrawl | Firecrawl API key |
 | `STRIPE_SECRET_KEY` | Stripe billing | Server-side secret key for creating subscription Checkout Sessions (`src/convex/stripe.ts`) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe billing | Signing secret for the `/api/stripe/webhook` endpoint (records subscription state) |
+| `RESEND_API_KEY` | Purchase emails | Resend API key for the purchase-confirmation email sent on `checkout.session.completed` with the customer's matched-leads CSV attachment (`src/convex/emailDelivery.ts`). Without it the email fails and is logged for retry |
+| `PURCHASE_EMAIL_FROM` | Purchase emails | Optional — `From` address for the purchase-confirmation email (default `Deal Forge <support@dealforge.io>`; must be a domain verified in Resend) |
 | `STRIPE_PUBLISHABLE_KEY` | Stripe billing | Optional — publishable key if you add client-side Stripe.js later (not currently used) |
 | `SKIPTRACE_API_KEY` | Skip trace (optional, paid) | Searchbug API password (`PASS`) for the reverse-address people search. Phone numbers are licensed per-record and need a funded Searchbug prepaid balance |
 | `SKIPTRACE_ACCOUNT_ID` | Skip trace (optional, paid) | Searchbug account/company code (`CO_CODE`) for the reverse-address people search |

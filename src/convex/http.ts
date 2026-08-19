@@ -150,6 +150,19 @@ const stripeWebhook = httpAction(async (ctx, request) => {
       // so the user sees active status immediately, then let the
       // subscription.created/updated events keep it in sync.
       await record("active");
+      // Purchase confirmation + matched-leads CSV. Scheduled (not awaited)
+      // so Stripe's 200 is never blocked by the email send; failures are
+      // logged in email_deliveries and retried by cron/admin endpoint.
+      if (userId) {
+        await ctx.scheduler.runAfter(0, internal.emailDelivery.sendPurchaseEmail, {
+          userId,
+          email: stripeEventString(object.customer_email) ?? "",
+          checkoutSessionId: stripeEventString(object.id) ?? "",
+          priceId,
+          subscriptionId,
+          stripeCustomerId: stripeEventString(object.customer) ?? "",
+        });
+      }
       break;
     }
     case "customer.subscription.created":
@@ -175,6 +188,26 @@ const stripeWebhook = httpAction(async (ctx, request) => {
 });
 
 http.route({ path: "/api/stripe/webhook", method: "POST", handler: stripeWebhook });
+
+// Delivery log + manual retry for purchase-confirmation emails (admin only).
+const adminEmailDeliveries = httpAction(async (ctx, request) => {
+  if (!(await adminAuthorized(ctx, request))) {
+    return json({ error: "Unauthorized" }, 401, { "cache-control": "no-store" });
+  }
+  const result = await ctx.runAction(internal.emailDelivery.listEmailDeliveries, {});
+  return json(result, 200, { "cache-control": "no-store" });
+});
+
+const adminEmailDeliveryRetry = httpAction(async (ctx, request) => {
+  if (!(await adminAuthorized(ctx, request))) {
+    return json({ error: "Unauthorized" }, 401, { "cache-control": "no-store" });
+  }
+  const result = await ctx.runAction(internal.emailDelivery.retryFailedDeliveries, {});
+  return json(result, 200, { "cache-control": "no-store" });
+});
+
+http.route({ path: "/api/admin/email-deliveries", method: "GET", handler: adminEmailDeliveries });
+http.route({ path: "/api/admin/email-deliveries/retry", method: "POST", handler: adminEmailDeliveryRetry });
 
 const queueN8nSource = httpAction(async (ctx, request) => {
   const expectedSecret = process.env.CONVEX_N8N_WEBHOOK_SECRET;

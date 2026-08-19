@@ -1,4 +1,5 @@
 import { api } from "@/convex/_generated/api";
+import { countActiveMatchesByLead, sortDeals, type DealSort } from "@/convex/marketplaceCore";
 import { MarketplaceView } from "@/components/MarketplaceView";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -157,6 +158,7 @@ type MongoLead = {
   mao?: number;
   acquisitionPrice?: number;
   estimatedProfit?: number;
+  matchCount?: number;
   notes?: string;
   lastVerifiedAt?: number | string;
 };
@@ -235,6 +237,7 @@ export default function Dashboard() {
   const [ownerLoading, setOwnerLoading] = useState(false);
 
   const listLeads = useAction(api.mongodb.listLeads);
+  const listMatches = useAction(api.mongodb.listMatches);
   const insertLead = useAction(api.mongodb.insertLead);
   const removeLead = useAction(api.mongodb.removeLead);
   const updateLead = useAction(api.mongodb.updateLead);
@@ -267,6 +270,8 @@ export default function Dashboard() {
       actors: Array<{ actor: string; requests: number; tokens: number }>;
     };
   } | null>(null);
+  const [leadSort, setLeadSort] = useState<DealSort>("distress");
+  const [matchCounts, setMatchCounts] = useState<Map<string, number>>(new Map());
 
   // Close the mobile navigation drawer on Escape.
   useEffect(() => {
@@ -306,7 +311,28 @@ export default function Dashboard() {
     };
   }, [isOwner, listLeads, refreshVersion, search, minScore, sourceType]);
 
+  // Owner-only match counts (how many active buyers are matched to each deal),
+  // used by the "Most buyers" sort and the queue rows.
+  useEffect(() => {
+    if (!isOwner) return;
+    let cancelled = false;
+    listMatches({})
+      .then((result) => {
+        if (!cancelled) setMatchCounts(countActiveMatchesByLead((result ?? []) as Array<Record<string, unknown>>));
+      })
+      .catch(() => {
+        if (!cancelled) setMatchCounts(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwner, listMatches, refreshVersion]);
+
   const leads = workspace?.leads ?? [];
+  const sortedLeads = sortDeals(
+    leads.map((lead) => ({ ...lead, matchCount: matchCounts.get(lead._id) ?? 0 })),
+    leadSort,
+  );
   const selectedLead = leads.find((lead) => lead._id === selectedLeadId);
   const averageScore = leads.length ? Math.round(leads.reduce((total, lead) => total + lead.distressScore, 0) / leads.length) : 0;
   const sourceCount = new Set(leads.map((lead) => lead.sourceType)).size;
@@ -608,7 +634,7 @@ export default function Dashboard() {
           {showFilters && <div className="glass-inset mt-3 flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-end"><label className="grid gap-1.5 text-xs font-semibold text-slate-600">Minimum distress score<input type="number" min="0" max="100" value={minScore} onChange={(event) => setMinScore(event.target.value)} className="h-10 w-full rounded-xl border border-white/85 bg-white/70 px-3 text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-sky-500/30 sm:w-44" /></label><label className="grid gap-1.5 text-xs font-semibold text-slate-600">Source type<select value={sourceType} onChange={(event) => setSourceType(event.target.value as SourceType | "ALL")} className="h-10 w-full rounded-xl border border-white/85 bg-white/70 px-3 text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-sky-500/30 sm:w-52"><option value="ALL">All source types</option>{SOURCE_TYPES.map((source) => <option key={source.value} value={source.value}>{source.label}</option>)}</select></label><button type="button" onClick={() => { setMinScore("0"); setSourceType("ALL"); }} className="h-10 px-2 text-xs font-semibold text-sky-700 hover:text-sky-900">Clear filters</button></div>}
 
           <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
-            <div className="glass-panel overflow-hidden rounded-[1.75rem]"><div className="flex items-center justify-between border-b border-white/70 px-4 py-4 sm:px-5"><div><h2 className="text-sm font-semibold text-slate-800">Approved lead queue</h2><p className="mt-1 text-xs text-slate-500">Showing source-backed records only</p></div><Badge className="border-0 bg-teal-100/75 text-teal-800">{workspace?.meta.dataOrigin ?? "verified"}</Badge></div>{workspace === undefined ? <div className="flex min-h-72 items-center justify-center"><Loader2 className="size-5 animate-spin text-sky-600" /></div> : leads.length === 0 ? <div className="flex min-h-80 flex-col items-center justify-center px-6 py-12 text-center"><div className="flex size-14 items-center justify-center rounded-2xl bg-white/75 text-sky-700 shadow-sm"><FilePlus2 className="size-6" /></div><h3 className="mt-5 text-base font-semibold text-slate-800">No sourced records yet</h3><p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">This workspace will never fill itself with invented PII. Add a verified public-record lead with its evidence chain to get started.</p>{isOwner && <Button type="button" onClick={() => setShowAddLead(true)} className="mt-5 gap-2 rounded-xl bg-sky-700 hover:bg-sky-800"><Plus className="size-4" /> Add first verified lead</Button>}</div> : <div className="divide-y divide-white/70">{leads.map((lead) => <button type="button" key={lead._id} onClick={() => handleSelectLead(lead)} className="group grid w-full gap-4 px-4 py-4 text-left transition-colors hover:bg-white/45 sm:grid-cols-[minmax(0,1fr)_150px_120px] sm:items-center sm:px-5"><div className="min-w-0"><div className="flex items-center gap-2"><MapPin className="size-4 shrink-0 text-sky-600" /><p className="truncate text-sm font-semibold text-slate-800">{lead.propertyAddress}</p></div><p className="mt-1 truncate pl-6 text-xs text-slate-500">{lead.city}, {lead.state} {lead.zip} · {lead.county} County</p><div className="mt-2 flex flex-wrap gap-1.5 pl-6"><Badge variant="outline" className="border-white/90 bg-white/50 text-[0.65rem] font-medium text-slate-600">{sourceLabel(lead.sourceType)}</Badge><Badge variant="outline" className="border-teal-200/80 bg-teal-50/50 text-[0.65rem] font-medium text-teal-700"><Check className="mr-1 size-3" /> Verified</Badge></div></div><div className="hidden sm:block"><p className="text-[0.68rem] font-medium uppercase tracking-[0.12em] text-slate-400">Distress</p><div className="mt-1.5 flex items-center gap-2"><span className={`rounded-lg px-2 py-1 text-sm font-bold ${scoreTone(lead.distressScore)}`}>{lead.distressScore}</span><span className="text-xs text-slate-500">/ 100</span></div></div><div className="flex items-center justify-between sm:justify-end"><span className="text-xs font-medium text-slate-500 sm:hidden">Distress <strong className="text-slate-800">{lead.distressScore}/100</strong></span><ChevronRight className="size-4 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-sky-600" /></div></button>)}</div>}</div>
+            <div className="glass-panel overflow-hidden rounded-[1.75rem]"><div className="flex items-center justify-between border-b border-white/70 px-4 py-4 sm:px-5"><div><h2 className="text-sm font-semibold text-slate-800">Approved lead queue</h2><p className="mt-1 text-xs text-slate-500">Showing source-backed records only</p></div><div className="flex flex-wrap items-center gap-2"><div className="flex items-center gap-1 rounded-xl border border-white/85 bg-white/55 p-1">{[{ value: "distress", label: "Best deals" }, { value: "matches", label: "Most buyers" }, { value: "profit", label: "Most profit" }].map((option) => <button key={option.value} type="button" onClick={() => setLeadSort(option.value as DealSort)} className={`rounded-lg px-2.5 py-1 text-[0.68rem] font-semibold transition-colors ${leadSort === option.value ? "bg-sky-700 text-white shadow-sm" : "text-slate-500 hover:text-sky-800"}`}>{option.label}</button>)}</div><Badge className="border-0 bg-teal-100/75 text-teal-800">{workspace?.meta.dataOrigin ?? "verified"}</Badge></div></div>{workspace === undefined ? <div className="flex min-h-72 items-center justify-center"><Loader2 className="size-5 animate-spin text-sky-600" /></div> : leads.length === 0 ? <div className="flex min-h-80 flex-col items-center justify-center px-6 py-12 text-center"><div className="flex size-14 items-center justify-center rounded-2xl bg-white/75 text-sky-700 shadow-sm"><FilePlus2 className="size-6" /></div><h3 className="mt-5 text-base font-semibold text-slate-800">No sourced records yet</h3><p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">This workspace will never fill itself with invented PII. Add a verified public-record lead with its evidence chain to get started.</p>{isOwner && <Button type="button" onClick={() => setShowAddLead(true)} className="mt-5 gap-2 rounded-xl bg-sky-700 hover:bg-sky-800"><Plus className="size-4" /> Add first verified lead</Button>}</div> : <div className="divide-y divide-white/70">{sortedLeads.map((lead) => <button type="button" key={lead._id} onClick={() => handleSelectLead(lead)} className="group grid w-full gap-4 px-4 py-4 text-left transition-colors hover:bg-white/45 sm:grid-cols-[minmax(0,1fr)_150px_150px] sm:items-center sm:px-5"><div className="min-w-0"><div className="flex items-center gap-2"><MapPin className="size-4 shrink-0 text-sky-600" /><p className="truncate text-sm font-semibold text-slate-800">{lead.propertyAddress}</p></div><p className="mt-1 truncate pl-6 text-xs text-slate-500">{lead.city}, {lead.state} {lead.zip} · {lead.county} County</p><div className="mt-2 flex flex-wrap gap-1.5 pl-6"><Badge variant="outline" className="border-white/90 bg-white/50 text-[0.65rem] font-medium text-slate-600">{sourceLabel(lead.sourceType)}</Badge><Badge variant="outline" className="border-teal-200/80 bg-teal-50/50 text-[0.65rem] font-medium text-teal-700"><Check className="mr-1 size-3" /> Verified</Badge></div></div><div className="hidden sm:block"><p className="text-[0.68rem] font-medium uppercase tracking-[0.12em] text-slate-400">Distress</p><div className="mt-1.5 flex items-center gap-2"><span className={`rounded-lg px-2 py-1 text-sm font-bold ${scoreTone(lead.distressScore)}`}>{lead.distressScore}</span><span className="text-xs text-slate-500">/ 100</span></div><p className="mt-2 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-slate-400">Buyers</p><p className="mt-0.5 text-sm font-semibold text-slate-700">{lead.matchCount ?? 0}</p></div><div className="flex items-center justify-between sm:justify-end"><span className="text-xs font-medium text-slate-500 sm:hidden">Distress <strong className="text-slate-800">{lead.distressScore}/100</strong></span><span className="hidden text-right sm:block"><span className="block text-[0.68rem] font-medium uppercase tracking-[0.12em] text-slate-400">Est. spread</span><span className={`mt-0.5 block text-sm font-semibold ${lead.estimatedProfit === undefined ? "text-slate-500" : lead.estimatedProfit >= 0 ? "text-teal-700" : "text-rose-600"}`}>{lead.estimatedProfit === undefined ? "—" : money(lead.estimatedProfit)}</span></span><ChevronRight className="size-4 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-sky-600" /></div></button>)}</div>}</div>
 
             <div className="glass-panel rounded-[1.75rem] p-5"><div className="flex items-center gap-2"><div className="flex size-9 items-center justify-center rounded-xl bg-sky-100/75 text-sky-700"><Filter className="size-4" /></div><div><h2 className="text-sm font-semibold text-slate-800">Quality rules</h2><p className="text-xs text-slate-500">Applied to every surfaced record</p></div></div><div className="mt-5 space-y-3">{["Source URL + reference required", "Verified distress evidence required", "Fabricated rows excluded", "Owner-only lead writes"].map((rule) => <div key={rule} className="flex items-start gap-2.5 text-xs leading-5 text-slate-600"><Check className="mt-0.5 size-3.5 shrink-0 text-teal-600" />{rule}</div>)}</div>          <div className="mt-6 border-t border-white/70 pt-5"><p className="text-xs font-semibold text-slate-700">Mongo workflow</p><p className="mt-2 text-xs leading-5 text-slate-500">Review buyer intake and manage candidate matches from the owner operations board.</p><Link to="/operations" className="mt-3 inline-flex text-xs font-semibold text-sky-700 hover:text-sky-900">Open buyers & matches <ChevronRight className="ml-1 size-3.5" /></Link></div></div>
           </div>

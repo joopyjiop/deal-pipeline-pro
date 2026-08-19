@@ -1,6 +1,6 @@
 import { useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import type { BuyerCard, MatchCard, SellerCard } from "@/convex/marketplaceCore";
+import { sortDeals, type BuyerCard, type DealSort, type MatchCard, type SellerCard } from "@/convex/marketplaceCore";
 import {
   BadgeCheck,
   Building2,
@@ -19,6 +19,12 @@ const tabs: Array<{ key: Tab; label: string }> = [
   { key: "sellers", label: "Sellers" },
   { key: "buyers", label: "Buyers" },
   { key: "matches", label: "Matches" },
+];
+
+const sellerSorts: Array<{ value: DealSort; label: string }> = [
+  { value: "distress", label: "Best deals" },
+  { value: "matches", label: "Most buyers" },
+  { value: "profit", label: "Most profit" },
 ];
 
 const money = (value: number | undefined) =>
@@ -47,8 +53,12 @@ function SellerRow({ seller }: { seller: SellerCard }) {
           <p className="mt-0.5 text-sm font-bold text-teal-700">{seller.distressScore}<span className="text-[0.6rem] font-medium text-slate-400">/100</span></p>
         </div>
         <div className="hidden text-right md:block">
-          <p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">ARV</p>
-          <p className="mt-0.5 text-sm font-semibold text-slate-700">{money(seller.arv)}</p>
+          <p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Buyers</p>
+          <p className="mt-0.5 text-sm font-semibold text-slate-700">{seller.matchCount}</p>
+        </div>
+        <div className="hidden text-right lg:block">
+          <p className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Est. profit</p>
+          <p className="mt-0.5 text-sm font-semibold text-teal-700">{money(seller.estimatedProfit)}</p>
         </div>
         <span className="inline-flex items-center gap-1 rounded-full border border-teal-200/80 bg-teal-50/70 px-2.5 py-0.5 text-[0.62rem] font-bold text-teal-700">
           <BadgeCheck className="size-3" /> VERIFIED
@@ -126,6 +136,8 @@ export function MarketplaceView() {
   const [data, setData] = useState<{ sellers: SellerCard[]; buyers: BuyerCard[]; matches: MatchCard[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("sellers");
+  const [sellerSort, setSellerSort] = useState<DealSort>("distress");
+  const sortedSellers = sortDeals(data?.sellers ?? [], sellerSort);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +203,29 @@ export function MarketplaceView() {
         ))}
       </div>
 
+      {tab === "sellers" && sortedSellers.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400">Sort deals</span>
+          <div className="flex items-center gap-1 rounded-xl border border-white/85 bg-white/55 p-1">
+            {sellerSorts.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setSellerSort(option.value)}
+                className={cn(
+                  "rounded-lg px-2.5 py-1 text-[0.68rem] font-semibold transition-colors",
+                  sellerSort === option.value
+                    ? "bg-sky-700 text-white shadow-sm"
+                    : "text-slate-500 hover:text-sky-800",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="glass-panel mt-4 space-y-2.5 rounded-[1.75rem] p-4">
         {data[tab].length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-slate-500">
@@ -198,7 +233,7 @@ export function MarketplaceView() {
           </p>
         ) : (
           <>
-            {tab === "sellers" && data.sellers.map((row) => <SellerRow key={row._id} seller={row} />)}
+            {tab === "sellers" && sortedSellers.map((row) => <SellerRow key={row._id} seller={row} />)}
             {tab === "buyers" && data.buyers.map((row) => <BuyerRow key={row._id} buyer={row} />)}
             {tab === "matches" && data.matches.map((row) => <MatchRow key={row._id} match={row} />)}
           </>

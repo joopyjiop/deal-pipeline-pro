@@ -13,6 +13,30 @@
  *    address and buyer name so the card is readable without owner queries.
  */
 
+export type DealSort = "distress" | "matches" | "profit";
+
+/**
+ * Shared deterministic deal sort used by both the marketplace (non-owner
+ * surface) and the owner dashboard. Deals without an estimated profit rank
+ * last on the profit sort; ties always fall back to distress score.
+ */
+export function sortDeals<T extends { distressScore: number; matchCount?: number; estimatedProfit?: number }>(deals: T[], sortBy: DealSort): T[] {
+  const sorted = [...deals];
+  if (sortBy === "matches") {
+    sorted.sort((a, b) => (b.matchCount ?? 0) - (a.matchCount ?? 0) || b.distressScore - a.distressScore);
+  } else if (sortBy === "profit") {
+    sorted.sort((a, b) => {
+      const profitA = a.estimatedProfit ?? -Infinity;
+      const profitB = b.estimatedProfit ?? -Infinity;
+      if (profitA !== profitB) return profitB > profitA ? 1 : -1;
+      return b.distressScore - a.distressScore;
+    });
+  } else {
+    sorted.sort((a, b) => b.distressScore - a.distressScore);
+  }
+  return sorted;
+}
+
 export interface SellerCard {
   _id: string;
   propertyAddress: string;
@@ -30,6 +54,11 @@ export interface SellerCard {
   arv?: number;
   repairs?: number;
   mao?: number;
+  acquisitionPrice?: number;
+  /** Estimated gross spread — MAO minus contract price (same formula as the pipeline). */
+  estimatedProfit?: number;
+  /** Number of active (non-rejected) buyer matches on this deal. */
+  matchCount: number;
   updatedAt?: number;
 }
 
@@ -96,8 +125,33 @@ export function toSellerCard(doc: Record<string, unknown>): SellerCard | null {
     arv: num(doc.arv),
     repairs: num(doc.repairs),
     mao: num(doc.mao),
+    acquisitionPrice: num(doc.acquisitionPrice),
+    estimatedProfit: estimatedProfitFrom(doc),
+    matchCount: 0,
     updatedAt: num(doc.updatedAt),
   };
+}
+
+/** Estimated gross spread — same formula as the pipeline (MAO − contract price). */
+export function estimatedProfitFrom(doc: { mao?: unknown; acquisitionPrice?: unknown }): number | undefined {
+  return typeof doc.mao === "number" && typeof doc.acquisitionPrice === "number"
+    ? doc.mao - doc.acquisitionPrice
+    : undefined;
+}
+
+/**
+ * Count active (non-REJECTED) matches per lead id. Keys are the string ids
+ * used in the match rows (`leadId`), which match the serialized lead `_id`.
+ */
+export function countActiveMatchesByLead(matches: Array<Record<string, unknown>>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const match of matches) {
+    if (match.status === "REJECTED") continue;
+    const leadId = str(match.leadId);
+    if (!leadId) continue;
+    counts.set(leadId, (counts.get(leadId) ?? 0) + 1);
+  }
+  return counts;
 }
 
 /** APPROVED buyer → PII-stripped buyer card (no phone/email/POF evidence). */

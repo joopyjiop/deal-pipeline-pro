@@ -4,7 +4,7 @@ import { MongoClient } from "mongodb";
 import { v } from "convex/values";
 import { action, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { toBuyerCard, toMatchCard, toSellerCard, type BuyerCard, type MatchCard, type SellerCard } from "./marketplaceCore";
+import { countActiveMatchesByLead, sortDeals, toBuyerCard, toMatchCard, toSellerCard, type BuyerCard, type DealSort, type MatchCard, type SellerCard } from "./marketplaceCore";
 
 /**
  * Read-only marketplace — the ONLY data surface non-owner signed-in users see.
@@ -57,8 +57,10 @@ export interface MarketplaceOverview {
 }
 
 export const marketplaceOverview = action({
-  args: {},
-  handler: async (ctx): Promise<MarketplaceOverview> => {
+  args: {
+    sortBy: v.optional(v.union(v.literal("distress"), v.literal("matches"), v.literal("profit"))),
+  },
+  handler: async (ctx, args): Promise<MarketplaceOverview> => {
     await rejectGuests(ctx);
     const db = await getDatabase();
     const [leadDocs, buyerDocs, matchDocs] = await Promise.all([
@@ -82,9 +84,14 @@ export const marketplaceOverview = action({
         .toArray(),
     ]);
 
-    const sellers = leadDocs
-      .map((doc) => toSellerCard(doc as unknown as Record<string, unknown>))
-      .filter((card): card is SellerCard => card !== null);
+    const matchCounts = countActiveMatchesByLead(matchDocs as unknown as Array<Record<string, unknown>>);
+    const sellers = sortDeals(
+      leadDocs
+        .map((doc) => toSellerCard(doc as unknown as Record<string, unknown>))
+        .filter((card): card is SellerCard => card !== null)
+        .map((card) => ({ ...card, matchCount: matchCounts.get(card._id) ?? 0 })),
+      args.sortBy ?? ("distress" as DealSort),
+    );
     const buyers = buyerDocs
       .map((doc) => toBuyerCard(doc as unknown as Record<string, unknown>))
       .filter((card): card is BuyerCard => card !== null);

@@ -195,6 +195,23 @@
   }
 }
 
+/* Toolkit grouped tabs: the toolkit container is a single-column grid so the
+   two system-status strips (access toggles + Mongo/n8n/AI health) can be
+   reordered below all tool cards with `order` — pure CSS, so React's DOM
+   reconciliation never fights it. The footer paragraph stays last. */
+.toolkit-container {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.toolkit-container > section.mt-5.grid {
+  order: 1;
+}
+
+.toolkit-container > p:last-child {
+  order: 2;
+}
+
 /* Smooth in-page anchor scrolling (used by the footer's legal links and the
    landing page section links). scroll-margin keeps anchored sections clear of
    the fixed marketing nav. */

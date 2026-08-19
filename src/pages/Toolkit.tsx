@@ -498,6 +498,14 @@ export default function Toolkit() {
       const tab = eyebrow ? SECTION_TAB_BY_EYEBROW[eyebrow] : undefined;
       section.classList.toggle("hidden", Boolean(tab) && tab !== activeToolTab);
     });
+    // The source scraper + deal estimator share one grid wrapper — collapse
+    // the wrapper too when every section inside it is hidden (automation tab),
+    // so it doesn't leave a stray gap.
+    const sharedToolGrid = container.querySelector<HTMLElement>("div.mt-5.grid.gap-5");
+    if (sharedToolGrid) {
+      const children = Array.from(sharedToolGrid.querySelectorAll("section.glass-panel"));
+      sharedToolGrid.classList.toggle("hidden", children.length > 0 && children.every((child) => child.classList.contains("hidden")));
+    }
   }, [activeToolTab]);
 
   const [access, setAccess] = useState<ToolAccess>({ scraperEnabled: true, estimatorEnabled: true, aiEnabled: false });
@@ -1213,7 +1221,7 @@ export default function Toolkit() {
 
   return (
     <main className="min-h-screen px-4 py-4 text-foreground sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1500px]" ref={toolkitRef}>
+      <div className="toolkit-container mx-auto max-w-[1500px]" ref={toolkitRef}>
         <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-[1.75rem] px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-9 items-center justify-center rounded-xl bg-white/75 text-sky-700 shadow-sm"><Wrench className="size-4" /></div>

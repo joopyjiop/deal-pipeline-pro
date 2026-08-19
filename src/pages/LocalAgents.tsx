@@ -10,6 +10,7 @@ import {
   Bot,
   Check,
   Clipboard,
+  Laptop,
   Loader2,
   MessageSquare,
   RotateCcw,
@@ -41,6 +42,7 @@ type ChatResponse = {
 
 const DEFAULT_ENDPOINT = "http://127.0.0.1:11434/v1";
 const DEFAULT_MODEL = "qwen3:4b";
+const DEFAULT_LAPTOP_MODEL = "qwen3:1.7b";
 const DEFAULT_CLOUD_MODEL = "gpt-oss:20b";
 const SETTINGS_KEY = "deal-pipeline-local-agent-settings";
 
@@ -90,7 +92,7 @@ function extractContent(payload: ChatResponse) {
   return "";
 }
 
-type AgentMode = "PHONE" | "CLOUD" | "BOTH";
+type AgentMode = "LAPTOP" | "PHONE" | "CLOUD" | "BOTH";
 
 type LocalAgentSettings = {
   endpoint?: string;
@@ -117,7 +119,7 @@ export default function LocalAgents() {
   const cloudListModels = useAction(api.ollama.listModels);
   const cloudChat = useAction(api.ollama.chat);
   const [savedSettings] = useState<LocalAgentSettings>(loadSettings);
-  const [mode, setMode] = useState<AgentMode>(() => savedSettings.mode ?? "PHONE");
+  const [mode, setMode] = useState<AgentMode>(() => savedSettings.mode ?? "LAPTOP");
   const [endpoint, setEndpoint] = useState(() => savedSettings.endpoint ?? DEFAULT_ENDPOINT);
   const [model, setModel] = useState(() => savedSettings.model ?? DEFAULT_MODEL);
   const [roleId, setRoleId] = useState(() => savedSettings.roleId && roles.some((role) => role.id === savedSettings.roleId) ? savedSettings.roleId : roles[0].id);
@@ -129,6 +131,7 @@ export default function LocalAgents() {
   const [copied, setCopied] = useState(false);
 
   const selectedRole = useMemo(() => roles.find((role) => role.id === roleId) ?? roles[0], [roleId]);
+  const isLocalMode = mode === "LAPTOP" || mode === "PHONE";
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ endpoint, model, roleId, mode }));
@@ -136,8 +139,17 @@ export default function LocalAgents() {
 
   const switchMode = (nextMode: AgentMode) => {
     setMode(nextMode);
-    if (nextMode === "PHONE" && model === DEFAULT_CLOUD_MODEL) setModel(DEFAULT_MODEL);
-    if (nextMode !== "PHONE" && model === DEFAULT_MODEL) setModel(DEFAULT_CLOUD_MODEL);
+    const leavingLocal = mode === "LAPTOP" || mode === "PHONE";
+    const enteringLocal = nextMode === "LAPTOP" || nextMode === "PHONE";
+    if (!leavingLocal && enteringLocal && model === DEFAULT_CLOUD_MODEL) {
+      setModel(nextMode === "LAPTOP" ? DEFAULT_LAPTOP_MODEL : DEFAULT_MODEL);
+    } else if (leavingLocal && !enteringLocal && (model === DEFAULT_MODEL || model === DEFAULT_LAPTOP_MODEL)) {
+      setModel(DEFAULT_CLOUD_MODEL);
+    } else if (nextMode === "LAPTOP" && model === DEFAULT_MODEL) {
+      setModel(DEFAULT_LAPTOP_MODEL);
+    } else if (nextMode === "PHONE" && model === DEFAULT_LAPTOP_MODEL) {
+      setModel(DEFAULT_MODEL);
+    }
     setAvailableModels([]);
     setConnectionState("unknown");
   };
@@ -153,7 +165,7 @@ export default function LocalAgents() {
       };
       const checkCloud = async () => (await cloudListModels()).models;
 
-      if (mode === "PHONE") {
+      if (isLocalMode) {
         const models = await checkPhone();
         setAvailableModels(models);
         setConnectionState("connected");
@@ -174,7 +186,7 @@ export default function LocalAgents() {
       setAvailableModels([...phoneModels, ...cloudModels]);
       if (phoneResult.status === "rejected" && cloudResult.status === "rejected") throw new Error("Neither the phone model nor the AI gateway could be reached");
       setConnectionState("connected");
-      toast.success(`Comparison ready: ${phoneResult.status === "fulfilled" ? "phone" : "no phone"} + ${cloudResult.status === "fulfilled" ? "AI gateway" : "no gateway"}.`);
+      toast.success(`Comparison ready: ${phoneResult.status === "fulfilled" ? "local device" : "no local device"} + ${cloudResult.status === "fulfilled" ? "AI gateway" : "no gateway"}.`);
     } catch (error) {
       setAvailableModels([]);
       setConnectionState("offline");
@@ -188,8 +200,8 @@ export default function LocalAgents() {
       toast.error("Add source notes or a question first.");
       return;
     }
-    if ((mode === "PHONE" || mode === "BOTH") && !cleanBaseUrl(endpoint)) {
-      toast.error("Add a local OpenAI-compatible endpoint for phone or comparison mode.");
+    if ((isLocalMode || mode === "BOTH") && !cleanBaseUrl(endpoint)) {
+      toast.error("Add a local OpenAI-compatible endpoint for laptop, phone, or comparison mode.");
       return;
     }
     setBusy(true);
@@ -199,7 +211,7 @@ export default function LocalAgents() {
         { role: "system" as const, content: selectedRole.systemPrompt },
         { role: "user" as const, content: message },
       ];
-      const runPhone = async () => {
+      const runLocal = async () => {
         const response = await fetch(chatUrl(endpoint), {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -219,16 +231,16 @@ export default function LocalAgents() {
         return content;
       };
 
-      if (mode === "PHONE" || mode === "CLOUD") {
-        const content = await (mode === "PHONE" ? runPhone() : runCloud());
+      if (isLocalMode || mode === "CLOUD") {
+        const content = await (isLocalMode ? runLocal() : runCloud());
         setAnswer(content);
         setConnectionState("connected");
         toast.success(`${selectedRole.name} completed ${mode === "CLOUD" ? "through the AI gateway" : "locally"}.`);
       } else {
-        const [phoneResult, cloudResult] = await Promise.allSettled([runPhone(), runCloud()]);
+        const [phoneResult, cloudResult] = await Promise.allSettled([runLocal(), runCloud()]);
         const sections: string[] = [];
-        if (phoneResult.status === "fulfilled") sections.push(`PHONE MODEL\n\n${phoneResult.value}`);
-        else sections.push(`PHONE MODEL UNAVAILABLE\n\n${phoneResult.reason instanceof Error ? phoneResult.reason.message : String(phoneResult.reason)}`);
+        if (phoneResult.status === "fulfilled") sections.push(`LOCAL MODEL\n\n${phoneResult.value}`);
+        else sections.push(`LOCAL MODEL UNAVAILABLE\n\n${phoneResult.reason instanceof Error ? phoneResult.reason.message : String(phoneResult.reason)}`);
         if (cloudResult.status === "fulfilled") sections.push(`AI GATEWAY\n\n${cloudResult.value}`);
         else sections.push(`AI GATEWAY UNAVAILABLE\n\n${cloudResult.reason instanceof Error ? cloudResult.reason.message : String(cloudResult.reason)}`);
         if (phoneResult.status === "rejected" && cloudResult.status === "rejected") throw new Error("Both agent reviews failed");
@@ -279,10 +291,10 @@ export default function LocalAgents() {
         <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-[1.75rem] px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-9 items-center justify-center rounded-xl bg-violet-100/80 text-violet-700"><Bot className="size-4" /></div>
-            <div><p className="eyebrow">{mode === "PHONE" ? "No API key required" : "Secured AI gateway"}</p><h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Local agent workspace</h1></div>
+            <div><p className="eyebrow">{isLocalMode ? "No API key required" : "Secured AI gateway"}</p><h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Local agent workspace</h1></div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge className={connectionState === "connected" ? "border-0 bg-teal-100/80 text-teal-800" : connectionState === "offline" ? "border-0 bg-rose-100/80 text-rose-800" : "border-0 bg-slate-100/80 text-slate-600"}>{connectionState === "connected" ? <><Wifi className="mr-1 size-3" /> {mode === "PHONE" ? "Phone connected" : mode === "CLOUD" ? "AI gateway connected" : "Comparison connected"}</> : connectionState === "offline" ? <><WifiOff className="mr-1 size-3" /> Offline</> : "Not checked"}</Badge>
+            <Badge className={connectionState === "connected" ? "border-0 bg-teal-100/80 text-teal-800" : connectionState === "offline" ? "border-0 bg-rose-100/80 text-rose-800" : "border-0 bg-slate-100/80 text-slate-600"}>{connectionState === "connected" ? <><Wifi className="mr-1 size-3" /> {mode === "LAPTOP" ? "Laptop connected" : mode === "PHONE" ? "Phone connected" : mode === "CLOUD" ? "AI gateway connected" : "Comparison connected"}</> : connectionState === "offline" ? <><WifiOff className="mr-1 size-3" /> Offline</> : "Not checked"}</Badge>
           </div>
         </header>
         <OwnerNav />
@@ -290,16 +302,18 @@ export default function LocalAgents() {
         <section className="mt-5 grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
           <div className="space-y-5">
             <section className="glass-panel rounded-[1.75rem] p-5 sm:p-6">
-              <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700"><Settings2 className="size-5" /></div><div><p className="eyebrow">Agent connection</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Choose where inference runs</h2><p className="mt-1 text-xs leading-5 text-slate-500">Phone mode stays local. AI gateway mode uses a server-side key through the authenticated Convex proxy.</p></div></div>
-              <div className="mt-5 space-y-3"><div className="grid grid-cols-3 gap-2"><Button type="button" variant={mode === "PHONE" ? "default" : "outline"} onClick={() => switchMode("PHONE")} className="h-10 rounded-xl px-2 text-xs">Android / phone</Button><Button type="button" variant={mode === "CLOUD" ? "default" : "outline"} onClick={() => switchMode("CLOUD")} className="h-10 rounded-xl px-2 text-xs">AI gateway</Button><Button type="button" variant={mode === "BOTH" ? "default" : "outline"} onClick={() => switchMode("BOTH")} className="h-10 rounded-xl px-2 text-xs">Both / compare</Button></div>{mode === "PHONE" || mode === "BOTH" ? <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>OpenAI-compatible base URL</span><Input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="http://127.0.0.1:11434/v1" autoComplete="off" spellCheck={false} className="rounded-xl border-white/85 bg-white/70 text-xs" /></label> : <div className="rounded-xl border border-teal-100/80 bg-teal-50/60 p-3 text-xs leading-5 text-teal-900">Secure route: browser → authenticated Convex action → your AI gateway (<code>AI_BASE_URL</code>, default local OmniRoute at <code>https://localhost:20128/v1</code>). The gateway key is never sent to the browser.</div>}{mode === "BOTH" ? <p className="text-[0.68rem] leading-4 text-slate-500">Comparison mode sends the same prompt to both agents for independent review. The phone model uses its own configured model; the field below selects the gateway model.</p> : null}<label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>{mode === "BOTH" ? "Gateway model name (phone uses its own default)" : "Model name"}</span><Input value={model} onChange={(event) => setModel(event.target.value)} placeholder={mode === "PHONE" ? DEFAULT_MODEL : DEFAULT_CLOUD_MODEL} autoComplete="off" spellCheck={false} className="rounded-xl border-white/85 bg-white/70 text-xs" /></label><Button type="button" variant="outline" onClick={() => void checkConnection()} disabled={connectionState === "checking"} className="h-10 w-full gap-2 rounded-xl border-white/85 bg-white/65 text-xs text-slate-700">{connectionState === "checking" ? <Loader2 className="size-4 animate-spin" /> : <Wifi className="size-4" />} Test {mode === "PHONE" ? "phone" : mode === "CLOUD" ? "AI gateway" : "both"} connection</Button></div>
+              <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700"><Settings2 className="size-5" /></div><div><p className="eyebrow">Agent connection</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Choose where inference runs</h2><p className="mt-1 text-xs leading-5 text-slate-500">Laptop and phone modes stay on your own hardware — no API key. AI gateway mode uses a server-side key through the authenticated Convex proxy.</p></div></div>
+              <div className="mt-5 space-y-3"><div className="grid grid-cols-2 gap-2"><Button type="button" variant={mode === "LAPTOP" ? "default" : "outline"} onClick={() => switchMode("LAPTOP")} className="h-10 rounded-xl px-2 text-xs">Laptop</Button><Button type="button" variant={mode === "PHONE" ? "default" : "outline"} onClick={() => switchMode("PHONE")} className="h-10 rounded-xl px-2 text-xs">Android / phone</Button><Button type="button" variant={mode === "CLOUD" ? "default" : "outline"} onClick={() => switchMode("CLOUD")} className="h-10 rounded-xl px-2 text-xs">AI gateway</Button><Button type="button" variant={mode === "BOTH" ? "default" : "outline"} onClick={() => switchMode("BOTH")} className="h-10 rounded-xl px-2 text-xs">Both / compare</Button></div>{isLocalMode || mode === "BOTH" ? <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>OpenAI-compatible base URL</span><Input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="http://127.0.0.1:11434/v1" autoComplete="off" spellCheck={false} className="rounded-xl border-white/85 bg-white/70 text-xs" /></label> : <div className="rounded-xl border border-teal-100/80 bg-teal-50/60 p-3 text-xs leading-5 text-teal-900">Secure route: browser → authenticated Convex action → your AI gateway (<code>AI_BASE_URL</code>, default local OmniRoute at <code>https://localhost:20128/v1</code>). The gateway key is never sent to the browser.</div>}{mode === "BOTH" ? <p className="text-[0.68rem] leading-4 text-slate-500">Comparison mode sends the same prompt to both agents for independent review. The local device uses its own configured model; the field below selects the gateway model.</p> : null}<label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>{mode === "BOTH" ? "Gateway model name (local device uses its own default)" : "Model name"}</span><Input value={model} onChange={(event) => setModel(event.target.value)} placeholder={mode === "LAPTOP" ? DEFAULT_LAPTOP_MODEL : mode === "PHONE" ? DEFAULT_MODEL : DEFAULT_CLOUD_MODEL} autoComplete="off" spellCheck={false} className="rounded-xl border-white/85 bg-white/70 text-xs" /></label><Button type="button" variant="outline" onClick={() => void checkConnection()} disabled={connectionState === "checking"} className="h-10 w-full gap-2 rounded-xl border-white/85 bg-white/65 text-xs text-slate-700">{connectionState === "checking" ? <Loader2 className="size-4 animate-spin" /> : <Wifi className="size-4" />} Test {mode === "LAPTOP" ? "laptop" : mode === "PHONE" ? "phone" : mode === "CLOUD" ? "AI gateway" : "both"} connection</Button></div>
               {availableModels.length > 0 && <div className="mt-4 rounded-xl border border-teal-100/80 bg-teal-50/60 p-3"><p className="text-[0.65rem] font-semibold uppercase tracking-wide text-teal-800">Models reported by server</p><div className="mt-2 flex flex-wrap gap-1.5">{availableModels.slice(0, 12).map((item) => <button type="button" key={item} onClick={() => setModel(item)} className="rounded-lg border border-teal-200/70 bg-white/70 px-2 py-1 text-[0.68rem] text-teal-800 hover:bg-white">{item}</button>)}</div></div>}
             </section>
 
             <section className="glass-panel rounded-[1.75rem] p-5 sm:p-6"><div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-violet-100/80 text-violet-700"><MessageSquare className="size-5" /></div><div><p className="eyebrow">Choose a role</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">One bounded local agent</h2></div></div><div className="mt-5 grid gap-2">{roles.map((role) => <button type="button" key={role.id} onClick={() => setRoleId(role.id)} className={`rounded-xl border px-3 py-3 text-left transition-colors ${role.id === roleId ? "border-violet-300/80 bg-violet-50/75" : "border-white/80 bg-white/45 hover:bg-white/70"}`}><p className="text-xs font-semibold text-slate-800">{role.name}</p><p className="mt-1 text-[0.68rem] leading-4 text-slate-500">{role.description}</p></button>)}</div></section>
           </div>
 
-          <section className="glass-panel rounded-[1.75rem] p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="eyebrow">{selectedRole.name}</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Analyze notes privately</h2><p className="mt-1 text-xs leading-5 text-slate-500">Paste source text, explicit numbers, or a review question. {mode === "CLOUD" ? "The authenticated backend sends it to your AI gateway." : mode === "BOTH" ? "The same prompt is reviewed independently by the phone model and the AI gateway." : "The model only sees this browser request."}</p></div><Badge variant="outline" className="border-violet-200/80 bg-violet-50/60 text-xs text-violet-800">{mode === "PHONE" ? "Phone local" : mode === "CLOUD" ? "AI gateway" : "Dual review"}</Badge></div><Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Example: Audit these sourced notes. List the source date, property address, sale reference, explicit distress evidence, missing fields, and the next owner review step.\n\nPaste only evidence you are permitted to review. Do not include API keys or unnecessary personal data." className="mt-5 min-h-[280px] resize-y rounded-2xl border-white/85 bg-white/65 text-sm leading-6" /><div className="mt-3 flex flex-wrap items-center justify-between gap-2"><p className="text-[0.68rem] text-slate-400">No automatic database writes, exports, approvals, or contact actions.</p><div className="flex gap-2"><Button type="button" variant="ghost" onClick={clearWorkspace} className="h-9 gap-1.5 rounded-xl px-3 text-xs"><RotateCcw className="size-3.5" /> Clear</Button><Button type="button" onClick={() => void runAgent()} disabled={busy || !prompt.trim()} className="h-9 gap-1.5 rounded-xl bg-violet-700 px-4 text-xs hover:bg-violet-800">{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} Run agent</Button></div></div>{answer && <div className="mt-5 rounded-2xl border border-violet-100/90 bg-violet-50/45 p-4"><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Check className="size-4 text-violet-700" /><p className="text-xs font-semibold uppercase tracking-wide text-violet-800">{mode === "BOTH" ? "Independent comparison" : mode === "CLOUD" ? "AI gateway response" : "Phone response"}</p></div><Button type="button" variant="ghost" onClick={() => void copyAnswer()} className="h-8 gap-1.5 rounded-lg px-2 text-xs text-violet-800">{copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />} {copied ? "Copied" : "Copy"}</Button></div><div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{answer}</div></div>}</section>
+          <section className="glass-panel rounded-[1.75rem] p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="eyebrow">{selectedRole.name}</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Analyze notes privately</h2><p className="mt-1 text-xs leading-5 text-slate-500">Paste source text, explicit numbers, or a review question. {mode === "CLOUD" ? "The authenticated backend sends it to your AI gateway." : mode === "BOTH" ? "The same prompt is reviewed independently by the local device and the AI gateway." : "The model only sees this browser request."}</p></div><Badge variant="outline" className="border-violet-200/80 bg-violet-50/60 text-xs text-violet-800">{mode === "LAPTOP" ? "Laptop local" : mode === "PHONE" ? "Phone local" : mode === "CLOUD" ? "AI gateway" : "Dual review"}</Badge></div><Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Example: Audit these sourced notes. List the source date, property address, sale reference, explicit distress evidence, missing fields, and the next owner review step.\n\nPaste only evidence you are permitted to review. Do not include API keys or unnecessary personal data." className="mt-5 min-h-[280px] resize-y rounded-2xl border-white/85 bg-white/65 text-sm leading-6" /><div className="mt-3 flex flex-wrap items-center justify-between gap-2"><p className="text-[0.68rem] text-slate-400">No automatic database writes, exports, approvals, or contact actions.</p><div className="flex gap-2"><Button type="button" variant="ghost" onClick={clearWorkspace} className="h-9 gap-1.5 rounded-xl px-3 text-xs"><RotateCcw className="size-3.5" /> Clear</Button><Button type="button" onClick={() => void runAgent()} disabled={busy || !prompt.trim()} className="h-9 gap-1.5 rounded-xl bg-violet-700 px-4 text-xs hover:bg-violet-800">{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} Run agent</Button></div></div>{answer && <div className="mt-5 rounded-2xl border border-violet-100/90 bg-violet-50/45 p-4"><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Check className="size-4 text-violet-700" /><p className="text-xs font-semibold uppercase tracking-wide text-violet-800">{mode === "BOTH" ? "Independent comparison" : mode === "CLOUD" ? "AI gateway response" : mode === "LAPTOP" ? "Laptop response" : "Phone response"}</p></div><Button type="button" variant="ghost" onClick={() => void copyAnswer()} className="h-8 gap-1.5 rounded-lg px-2 text-xs text-violet-800">{copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />} {copied ? "Copied" : "Copy"}</Button></div><div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{answer}</div></div>}</section>
         </section>
+
+        <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6"><div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700"><Laptop className="size-5" /></div><div><p className="eyebrow">Laptop setup · 4 GB RAM</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Run a small model on your laptop</h2></div></div><div className="mt-4 grid gap-3 text-xs leading-5 text-slate-600 md:grid-cols-3"><div className="rounded-xl border border-white/80 bg-white/45 p-3"><p className="font-semibold text-slate-800">1. Install Ollama</p><p className="mt-1">Download Ollama for Windows and pull a small quantized model: <code className="rounded bg-white/70 px-1">ollama pull qwen3:1.7b</code> (~1.2 GB — fits comfortably in 4 GB of RAM). Alternatives: <code className="rounded bg-white/70 px-1">llama3.2:3b</code> or <code className="rounded bg-white/70 px-1">gemma3:4b</code> (~2 GB, slower on 4 GB).</p></div><div className="rounded-xl border border-white/80 bg-white/45 p-3"><p className="font-semibold text-slate-800">2. Allow the app to reach it</p><p className="mt-1">Ollama blocks non-local origins by default. In a terminal run <code className="rounded bg-white/70 px-1">set OLLAMA_ORIGINS=*</code> then <code className="rounded bg-white/70 px-1">ollama serve</code> so this HTTPS app can call <code className="rounded bg-white/70 px-1">http://127.0.0.1:11434/v1</code>.</p></div><div className="rounded-xl border border-white/80 bg-white/45 p-3"><p className="font-semibold text-slate-800">3. Point the agent at it</p><p className="mt-1">Leave the endpoint at <code className="rounded bg-white/70 px-1">http://127.0.0.1:11434/v1</code>, set the model to <code className="rounded bg-white/70 px-1">qwen3:1.7b</code>, press Test connection, then Run agent. Close other heavy apps while reviewing — the model shares your 4 GB.</p></div></div><p className="mt-4 text-[0.68rem] text-slate-400">The model runs on your laptop only — notes never leave your machine in this mode, and nothing is written to the pipeline.</p></section>
 
         <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6"><div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-100/80 text-amber-700"><Smartphone className="size-5" /></div><div><p className="eyebrow">Android setup</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Run the model on your phone</h2></div></div><div className="mt-4 grid gap-3 text-xs leading-5 text-slate-600 md:grid-cols-3"><div className="rounded-xl border border-white/80 bg-white/45 p-3"><p className="font-semibold text-slate-800">1. Install a local server</p><p className="mt-1">Use an Android app that exposes an OpenAI-compatible API, or run llama.cpp/Ollama through Termux. The phone and browser must use the same device.</p></div><div className="rounded-xl border border-white/80 bg-white/45 p-3"><p className="font-semibold text-slate-800">2. Enable browser access</p><p className="mt-1">Allow CORS for this app origin and keep the server bound to localhost. If the server does not support CORS, the browser cannot call it safely.</p></div><div className="rounded-xl border border-white/80 bg-white/45 p-3"><p className="font-semibold text-slate-800">3. Select a small model</p><p className="mt-1">Start with a 3B–4B quantized model such as the one your local server reports. Larger models may be slow or exceed phone memory.</p></div></div><p className="mt-4 text-[0.68rem] text-slate-400">If the page says Offline, first test the endpoint in the phone browser. A hosted HTTPS app cannot call an arbitrary remote HTTP server without the server allowing CORS and the browser permitting the connection.</p></section>
       </div>

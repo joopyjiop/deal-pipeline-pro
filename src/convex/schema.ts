@@ -157,6 +157,27 @@ const schema = defineSchema(
       createdAt: v.number(),
       updatedAt: v.number(),
     }).index("by_user", ["userId"]),
+
+    // AI usage accounting for the token guard (src/convex/aiUsage.ts +
+    // aiUsageCore.ts). One doc per (actor, UTC day) plus one "global" doc per
+    // day. Written only by the internal consumeAiUsage mutation, which charges
+    // every model call (chat, embeddings, consultant court, thread replies)
+    // before it is sent — per-actor rate/daily caps for users, plus an
+    // app-wide daily budget that bounds everyone including system actors.
+    aiUsage: defineTable({
+      // "user:<subject>", "court", "thread-responder", "agent", "indexing",
+      // or "global" for the app-wide daily budget row.
+      actor: v.string(),
+      // UTC calendar day bucket ("YYYY-MM-DD").
+      day: v.string(),
+      requests: v.number(),
+      // Estimated tokens charged (input chars / 4 + reserved output).
+      tokens: v.number(),
+      // Rolling request timestamps within the rate window (user actors only).
+      recent: v.array(v.number()),
+    })
+      .index("by_actor_day", ["actor", "day"])
+      .index("by_day", ["day"]),
   },
   {
     schemaValidation: false,

@@ -4,10 +4,14 @@ import { internal } from "./_generated/api";
 const crons = cronJobs();
 
 // The cycle is paused until the owner enables automation from /toolkit.
+// internal.aiUsage.runAutomationCycleWithCharge wraps the cycle and charges
+// the AI token guard (aiUsageCore.ts) for the consultant-court runs it
+// performs — the court chain in mongodb.ts predates the guard, so court runs
+// are charged at their entry points with a fixed per-run estimate.
 crons.hourly(
   "run Mongo automation cycle",
   { minuteUTC: 17 },
-  internal.mongodb.runAutomationCycle,
+  internal.aiUsage.runAutomationCycleWithCharge,
 );
 
 // Website-side auto-responder: every 3 minutes, answer open Odysseus

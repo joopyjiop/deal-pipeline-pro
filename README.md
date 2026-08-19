@@ -56,6 +56,7 @@ Defined with `defineSchema`; `schemaValidation: false`. Every table has `_id` an
 | `leads` | `propertyAddress`, `city`, `state`, `zip`, `county`, `parcelId?`, `ownerMailingAddress?`, `sourceType` (enum), `sourceUrl`, `sourceRef`, `sourceDate`, `distressScore` (0–100), `distressSignals[]` (`{type, weight, evidence, verified, sourceUrl, sourceDate}`), `verificationStatus` (`UNVERIFIED`\|`PARTIAL`\|`VERIFIED`), `pipelineStatus` (`SOURCED`\|`CRITIQUED`\|`VERIFIED`\|`APPROVED`\|`REJECTED`), `fabricated`, `absenteeOwner`, `needsSkipTrace`, `listedPhone`, `lastVerifiedAt`, `arv?`, `repairs?`, `mao?`, `notes?`, `createdAt`, `updatedAt` | `by_pipeline_status`, `by_verification_status`, `by_source_type`, `by_parcel_id` |
 | `sharedConversations` | `threadId` (conversation/task ref, e.g. `deal:<leadId>`), `sender` (`website` \| `odysseus`), `kind` (`MESSAGE` \| `REQUEST` \| `ESCALATION` \| `RESOLUTION`), `content`, `refs?[]`, `metadata?`, `sentAt` (ms epoch) | `by_thread` (`threadId`), `by_thread_time` (`threadId`, `sentAt`) |
 | `subscriptions` | Stripe subscription state (Deal Forge marketing site): `userId`, `email?`, `stripeCustomerId?`, `stripeSubscriptionId?`, `priceId?`, `status`, `currentPeriodEnd?`, `createdAt`, `updatedAt`. Written only by the verified Stripe webhook | `by_user` (`userId`) |
+| `aiUsage` | AI token-guard accounting: `actor` (`user:<subject>` \| `court` \| `thread-responder` \| `agent` \| `indexing` \| `global`), `day` (UTC), `requests`, `tokens` (estimated), `recent[]` (rate-window timestamps). Written only by the internal `consumeAiUsage` mutation — see “AI token guard” below | `by_actor_day` (`actor`, `day`), `by_day` (`day`) |
 
 `sharedConversations` is the mid-task collaboration thread between the website and the external Odysseus harness. The website writes via the owner-gated `postSharedMessage` mutation and reads via `getSharedThread`/`listSharedThreads` (UI: `/shared-conversation`); Odysseus writes/reads via the MCP tools `shared_thread_post` / `shared_thread_read` / `shared_threads_list`. Sender is forced server-side — the website can never impersonate Odysseus and vice versa. Protocol: either side posts `REQUEST`/`ESCALATION` when it hits something outside its strengths (see `src/convex/sharedConversation.ts` and `docs/odysseus-briefing.md`).
 
@@ -269,6 +270,19 @@ The website actively responds to Odysseus's open messages instead of leaving eve
 
 ---
 
+## AI token guard (nobody wastes the owner's tokens)
+
+Every model call — customer semantic-search embeddings, local-agents chat, thread-responder replies, and the consultant court — is charged against a budget **before** the gateway is hit, so a single caller (or a runaway agent) can't burn through the owner's paid AI credits (`src/convex/aiUsage.ts` + `aiUsageCore.ts`):
+
+- **Per-call parameters (server-side, not bypassable):** output tokens are always clamped (`max_tokens` = min(requested, `AI_MAX_OUTPUT_TOKENS`, hard ceiling 8,000)) and total input is capped at 200,000 characters before anything is sent.
+- **Per-user limits:** signed-in users are rate-limited (`AI_RATE_LIMIT_PER_MINUTE`, default 6 requests/min) and capped at `AI_USER_DAILY_CAP_TOKENS` (default 200k estimated tokens/day). Any user can read their own usage via the `myAiUsage` query.
+- **App-wide budget:** `AI_DAILY_BUDGET_TOKENS` (default 1,000,000 estimated tokens/day) bounds **everyone**, including system actors (`court`, `thread-responder`, `agent`, `indexing`) that skip the per-user caps so automation keeps working.
+- **Charging is atomic:** a single internal mutation (`consumeAiUsage`) does the read-modify-write of the actor row + the `global` row per UTC day, so concurrent requests can't race past a cap. Exceeded budgets throw a clear error (with `retryAfterMs` for rate limits).
+- **Owner visibility:** the owner-only `getAiUsage` action returns the current limits plus today's per-actor and global usage. All limits are set in the Convex Keys panel — no code change needed to tune them.
+- **Court charging note:** the consultant-court chain in `mongodb.ts` predates the guard and its call site can't be edited with this repo's tooling, so court runs are charged at their entry points instead: the MCP `consultant_court` dispatch charges one `COURT_RUN_ESTIMATE_TOKENS` (24,000) before running, and the automation cron (`runAutomationCycleWithCharge`) charges `24,000 × ai.completed` after each cycle.
+
+---
+
 ## Environment variables
 
 ### Client / build-time (`src/lib/convex-url.ts`)
@@ -312,6 +326,10 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 | `AI_API_KEY` | optional | Bearer key sent to the AI gateway (some local gateways expect one) |
 | `OLLAMA_MODEL` | optional | Chat model-name selector routed through the gateway (default `gpt-oss:20b`) |
 | `OLLAMA_COURT_MODEL` | optional | Court model-name selector (wins over `OLLAMA_MODEL`) |
+| `AI_MAX_OUTPUT_TOKENS` | optional | Hard ceiling on output tokens for **every** model call (default 8,000 = the absolute ceiling). Lower it (e.g. 1,000) to cap all AI output regardless of what a caller requests |
+| `AI_RATE_LIMIT_PER_MINUTE` | optional | Max AI requests per minute per signed-in user (default 6). System actors (court/agents/crons) are not rate-limited per minute |
+| `AI_USER_DAILY_CAP_TOKENS` | optional | Max estimated tokens per user per UTC day (default 200,000). System actors have no per-actor cap |
+| `AI_DAILY_BUDGET_TOKENS` | optional | App-wide daily AI budget across **all** actors (default 1,000,000) — the final backstop that bounds everyone including agents and crons |
 
 ### Owner enrichment (free) vs. skip trace (paid)
 

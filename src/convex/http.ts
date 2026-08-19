@@ -5,6 +5,7 @@ import { auth } from "./auth";
 import { messageContent, normalizeThreadId, sanitizeRefs, shouldNotifyOwner } from "./sharedConversation";
 import { assertPublicOutboundUrl, clientIpFromRequest, constantTimeEqual, isIpAllowed } from "./networkGuard";
 import { type ApiScope } from "./apiAccessCore";
+import { COURT_RUN_ESTIMATE_TOKENS, dayKey, getAiLimits } from "./aiUsageCore";
 
 const http = httpRouter();
 
@@ -726,6 +727,21 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
   }
   if (name === "consultant_court") {
     if (typeof rawArguments.stagedId !== "string" || !rawArguments.stagedId.trim()) throw new Error("consultant_court requires stagedId");
+    // Charge the AI token guard before the court runs (the court chain itself
+    // predates the guard — see aiUsageCore.ts → COURT_RUN_ESTIMATE_TOKENS).
+    const courtCharge = await ctx.runMutation(internal.aiUsage.consumeAiUsage, {
+      actor: "court",
+      day: dayKey(Date.now()),
+      estimatedTokens: COURT_RUN_ESTIMATE_TOKENS,
+      limits: getAiLimits(),
+    });
+    if (!courtCharge.ok) {
+      const retry =
+        courtCharge.retryAfterMs && courtCharge.retryAfterMs > 0
+          ? ` Try again in ${Math.ceil(courtCharge.retryAfterMs / 1000)} seconds.`
+          : "";
+      throw new Error(`${courtCharge.reason}.${retry}`);
+    }
     return ctx.runAction(internal.mongodb.mcpRunConsultantCourt, { stagedId: rawArguments.stagedId });
   }
   if (name === "run_agent_team") {

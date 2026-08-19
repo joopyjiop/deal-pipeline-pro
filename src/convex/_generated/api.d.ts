@@ -10,6 +10,8 @@
 
 import type * as admin from "../admin.js";
 import type * as agents from "../agents.js";
+import type * as aiUsage from "../aiUsage.js";
+import type * as aiUsageCore from "../aiUsageCore.js";
 import type * as apiAccess from "../apiAccess.js";
 import type * as apiAccessCore from "../apiAccessCore.js";
 import type * as auth from "../auth.js";
@@ -52,6 +54,8 @@ import type {
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   agents: typeof agents;
+  aiUsage: typeof aiUsage;
+  aiUsageCore: typeof aiUsageCore;
   apiAccess: typeof apiAccess;
   apiAccessCore: typeof apiAccessCore;
   auth: typeof auth;

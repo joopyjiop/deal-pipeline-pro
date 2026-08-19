@@ -296,7 +296,7 @@ async function generateReply(ctx: ActionCtx, threadId: string, messages: Message
     last.content,
   ].join("\n");
 
-  const { content } = await chatCompletion({
+  const { content } = await chatCompletion(ctx, {
     model: MODEL,
     messages: [
       { role: "system", content: REPLY_SYSTEM_PROMPT },
@@ -304,6 +304,7 @@ async function generateReply(ctx: ActionCtx, threadId: string, messages: Message
     ],
     maxTokens: 700,
     temperature: 0.2,
+    actor: "thread-responder",
   });
   return { content, model: MODEL };
 }

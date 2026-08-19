@@ -1405,7 +1405,7 @@ export const indexLeadEmbeddings = action({
       try        {
 
         const result = await ctx.runAction(internal.ollama.embedText,        {
- text: prompt });
+ text: prompt, actor: "indexing" });
         await database.collection(LEADS).updateOne(
                  {
  _id: document._id },
@@ -1437,7 +1437,7 @@ export const semanticSearchLeads = action({
     if (!query || query.length > 500) throw new Error("Enter a search query (max 500 characters)");
     const embedQuery: () => Promise<number[]> = () =>
       ctx.runAction(internal.ollama.embedText,        {
- text: query }).then((result) => result.embedding);
+ text: query, actor: `user:${identity.subject}` }).then((result) => result.embedding);
     return semanticSearchImpl(await getDatabase(), query, args.limit ?? 10, owner, embedQuery);
   },
 });
@@ -1453,7 +1453,7 @@ export const mcpSemanticSearch = internalAction({
     if (!query || query.length > 500) throw new Error("Enter a search query (max 500 characters)");
     const embedQuery: () => Promise<number[]> = () =>
       ctx.runAction(internal.ollama.embedText,        {
- text: query }).then((result) => result.embedding);
+ text: query, actor: "agent" }).then((result) => result.embedding);
     return semanticSearchImpl(database, query, args.limit ?? 10, true, embedQuery);
   },
 });

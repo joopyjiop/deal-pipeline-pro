@@ -734,6 +734,12 @@ function objectId(id: string)        {
   return new ObjectId(id);
 }
 
+function mongoIdCandidates(id: string): Array<string | ObjectId> {
+  const candidates: Array<string | ObjectId> = [id];
+  if (ObjectId.isValid(id)) candidates.push(new ObjectId(id));
+  return candidates;
+}
+
 // Off-market source presets for the sourcing agent: probate filings, tax
 // delinquency, and government-owned/seized property. Every preset is a real
 // public site the owner can crawl in bounded batches; none of them generate

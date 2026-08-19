@@ -5,6 +5,7 @@ import { v } from "convex/values";
 import { action, internalAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { isEmptyStagingRow, type StagedRowLike } from "./stagingCleanupCore";
+import { mongoIdLookups } from "./mongoIdCore";
 
 // Mirrors mongodb.ts's URI resolution: prefer the MONGODB_URI env var only
 // when it carries credentials; otherwise use the owner-saved fallback URI
@@ -113,10 +114,13 @@ export const deleteStagedSource = action({
     const database = await getDatabase(ctx);
     // Most rows have ObjectId _ids; a few (admin/manual imports) may carry a
     // string id. Match whichever shape the stored row actually uses.
-    const filter: Record<string, unknown> =
-      ObjectId.isValid(args.stagedId) ? { _id: new ObjectId(args.stagedId) } : { _id: args.stagedId };
-    const result = await database.collection(IMPORT_STAGING).deleteOne(filter);
-    return { deleted: result.deletedCount > 0 };
+    const collection = database.collection(IMPORT_STAGING);
+    for (const lookup of mongoIdLookups(args.stagedId)) {
+      const mongoId = lookup.kind === "objectId" ? new ObjectId(lookup.value) : (lookup.value as unknown as ObjectId);
+      const result = await collection.deleteOne({ _id: mongoId });
+      if (result.deletedCount === 1) return { deleted: true };
+    }
+    return { deleted: false };
   },
 });
 

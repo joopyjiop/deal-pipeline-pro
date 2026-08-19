@@ -239,7 +239,7 @@ export default function Dashboard() {
   const listLeads = useAction(api.mongodb.listLeads);
   const listMatches = useAction(api.mongodb.listMatches);
   const insertLead = useAction(api.mongodb.insertLead);
-  const removeLead = useAction(api.mongodb.removeLead);
+  const removeLead = useAction(api.leadCleanup.deleteLeadRecord);
   const updateLead = useAction(api.mongodb.updateLead);
   const skipTraceLead = useAction(api.mongodb.skipTraceLead);
   const enrichOwnerFromRentCast = useAction(api.mongodb.enrichOwnerFromRentCast);

@@ -174,20 +174,20 @@ const faqs = [
 function FAQItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="border-b border-slate-200">
+    <div className="border-b border-white/10">
       <button
         onClick={() => setOpen((value) => !value)}
         className="flex w-full items-center justify-between gap-4 py-5 text-left"
         aria-expanded={open}
       >
-        <span className="text-base font-medium text-slate-900">{q}</span>
+        <span className="text-base font-medium text-slate-100">{q}</span>
         {open ? (
-          <ChevronUp className="size-5 shrink-0 text-indigo-600" />
+          <ChevronUp className="size-5 shrink-0 text-emerald-400" />
         ) : (
-          <ChevronDown className="size-5 shrink-0 text-slate-400" />
+          <ChevronDown className="size-5 shrink-0 text-slate-500" />
         )}
       </button>
-      {open && <p className="pb-5 text-[15px] leading-relaxed text-slate-600">{a}</p>}
+      {open && <p className="pb-5 text-[15px] leading-relaxed text-slate-400">{a}</p>}
     </div>
   );
 }
@@ -245,25 +245,25 @@ export default function Landing() {
   };
 
   return (
-    <div className="min-h-screen bg-white font-sans text-slate-900 antialiased">
+    <div className="min-h-screen bg-navy-950 font-sans text-slate-100 antialiased">
       {/* Nav */}
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/85 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-navy-950/85 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <Logo size="md" />
+          <Logo size="md" tone="light" />
           <nav className="hidden items-center gap-7 lg:flex" aria-label="Main">
             {navLinks.map((link) => (
-              <a key={link.href} href={link.href} className="text-sm text-slate-600 transition-colors hover:text-indigo-600">
+              <a key={link.href} href={link.href} className="text-sm text-slate-400 transition-colors hover:text-emerald-400">
                 {link.label}
               </a>
             ))}
           </nav>
           <div className="flex items-center gap-3">
-            <Link to="/auth" className="hidden text-sm text-slate-600 transition-colors hover:text-indigo-600 sm:block">
+            <Link to="/auth" className="hidden text-sm text-slate-400 transition-colors hover:text-emerald-400 sm:block">
               Sign in
             </Link>
             <a
               href="#pricing"
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-indigo-500 hover:shadow-md"
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-navy-950 shadow-[0_4px_16px_rgb(16_185_129_/_0.35)] transition-all hover:bg-emerald-300 hover:shadow-[0_6px_22px_rgb(16_185_129_/_0.45)]"
             >
               Subscribe <ArrowRight className="size-4" />
             </a>
@@ -274,18 +274,21 @@ export default function Landing() {
       <main>
         {/* Hero */}
         <section className="relative overflow-hidden">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_0%,rgb(79_70_229/0.08),transparent_60%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_0%,rgb(16_185_129/0.14),transparent_60%)]" />
+          <div className="pointer-events-none absolute -top-24 right-0 size-[34rem] rounded-full bg-emerald-500/10 blur-3xl" />
           <div className="relative mx-auto max-w-7xl px-4 pb-20 pt-16 sm:px-6 lg:px-8 lg:pb-28 lg:pt-24">
             <div className="mx-auto max-w-3xl text-center">
-              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-4 py-1.5 text-sm font-medium text-indigo-700">
+              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-1.5 text-sm font-medium text-emerald-300">
                 <Sparkles className="size-4" />
                 Distressed property leads, sourced &amp; verified
               </div>
               <h1 className="text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
                 Distressed property leads,
-                <span className="block text-indigo-600">verified before you buy.</span>
+                <span className="block bg-gradient-to-r from-emerald-300 to-teal-400 bg-clip-text text-transparent">
+                  verified before you buy.
+                </span>
               </h1>
-              <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-600">
+              <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-400">
                 Deal Forge gives subscribers a steady stream of source-verified distressed property
                 leads — sheriff sales, tax sales, and foreclosures — each backed by public-record
                 evidence. No fabricated data. No guessing.
@@ -293,44 +296,44 @@ export default function Landing() {
               <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
                 <a
                   href="#pricing"
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-7 py-3.5 text-base font-semibold text-white shadow-sm transition-all hover:bg-indigo-500 hover:shadow-lg sm:w-auto"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 px-7 py-3.5 text-base font-semibold text-navy-950 shadow-[0_8px_28px_rgb(16_185_129_/_0.35)] transition-all hover:bg-emerald-300 hover:shadow-[0_10px_36px_rgb(16_185_129_/_0.45)] sm:w-auto"
                 >
                   Subscribe now <ArrowRight className="size-5" />
                 </a>
                 <Link
                   to="/demo"
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-7 py-3.5 text-base font-semibold text-slate-700 transition-colors hover:border-indigo-300 hover:text-indigo-600 sm:w-auto"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-7 py-3.5 text-base font-semibold text-slate-200 backdrop-blur transition-colors hover:border-emerald-400/40 hover:text-emerald-300 sm:w-auto"
                 >
                   <Play className="size-4" /> Watch demo
                 </Link>
               </div>
-              <div className="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-slate-500">
+              <div className="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-slate-400">
                 <span className="inline-flex items-center gap-1.5">
-                  <Lock className="size-4 text-indigo-600" /> Secure Stripe checkout
+                  <Lock className="size-4 text-emerald-400" /> Secure Stripe checkout
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <RefreshCcw className="size-4 text-indigo-600" /> Cancel anytime
+                  <RefreshCcw className="size-4 text-emerald-400" /> Cancel anytime
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <ShieldCheck className="size-4 text-indigo-600" /> No fabricated data
+                  <ShieldCheck className="size-4 text-emerald-400" /> No fabricated data
                 </span>
               </div>
             </div>
 
             {/* Lead preview card */}
             <div className="mx-auto mt-16 max-w-3xl">
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_20px_60px_-20px_rgb(30_27_75/0.15)]">
+              <div className="rounded-2xl border border-white/10 bg-navy-900/70 p-6 shadow-[0_20px_60px_-20px_rgb(0_0_0/0.6)] backdrop-blur">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex size-11 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                    <div className="flex size-11 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
                       <Building2 className="size-6" />
                     </div>
                     <div>
-                      <div className="text-sm font-semibold text-slate-900">Verified lead · 4 days ago</div>
-                      <div className="text-sm text-slate-500">Detroit, MI · Wayne County</div>
+                      <div className="text-sm font-semibold text-slate-100">Verified lead · 4 days ago</div>
+                      <div className="text-sm text-slate-400">Detroit, MI · Wayne County</div>
                     </div>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300">
                     <BadgeCheck className="size-3.5" /> VERIFIED
                   </span>
                 </div>
@@ -340,18 +343,18 @@ export default function Landing() {
                     { label: "Source", value: "Sheriff sale" },
                     { label: "Evidence", value: "Public record ✓" },
                   ].map((item) => (
-                    <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div key={item.label} className="rounded-xl border border-white/10 bg-navy-950/60 p-4">
                       <div className="text-xs font-medium text-slate-500">{item.label}</div>
-                      <div className="mt-1 text-base font-semibold text-slate-900">{item.value}</div>
+                      <div className="mt-1 text-base font-semibold text-slate-100">{item.value}</div>
                     </div>
                   ))}
                 </div>
-                <div className="mt-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                  <span className="text-slate-500">Est. spread (ARV − repairs − purchase)</span>
-                  <span className="font-semibold text-emerald-700">$32,400</span>
+                <div className="mt-4 flex items-center justify-between rounded-xl border border-white/10 bg-navy-950/60 px-4 py-3 text-sm">
+                  <span className="text-slate-400">Est. spread (ARV − repairs − purchase)</span>
+                  <span className="font-semibold text-emerald-400">$32,400</span>
                 </div>
               </div>
-              <p className="mt-4 text-center text-xs text-slate-400">
+              <p className="mt-4 text-center text-xs text-slate-500">
                 Illustrative lead summary — every real lead ships with its source URL, reference, and date.
               </p>
             </div>
@@ -359,12 +362,12 @@ export default function Landing() {
         </section>
 
         {/* Sources */}
-        <section className="border-y border-slate-200 bg-slate-50/60">
+        <section className="border-y border-white/5 bg-navy-900/40">
           <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
             <p className="text-center text-sm text-slate-500">Leads sourced from public records &amp; trusted marketplaces</p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-x-10 gap-y-4">
               {sources.map((source) => (
-                <span key={source} className="text-sm font-semibold text-slate-400">
+                <span key={source} className="text-sm font-semibold text-slate-500">
                   {source}
                 </span>
               ))}
@@ -376,25 +379,25 @@ export default function Landing() {
         <section id="how-it-works" className="scroll-mt-20 py-20 lg:py-24">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-2xl text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">How it works</span>
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">How it works</span>
               <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
                 From subscription to closed deal in three steps
               </h2>
-              <p className="mt-4 text-lg text-slate-600">
+              <p className="mt-4 text-lg text-slate-400">
                 A simple, honest pipeline — no spreadsheets, no guesswork.
               </p>
             </div>
             <div className="mt-14 grid gap-6 md:grid-cols-3">
               {steps.map((step, index) => (
-                <div key={step.title} className="relative rounded-2xl border border-slate-200 bg-white p-7">
-                  <div className="absolute -top-3 left-7 rounded-full bg-indigo-600 px-3 py-0.5 text-xs font-bold text-white">
+                <div key={step.title} className="relative rounded-2xl border border-white/10 bg-navy-900/60 p-7">
+                  <div className="absolute -top-3 left-7 rounded-full bg-emerald-400 px-3 py-0.5 text-xs font-bold text-navy-950">
                     Step {index + 1}
                   </div>
-                  <div className="mt-4 flex size-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                  <div className="mt-4 flex size-12 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
                     <step.icon className="size-6" />
                   </div>
-                  <h3 className="mt-5 text-lg font-semibold text-slate-900">{step.title}</h3>
-                  <p className="mt-2 text-[15px] leading-relaxed text-slate-600">{step.desc}</p>
+                  <h3 className="mt-5 text-lg font-semibold text-slate-100">{step.title}</h3>
+                  <p className="mt-2 text-[15px] leading-relaxed text-slate-400">{step.desc}</p>
                 </div>
               ))}
             </div>
@@ -402,14 +405,14 @@ export default function Landing() {
         </section>
 
         {/* Features */}
-        <section id="features" className="scroll-mt-20 border-t border-slate-200 bg-slate-50/60 py-20 lg:py-24">
+        <section id="features" className="scroll-mt-20 border-t border-white/5 bg-navy-900/40 py-20 lg:py-24">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-2xl text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Features</span>
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">Features</span>
               <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
                 Everything you need to trust the deal
               </h2>
-              <p className="mt-4 text-lg text-slate-600">
+              <p className="mt-4 text-lg text-slate-400">
                 Built for wholesalers who demand proof before they commit capital.
               </p>
             </div>
@@ -417,13 +420,13 @@ export default function Landing() {
               {features.map((feature) => (
                 <div
                   key={feature.title}
-                  className="rounded-2xl border border-slate-200 bg-white p-6 transition-all hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md"
+                  className="rounded-2xl border border-white/10 bg-navy-900/60 p-6 transition-all hover:-translate-y-0.5 hover:border-emerald-400/30 hover:shadow-[0_12px_36px_-12px_rgb(16_185_129_/_0.25)]"
                 >
-                  <div className="flex size-11 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                  <div className="flex size-11 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
                     <feature.icon className="size-5" />
                   </div>
-                  <h3 className="mt-4 text-lg font-semibold text-slate-900">{feature.title}</h3>
-                  <p className="mt-2 text-[15px] leading-relaxed text-slate-600">{feature.desc}</p>
+                  <h3 className="mt-4 text-lg font-semibold text-slate-100">{feature.title}</h3>
+                  <p className="mt-2 text-[15px] leading-relaxed text-slate-400">{feature.desc}</p>
                 </div>
               ))}
             </div>
@@ -434,11 +437,11 @@ export default function Landing() {
         <section id="pricing" className="scroll-mt-20 py-20 lg:py-24">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-2xl text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Pricing</span>
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">Pricing</span>
               <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
                 Simple monthly plans, cancel anytime
               </h2>
-              <p className="mt-4 text-lg text-slate-600">
+              <p className="mt-4 text-lg text-slate-400">
                 Billed securely through Stripe. No contracts, no hidden fees.
               </p>
             </div>
@@ -447,26 +450,26 @@ export default function Landing() {
                 <div
                   key={plan.key}
                   className={cn(
-                    "relative flex flex-col rounded-2xl border bg-white p-7",
+                    "relative flex flex-col rounded-2xl border bg-navy-900/60 p-7",
                     plan.popular
-                      ? "border-indigo-600 shadow-[0_20px_50px_-20px_rgb(79_70_229/0.35)]"
-                      : "border-slate-200",
+                      ? "border-emerald-400/70 shadow-[0_20px_60px_-20px_rgb(16_185_129_/_0.35)]"
+                      : "border-white/10",
                   )}
                 >
                   {plan.popular && (
-                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-indigo-600 px-4 py-1 text-xs font-bold text-white">
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-emerald-400 px-4 py-1 text-xs font-bold text-navy-950">
                       MOST POPULAR
                     </span>
                   )}
-                  <h3 className="text-lg font-semibold text-slate-900">{plan.name}</h3>
-                  <p className="mt-1 text-sm text-slate-500">{plan.desc}</p>
+                  <h3 className="text-lg font-semibold text-slate-100">{plan.name}</h3>
+                  <p className="mt-1 text-sm text-slate-400">{plan.desc}</p>
                   <div className="mt-5 flex items-baseline gap-1">
                     {plan.price === null ? (
-                      <span className="text-4xl font-bold text-slate-900">Custom</span>
+                      <span className="text-4xl font-bold text-slate-100">Custom</span>
                     ) : (
                       <>
-                        <span className="text-4xl font-bold text-slate-900">${plan.price}</span>
-                        <span className="text-sm text-slate-500">/ month</span>
+                        <span className="text-4xl font-bold text-slate-100">${plan.price}</span>
+                        <span className="text-sm text-slate-400">/ month</span>
                       </>
                     )}
                   </div>
@@ -480,8 +483,8 @@ export default function Landing() {
                     className={cn(
                       "mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all",
                       plan.popular
-                        ? "bg-indigo-600 text-white hover:bg-indigo-500 hover:shadow-md"
-                        : "border border-slate-300 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-600",
+                        ? "bg-emerald-400 text-navy-950 hover:bg-emerald-300 hover:shadow-[0_8px_24px_rgb(16_185_129_/_0.35)]"
+                        : "border border-white/15 bg-white/5 text-slate-200 hover:border-emerald-400/40 hover:text-emerald-300",
                       checkingOut !== null && "cursor-wait opacity-60",
                     )}
                   >
@@ -490,8 +493,8 @@ export default function Landing() {
                   </button>
                   <ul className="mt-7 space-y-3">
                     {plan.features.map((feature) => (
-                      <li key={feature} className="flex items-start gap-3 text-sm text-slate-600">
-                        <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-indigo-600" />
+                      <li key={feature} className="flex items-start gap-3 text-sm text-slate-400">
+                        <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" />
                         {feature}
                       </li>
                     ))}
@@ -499,9 +502,9 @@ export default function Landing() {
                 </div>
               ))}
             </div>
-            <p className="mt-8 text-center text-sm text-slate-500">
+            <p className="mt-8 text-center text-sm text-slate-400">
               Questions about which plan fits?{" "}
-              <a href="#contact" className="font-medium text-indigo-600 hover:text-indigo-700">
+              <a href="#contact" className="font-medium text-emerald-400 hover:text-emerald-300">
                 Contact us
               </a>
               .
@@ -510,13 +513,13 @@ export default function Landing() {
         </section>
 
         {/* FAQ */}
-        <section id="faq" className="scroll-mt-20 border-t border-slate-200 bg-slate-50/60 py-20">
+        <section id="faq" className="scroll-mt-20 border-t border-white/5 bg-navy-900/40 py-20">
           <div className="mx-auto max-w-3xl px-4 sm:px-6">
             <div className="text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">FAQ</span>
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">FAQ</span>
               <h2 className="mt-3 text-3xl font-bold tracking-tight">Frequently asked questions</h2>
             </div>
-            <div className="mt-10 divide-y divide-slate-200 border-t border-slate-200">
+            <div className="mt-10 divide-y divide-white/10 border-t border-white/10">
               {faqs.map((faq) => (
                 <FAQItem key={faq.q} q={faq.q} a={faq.a} />
               ))}
@@ -528,33 +531,33 @@ export default function Landing() {
         <section id="contact" className="scroll-mt-20 py-20 lg:py-24">
           <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-2xl text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Contact</span>
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">Contact</span>
               <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">We're here to help</h2>
-              <p className="mt-4 text-lg text-slate-600">
+              <p className="mt-4 text-lg text-slate-400">
                 Questions about a plan, a lead, or your subscription? Reach out any time.
               </p>
             </div>
             <div className="mt-12 grid gap-5 sm:grid-cols-2">
               <a
                 href={`mailto:${CONTACT_EMAIL}`}
-                className="flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-6 transition-colors hover:border-indigo-200 hover:shadow-md"
+                className="flex items-start gap-4 rounded-2xl border border-white/10 bg-navy-900/60 p-6 transition-colors hover:border-emerald-400/30 hover:shadow-[0_12px_36px_-12px_rgb(16_185_129_/_0.25)]"
               >
-                <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
                   <Mail className="size-5" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">Email us</div>
-                  <div className="mt-1 text-sm text-slate-500">{CONTACT_EMAIL}</div>
-                  <div className="mt-1 text-sm text-slate-400">We reply within 2 business days.</div>
+                  <div className="text-sm font-semibold text-slate-100">Email us</div>
+                  <div className="mt-1 text-sm text-slate-400">{CONTACT_EMAIL}</div>
+                  <div className="mt-1 text-sm text-slate-500">We reply within 2 business days.</div>
                 </div>
               </a>
-              <div className="flex items-start gap-4 rounded-2xl border border-slate-200 bg-white p-6">
-                <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+              <div className="flex items-start gap-4 rounded-2xl border border-white/10 bg-navy-900/60 p-6">
+                <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
                   <MapPin className="size-5" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">Support address</div>
-                  <div className="mt-1 text-sm text-slate-500">{SUPPORT_ADDRESS}</div>
+                  <div className="text-sm font-semibold text-slate-100">Support address</div>
+                  <div className="mt-1 text-sm text-slate-400">{SUPPORT_ADDRESS}</div>
                 </div>
               </div>
             </div>
@@ -564,19 +567,19 @@ export default function Landing() {
         {/* Final CTA */}
         <section className="pb-20">
           <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 to-indigo-800 px-8 py-14 text-center shadow-xl">
-              <div className="pointer-events-none absolute -right-16 -top-16 size-64 rounded-full bg-white/10 blur-2xl" />
-              <div className="pointer-events-none absolute -bottom-20 -left-16 size-64 rounded-full bg-white/10 blur-2xl" />
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-400 via-emerald-500 to-teal-700 px-8 py-14 text-center shadow-[0_24px_80px_-24px_rgb(16_185_129_/_0.5)]">
+              <div className="pointer-events-none absolute -right-16 -top-16 size-64 rounded-full bg-white/15 blur-2xl" />
+              <div className="pointer-events-none absolute -bottom-20 -left-16 size-64 rounded-full bg-navy-950/20 blur-2xl" />
               <div className="relative">
-                <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+                <h2 className="text-3xl font-bold tracking-tight text-navy-950 sm:text-4xl">
                   Stop guessing. Start closing.
                 </h2>
-                <p className="mx-auto mt-4 max-w-xl text-lg text-indigo-100">
+                <p className="mx-auto mt-4 max-w-xl text-lg text-navy-900/80">
                   Join wholesalers who verify every lead before they spend a dollar on outreach.
                 </p>
                 <a
                   href="#pricing"
-                  className="mt-8 inline-flex items-center gap-2 rounded-xl bg-white px-8 py-3.5 text-base font-semibold text-indigo-700 shadow-sm transition-all hover:bg-indigo-50 hover:shadow-lg"
+                  className="mt-8 inline-flex items-center gap-2 rounded-xl bg-navy-950 px-8 py-3.5 text-base font-semibold text-emerald-300 shadow-sm transition-all hover:bg-navy-900 hover:shadow-lg"
                 >
                   Subscribe now <ArrowRight className="size-5" />
                 </a>

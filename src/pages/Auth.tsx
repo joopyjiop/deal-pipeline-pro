@@ -119,13 +119,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col px-5 py-6 sm:px-8">
+    <div className="min-h-screen flex flex-col bg-navy-950 text-slate-100 px-5 py-6 sm:px-8">
 
       
       {/* Auth Content */}
       <div className="flex flex-1 items-center justify-center py-10">
         <div className="flex items-center justify-center h-full flex-col">
-        <Card className="glass-panel-strong w-full min-w-0 max-w-md overflow-hidden rounded-[1.75rem] border-0 pb-0">
+        <Card className="glass-panel-strong w-full min-w-0 max-w-md overflow-hidden rounded-[1.75rem] border-white/10 bg-navy-900/85 pb-0">
           {step === "signIn" ? (
             <>
               <CardHeader className="text-center sm:px-8 sm:pt-8">
@@ -134,8 +134,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       <LogoMark size="lg" />
                     </div>
                   </div>
-                <CardTitle className="text-xl tracking-tight text-slate-900">Enter the deal room</CardTitle>
-                <CardDescription className="leading-6 text-slate-500">
+                <CardTitle className="text-xl tracking-tight text-slate-100">Enter the deal room</CardTitle>
+                <CardDescription className="leading-6 text-slate-400">
                   Sign in to DealForge—your verified wholesale deal workspace.
                 </CardDescription>
               </CardHeader>
@@ -177,7 +177,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         <span className="w-full border-t" />
                       </div>
                       <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-background px-2 text-muted-foreground">
+                        <span className="bg-navy-900 px-2 text-slate-400">
                           Or
                         </span>
                       </div>
@@ -200,8 +200,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           ) : (
             <>
               <CardHeader className="text-center mt-4">
-                <CardTitle>Check your email</CardTitle>
-                <CardDescription>
+                <CardTitle className="text-slate-100">Check your email</CardTitle>
+                <CardDescription className="text-slate-400">
                   We've sent a code to {step.email}
                 </CardDescription>
               </CardHeader>
@@ -281,7 +281,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             </>
           )}
 
-          <div className="border-t border-white/70 bg-white/35 px-6 py-4 text-center text-xs text-slate-500">
+          <div className="border-t border-white/10 bg-navy-950/60 px-6 py-4 text-center text-xs text-slate-400">
             Owner-controlled access · Secured by{" "}
             <a
               href="https://freebuff.com"

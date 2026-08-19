@@ -42,30 +42,30 @@ export function SiteFooter() {
   ];
 
   return (
-    <footer className="border-t border-slate-200 bg-white">
+    <footer className="border-t border-white/5 bg-navy-950">
       <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
         <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-4">
           <div>
             <Link to="/" className="inline-flex items-center gap-2">
-              <Logo size="md" />
+              <Logo size="md" tone="light" />
             </Link>
-            <p className="mt-4 max-w-xs text-sm leading-relaxed text-slate-500">
+            <p className="mt-4 max-w-xs text-sm leading-relaxed text-slate-400">
               Source-verified distressed property leads for wholesale real
               estate investors. Every lead carries real evidence — never
               fabricated data.
             </p>
-            <div className="mt-5 flex items-start gap-2 text-sm text-slate-500">
-              <MapPin className="mt-0.5 size-4 shrink-0 text-indigo-600" />
+            <div className="mt-5 flex items-start gap-2 text-sm text-slate-400">
+              <MapPin className="mt-0.5 size-4 shrink-0 text-emerald-400" />
               <span>100 Congress Ave, Suite 1100, Austin, TX 78701</span>
             </div>
           </div>
 
           <nav aria-label="Product">
-            <h4 className="text-sm font-semibold text-slate-900">Product</h4>
+            <h4 className="text-sm font-semibold text-slate-200">Product</h4>
             <ul className="mt-4 space-y-2.5">
               {productLinks.map((link) => (
                 <li key={link.label}>
-                  <Link to={link.href} className="text-sm text-slate-500 transition-colors hover:text-indigo-600">
+                  <Link to={link.href} className="text-sm text-slate-400 transition-colors hover:text-emerald-400">
                     {link.label}
                   </Link>
                 </li>
@@ -74,11 +74,11 @@ export function SiteFooter() {
           </nav>
 
           <nav aria-label="Company">
-            <h4 className="text-sm font-semibold text-slate-900">Company</h4>
+            <h4 className="text-sm font-semibold text-slate-200">Company</h4>
             <ul className="mt-4 space-y-2.5">
               {companyLinks.map((link) => (
                 <li key={link.label}>
-                  <Link to={link.href} className="text-sm text-slate-500 transition-colors hover:text-indigo-600">
+                  <Link to={link.href} className="text-sm text-slate-400 transition-colors hover:text-emerald-400">
                     {link.label}
                   </Link>
                 </li>
@@ -87,11 +87,11 @@ export function SiteFooter() {
           </nav>
 
           <nav aria-label="Legal">
-            <h4 className="text-sm font-semibold text-slate-900">Legal</h4>
+            <h4 className="text-sm font-semibold text-slate-200">Legal</h4>
             <ul className="mt-4 space-y-2.5">
               {legalLinks.map((link) => (
                 <li key={link.label}>
-                  <Link to={link.href} className="text-sm text-slate-500 transition-colors hover:text-indigo-600">
+                  <Link to={link.href} className="text-sm text-slate-400 transition-colors hover:text-emerald-400">
                     {link.label}
                   </Link>
                 </li>
@@ -99,21 +99,21 @@ export function SiteFooter() {
             </ul>
             <a
               href={`mailto:${CONTACT_EMAIL}`}
-              className="mt-5 flex items-center gap-2 text-sm text-slate-500 transition-colors hover:text-indigo-600"
+              className="mt-5 flex items-center gap-2 text-sm text-slate-400 transition-colors hover:text-emerald-400"
             >
-              <Mail className="size-4 text-indigo-600" />
+              <Mail className="size-4 text-emerald-400" />
               {CONTACT_EMAIL}
             </a>
           </nav>
         </div>
 
-        <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-slate-200 pt-8 md:flex-row">
-          <p className="text-sm text-slate-500">© 2026 Deal Forge. All rights reserved.</p>
-          <div className="flex items-center gap-5 text-sm text-slate-500">
+        <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-white/5 pt-8 md:flex-row">
+          <p className="text-sm text-slate-400">© 2026 Deal Forge. All rights reserved.</p>
+          <div className="flex items-center gap-5 text-sm text-slate-400">
             <span className="hidden sm:inline">Secure checkout via Stripe</span>
-            <Link to={legalHref("privacy")} className="transition-colors hover:text-indigo-600">Privacy</Link>
-            <Link to={legalHref("terms")} className="transition-colors hover:text-indigo-600">Terms</Link>
-            <Link to={legalHref("cancellation")} className="transition-colors hover:text-indigo-600">Cancellation</Link>
+            <Link to={legalHref("privacy")} className="transition-colors hover:text-emerald-400">Privacy</Link>
+            <Link to={legalHref("terms")} className="transition-colors hover:text-emerald-400">Terms</Link>
+            <Link to={legalHref("cancellation")} className="transition-colors hover:text-emerald-400">Cancellation</Link>
           </div>
         </div>
       </div>

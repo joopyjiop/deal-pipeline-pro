@@ -1,4 +1,5 @@
 import { api } from "@/convex/_generated/api";
+import { OwnerNav } from "@/components/OwnerNav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,7 +7,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { useAction } from "convex/react";
 import {
-  ArrowLeft,
   Bot,
   Check,
   Clipboard,
@@ -278,15 +278,14 @@ export default function LocalAgents() {
       <div className="mx-auto max-w-6xl">
         <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-[1.75rem] px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
-            <Link to="/toolkit" className="flex size-9 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-600 transition-colors hover:text-sky-700" aria-label="Back to toolkit"><ArrowLeft className="size-4" /></Link>
             <div className="flex size-9 items-center justify-center rounded-xl bg-violet-100/80 text-violet-700"><Bot className="size-4" /></div>
             <div><p className="eyebrow">{mode === "PHONE" ? "No API key required" : "Secured AI gateway"}</p><h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Local agent workspace</h1></div>
           </div>
           <div className="flex items-center gap-2">
-            <Link to="/operations" className="hidden text-sm font-medium text-slate-600 hover:text-sky-700 sm:inline">Operations</Link>
             <Badge className={connectionState === "connected" ? "border-0 bg-teal-100/80 text-teal-800" : connectionState === "offline" ? "border-0 bg-rose-100/80 text-rose-800" : "border-0 bg-slate-100/80 text-slate-600"}>{connectionState === "connected" ? <><Wifi className="mr-1 size-3" /> {mode === "PHONE" ? "Phone connected" : mode === "CLOUD" ? "AI gateway connected" : "Comparison connected"}</> : connectionState === "offline" ? <><WifiOff className="mr-1 size-3" /> Offline</> : "Not checked"}</Badge>
           </div>
         </header>
+        <OwnerNav />
 
         <section className="mt-5 grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
           <div className="space-y-5">

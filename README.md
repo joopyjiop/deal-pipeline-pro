@@ -47,7 +47,7 @@ The Convex `users`, `appSettings`, and a `leads` table live in Convex itself (se
 
 - **Signed-out visitors:** marketing pages only (landing, demo, legal, buyer intake form). No lead/buyer/match data is queryable — `marketplaceOverview` rejects anonymous identities server-side, and `semanticSearchLeads` requires a signed-in user.
 - **Signed-in non-owners:** the **read-only marketplace** (`src/convex/marketplace.ts` + `MarketplaceView.tsx`) — approved sellers (verified, non-fabricated leads with PII scrubbed), approved buyers (contact PII stripped), and matches. No write paths, no owner buttons, no lead dossiers, no owner workspace. Guest/anonymous accounts are not offered and are rejected server-side.
-- **Owner (permanent owner email or `role: admin`):** the full workspace — verified-lead dossiers with owner/skip-trace PII, add/edit/delete, approvals, API access, AI usage, and the owner-only routes (`/operations`, `/toolkit`, `/local-agents`, `/shared-conversation` wrapped in `OwnerOnly`).
+- **Owner (permanent owner email or `role: admin`):** the full workspace — verified-lead dossiers with owner/skip-trace PII, add/edit/delete, approvals, API access, AI usage, and the owner-only routes (`/operations`, `/toolkit`, `/local-agents`, `/shared-conversation` wrapped in `OwnerOnly`, linked by the shared `OwnerNav` hub). Guests are not offered anymore, and the Dashboard's owner-only **Purge guest accounts** action (`userAdmin.purgeAnonymousUsersAction`) deletes any leftover anonymous user rows entirely.
 
 ---
 

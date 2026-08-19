@@ -43,6 +43,7 @@ import type * as stripe from "../stripe.js";
 import type * as subscriptions from "../subscriptions.js";
 import type * as threadResponder from "../threadResponder.js";
 import type * as underwriting from "../underwriting.js";
+import type * as userAdmin from "../userAdmin.js";
 import type * as users from "../users.js";
 import type * as webIntel from "../webIntel.js";
 import type * as webIntelCore from "../webIntelCore.js";
@@ -89,6 +90,7 @@ declare const fullApi: ApiFromModules<{
   subscriptions: typeof subscriptions;
   threadResponder: typeof threadResponder;
   underwriting: typeof underwriting;
+  userAdmin: typeof userAdmin;
   users: typeof users;
   webIntel: typeof webIntel;
   webIntelCore: typeof webIntelCore;

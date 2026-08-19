@@ -9,6 +9,7 @@ import {
   Activity,
   ArrowUpRight,
   BarChart3,
+  Bot,
   Building2,
   Check,
   ChevronRight,
@@ -26,6 +27,7 @@ import {
   LogOut,
   MapPin,
   Menu,
+  MessageSquare,
   Phone,
   Plus,
   RefreshCw,
@@ -33,6 +35,8 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
+  UserX,
+  Wrench,
   X,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
@@ -244,6 +248,7 @@ export default function Dashboard() {
   const approveApiCredential = useAction(api.apiAccess.approveApiCredential);
   const deleteApiCredential = useAction(api.apiAccess.deleteApiCredential);
   const getAiUsage = useAction(api.aiUsage.getAiUsage);
+  const purgeAnonymousUsers = useAction(api.userAdmin.purgeAnonymousUsersAction);
   const [workspace, setWorkspace] = useState<MongoWorkspace>();
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -338,6 +343,16 @@ export default function Dashboard() {
       setAiUsageLoading(false);
     }
   }, [getAiUsage]);
+
+  const handlePurgeGuests = async () => {
+    if (!window.confirm("Delete every guest (anonymous) account? Their sessions stop working immediately. This cannot be undone.")) return;
+    try {
+      const result = await purgeAnonymousUsers();
+      toast.success(result.deleted > 0 ? `Removed ${result.deleted} guest account${result.deleted === 1 ? "" : "s"}.` : "No guest accounts found.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not purge guest accounts.");
+    }
+  };
 
   const pendingCreds = apiCreds.filter((cred) => cred.status === "PENDING");
 
@@ -567,9 +582,12 @@ export default function Dashboard() {
           <nav className="space-y-1" aria-label="Workspace navigation">
             <div className="flex items-center gap-3 rounded-xl bg-white/78 px-3 py-2.5 text-sm font-semibold text-sky-800 shadow-sm"><Home className="size-4" /> Verified leads</div>
             <Link to="/operations" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><BarChart3 className="size-4" /> Buyers & matches <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Open</Badge></Link>
-            <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500"><Database className="size-4" /> Source registry <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-400">Soon</Badge></div>
+            <Link to="/toolkit" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Wrench className="size-4" /> Toolkit</Link>
+            <Link to="/local-agents" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Bot className="size-4" /> Local agents</Link>
+            <Link to="/shared-conversation" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><MessageSquare className="size-4" /> Odysseus</Link>
             {isOwner && <button type="button" onClick={() => { setShowApiAccess(true); void loadApiCredentials(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><KeyRound className="size-4" /> API access <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
             {isOwner && <button type="button" onClick={() => { setShowAiUsage(true); void loadAiUsage(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Activity className="size-4" /> AI usage <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
+            {isOwner && <button type="button" onClick={() => void handlePurgeGuests()} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/60 hover:text-rose-700"><UserX className="size-4" /> Purge guest accounts</button>}
           </nav>
           <div className="mt-auto rounded-2xl border border-teal-100/90 bg-teal-50/55 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-teal-800"><ShieldCheck className="size-4" /> Integrity mode on</div><p className="mt-2 text-xs leading-5 text-teal-900/65">Only verified, non-fabricated records are surfaced.</p></div>
           <button type="button" onClick={handleSignOut} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/65 hover:text-slate-800"><LogOut className="size-4" /> Sign out</button>
@@ -606,9 +624,12 @@ export default function Dashboard() {
             <nav className="space-y-1" aria-label="Workspace navigation">
               <div className="flex items-center gap-3 rounded-xl bg-white/78 px-3 py-2.5 text-sm font-semibold text-sky-800 shadow-sm"><Home className="size-4" /> Verified leads</div>
               <Link to="/operations" onClick={() => setMobileNavOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><BarChart3 className="size-4" /> Buyers & matches <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Open</Badge></Link>
-              <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500"><Database className="size-4" /> Source registry <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-400">Soon</Badge></div>
+              <Link to="/toolkit" onClick={() => setMobileNavOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Wrench className="size-4" /> Toolkit</Link>
+              <Link to="/local-agents" onClick={() => setMobileNavOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Bot className="size-4" /> Local agents</Link>
+              <Link to="/shared-conversation" onClick={() => setMobileNavOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><MessageSquare className="size-4" /> Odysseus</Link>
               {isOwner && <button type="button" onClick={() => { setMobileNavOpen(false); setShowApiAccess(true); void loadApiCredentials(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><KeyRound className="size-4" /> API access <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
               {isOwner && <button type="button" onClick={() => { setMobileNavOpen(false); setShowAiUsage(true); void loadAiUsage(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Activity className="size-4" /> AI usage <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
+              {isOwner && <button type="button" onClick={() => { setMobileNavOpen(false); void handlePurgeGuests(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/60 hover:text-rose-700"><UserX className="size-4" /> Purge guest accounts</button>}
             </nav>
             <div className="mt-auto rounded-2xl border border-teal-100/90 bg-teal-50/55 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-teal-800"><ShieldCheck className="size-4" /> Integrity mode on</div><p className="mt-2 text-xs leading-5 text-teal-900/65">Only verified, non-fabricated records are surfaced.</p></div>
             <button type="button" onClick={handleSignOut} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/65 hover:text-slate-800"><LogOut className="size-4" /> Sign out</button>

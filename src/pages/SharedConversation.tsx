@@ -3,9 +3,9 @@ import { Link } from "react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
+import { OwnerNav } from "@/components/OwnerNav";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
   Bot,
   Globe2,
   Loader2,
@@ -195,9 +195,6 @@ export default function SharedConversation() {
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-start gap-3">
-            <Link to="/toolkit" className="flex size-9 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-600 transition-colors hover:text-sky-700" aria-label="Back to toolkit">
-              <ArrowLeft className="size-4" />
-            </Link>
             <div className="flex items-start gap-3">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700">
                 <MessageSquare className="size-5" />
@@ -235,6 +232,7 @@ export default function SharedConversation() {
             Auto-answers open Odysseus requests/questions every ~3 min when AI access is enabled in the Toolkit.
           </p>
         </div>
+        <OwnerNav />
 
         <div className="mt-6 grid gap-5 lg:grid-cols-[320px_1fr]">
           {/* Thread list */}

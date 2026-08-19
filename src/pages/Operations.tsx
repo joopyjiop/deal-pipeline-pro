@@ -1,11 +1,11 @@
 import { api } from "@/convex/_generated/api";
+import { OwnerNav } from "@/components/OwnerNav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
 import { useAction } from "convex/react";
 import {
-  ArrowLeft,
   Check,
   CircleAlert,
   Gavel,
@@ -18,7 +18,6 @@ import {
   ShieldCheck,
   UserRound,
   Users,
-  Wrench,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -363,16 +362,15 @@ export default function Operations() {
       <div className="mx-auto max-w-[1500px]">
         <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-[1.75rem] px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
-            <Link to="/dashboard" className="flex size-9 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-600 transition-colors hover:text-sky-700" aria-label="Back to verified leads"><ArrowLeft className="size-4" /></Link>
             <div className="flex size-9 items-center justify-center rounded-xl bg-white/75 text-sky-700 shadow-sm"><Landmark className="size-4" /></div>
             <div><p className="eyebrow">Mongo operations</p><h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Buyers & matches</h1></div>
           </div>
           <div className="flex items-center gap-2">
-            <Link to="/toolkit" className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/85 bg-white/60 px-3 text-sm font-medium text-slate-700 transition-colors hover:text-sky-700"><Wrench className="size-4" /> Toolkit</Link>
             <Button type="button" variant="outline" onClick={refresh} className="gap-2 rounded-xl border-white/85 bg-white/60 text-slate-700"><RefreshCw className="size-4" /> Refresh</Button>
             <button type="button" onClick={handleSignOut} className="flex size-10 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500 hover:text-slate-800" aria-label="Sign out"><LogOut className="size-4" /></button>
           </div>
         </header>
+        <OwnerNav />
 
         <section className="mt-5 grid gap-3 sm:grid-cols-3">
           <div className="glass-panel rounded-2xl p-4"><div className="flex items-center justify-between"><p className="text-xs font-medium text-slate-500">Buyer queue</p><Users className="size-4 text-sky-600" /></div><p className="mt-3 text-2xl font-semibold text-slate-900">{buyerFilter === "PENDING" ? pendingCount : visibleBuyers.length}</p><p className="mt-1 text-xs text-slate-500">{buyerFilter === "PENDING" ? "Awaiting owner review" : "Current filter"}</p></div>

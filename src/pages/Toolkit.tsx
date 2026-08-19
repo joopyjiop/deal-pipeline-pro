@@ -1,5 +1,6 @@
 import { api } from "@/convex/_generated/api";
 import { CONVEX_SITE_URL } from "@/lib/convex-url";
+import { OwnerNav } from "@/components/OwnerNav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +8,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { useAction } from "convex/react";
 import {
-  ArrowLeft,
   Bot,
   Calculator,
   Check,
@@ -23,13 +23,11 @@ import {
   Landmark,
   Loader2,
   LogOut,
-  MessageSquare,
   Play,
   Radar,
   RefreshCw,
   Search,
   ShieldCheck,
-  Smartphone,
   Sparkles,
   Users,
   Wrench,
@@ -1177,16 +1175,15 @@ export default function Toolkit() {
       <div className="mx-auto max-w-[1500px]">
         <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-[1.75rem] px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
-            <Link to="/operations" className="flex size-9 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-600 transition-colors hover:text-sky-700" aria-label="Back to operations"><ArrowLeft className="size-4" /></Link>
             <div className="flex size-9 items-center justify-center rounded-xl bg-white/75 text-sky-700 shadow-sm"><Wrench className="size-4" /></div>
             <div><p className="eyebrow">Owner controls</p><h1 className="mt-1 text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">Source & underwriting toolkit</h1></div>
           </div>
           <div className="flex items-center gap-2">
-            <Link to="/local-agents" className="inline-flex h-10 items-center gap-2 rounded-xl border border-violet-200/80 bg-violet-50/65 px-3 text-xs font-semibold text-violet-800 transition-colors hover:bg-violet-100/80"><Smartphone className="size-4" /> Local agents</Link><Link to="/shared-conversation" className="inline-flex h-10 items-center gap-2 rounded-xl border border-sky-200/80 bg-sky-50/65 px-3 text-xs font-semibold text-sky-800 transition-colors hover:bg-sky-100/80"><MessageSquare className="size-4" /> Shared conversation</Link>
             <Button type="button" variant="outline" onClick={() => void loadAccess()} className="gap-2 rounded-xl border-white/85 bg-white/60 text-slate-700"><RefreshCw className="size-4" /> Refresh</Button>
             <button type="button" onClick={handleSignOut} className="flex size-10 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500 hover:text-slate-800" aria-label="Sign out"><LogOut className="size-4" /></button>
           </div>
         </header>
+        <OwnerNav />
 
         <section className="glass-panel mt-5 rounded-[1.75rem] p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">

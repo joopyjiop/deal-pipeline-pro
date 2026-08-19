@@ -16,6 +16,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  Trash2,
   UserRound,
   Users,
   X,
@@ -104,6 +105,14 @@ type StagedSource = {
   rejectReason?: string;
   scoreMismatch?: "SCORE_MISMATCH" | null;
   missingEvidence?: string[];
+  // Fetch/crawl paths nest their evidence here — fall back to it for display
+  // so scraped rows don't show as "Untitled staged source".
+  rawJson?: {
+    url?: string;
+    title?: string;
+    excerpt?: string;
+    links?: string[];
+  };
 };
 
 type BuyerFilter = "ALL" | Buyer["intakeStatus"];
@@ -151,6 +160,8 @@ export default function Operations() {
   const listImportStaging = useAction(api.mongodb.listImportStaging);
   const qualifyStagedSource = useAction(api.mongodb.qualifyStagedSource);
   const setStagingEvidence = useAction(api.mongodb.setStagingEvidence);
+  const purgeEmptyStaging = useAction(api.stagingCleanup.purgeEmptyStagedSources);
+  const deleteStaged = useAction(api.stagingCleanup.deleteStagedSource);
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -327,6 +338,29 @@ export default function Operations() {
     });
   };
 
+  const handlePurgeEmptyStaging = async () => {
+    if (!window.confirm("Delete every empty staged source (no source URL anywhere and no readable content)? This cannot be undone.")) return;
+    try {
+      const result = await purgeEmptyStaging();
+      toast.success(result.deleted > 0 ? `Removed ${result.deleted} empty staged source${result.deleted === 1 ? "" : "s"}.` : "No empty staged sources found.");
+      refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not purge empty staged sources.");
+    }
+  };
+
+  const handleRemoveStaged = async (staged: StagedSource) => {
+    const label = (staged.title ?? staged.sourceUrl ?? staged.rawJson?.url ?? "").slice(0, 60);
+    if (!window.confirm(`Remove this staged source${label ? ` (${label})` : ""}? This cannot be undone.`)) return;
+    try {
+      await deleteStaged({ stagedId: staged._id });
+      toast.success("Staged source removed.");
+      refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not remove this staged source.");
+    }
+  };
+
   const handleFillEvidence = async (staged: StagedSource) => {
     const form = evidenceForm[staged._id];
     try {
@@ -388,10 +422,10 @@ export default function Operations() {
 
         <section className="glass-panel mt-5 overflow-hidden rounded-[1.75rem]">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/70 px-4 py-4 sm:px-5">
-            <div><p className="eyebrow">Source evidence gate</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Import-staging review queue</h2><p className="mt-1 text-xs text-slate-500">A live lead needs a real source URL, reference, and date. Rows missing any of the three stay parked as NEEDS_EVIDENCE; contradictory distress scores are flagged.</p></div>
-            <Badge className="border-0 bg-amber-100/80 text-amber-800">{staging.length} staged</Badge>
+            <div><p className="eyebrow">Source evidence gate</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Import-staging review queue</h2><p className="mt-1 text-xs text-slate-500">A live lead needs a real source URL, reference, and date. Rows missing any of the three stay parked as NEEDS_EVIDENCE; contradictory distress scores are flagged. Fetch rows that came back with no URL or content at all are garbage — clear them in one click.</p></div>
+            <div className="flex items-center gap-2"><Button type="button" variant="outline" onClick={() => void handlePurgeEmptyStaging()} className="h-8 gap-1.5 rounded-lg border-rose-200/80 bg-rose-50/45 px-3 text-xs text-rose-700 hover:bg-rose-50"><Trash2 className="size-3.5" /> Clear empty rows</Button><Badge className="border-0 bg-amber-100/80 text-amber-800">{staging.length} staged</Badge></div>
           </div>
-          {staging.length === 0 ? <div className="flex min-h-32 items-center justify-center px-6 text-center"><p className="text-sm text-slate-500">No staged sources yet. Queue a public source in the Toolkit and it will appear here for review.</p></div> : <div className="divide-y divide-white/70">{staging.map((row) => <article key={row._id} className="p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{row.title ?? row.sourceUrl ?? "Untitled staged source"}</p><p className="mt-1 truncate text-xs text-slate-500">{row.sourceUrl ?? "No source URL recorded"}</p><div className="mt-2 flex flex-wrap items-center gap-1.5"><Badge variant="outline" className={row.status === "NEW" ? "border-teal-200/80 bg-teal-50/60 text-[0.65rem] text-teal-800" : row.status === "NEEDS_EVIDENCE" ? "border-amber-200/80 bg-amber-50/60 text-[0.65rem] text-amber-800" : "border-white/90 bg-white/55 text-[0.65rem] text-slate-600"}>{pretty(row.status)}</Badge>{row.distressScore !== undefined && <Badge variant="outline" className="border-white/90 bg-white/55 text-[0.65rem] text-slate-600">Score {row.distressScore}</Badge>}{row.scoreMismatch === "SCORE_MISMATCH" && <Badge className="border-0 bg-rose-100/80 text-[0.65rem] text-rose-800">{row.scoreMismatch}</Badge>}{row.missingEvidence && row.missingEvidence.length > 0 && <span className="text-[0.68rem] text-amber-700">Missing: {row.missingEvidence.join(", ")}</span>}</div></div>{(row.status === "NEW" || row.status === "NEEDS_EVIDENCE") && <Button type="button" variant={row.status === "NEW" ? "default" : "outline"} onClick={() => void handlePromoteStaged(row)} className={row.status === "NEW" ? "h-9 rounded-xl bg-teal-700 text-xs hover:bg-teal-800" : "h-9 rounded-xl border-amber-200/80 bg-amber-50/45 px-3 text-xs text-amber-800"}>Promote to lead</Button>}</div>{row.status === "NEEDS_EVIDENCE" && <div className="mt-3 rounded-2xl border border-amber-100/80 bg-amber-50/35 p-3"><p className="text-[0.68rem] font-semibold uppercase tracking-wide text-amber-800">Fill source evidence</p><div className="mt-2 grid gap-2 sm:grid-cols-2"><Input value={(evidenceForm[row._id]?.sourceUrl ?? row.sourceUrl ?? "")} onChange={(event) => setEvidenceField(row._id, "sourceUrl", event.target.value)} placeholder="https://… source URL" className="rounded-xl border-white/85 bg-white/70 text-xs" /><Input value={(evidenceForm[row._id]?.sourceRef ?? row.sourceRef ?? "")} onChange={(event) => setEvidenceField(row._id, "sourceRef", event.target.value)} placeholder="Source reference (case/parcel/sale id)" className="rounded-xl border-white/85 bg-white/70 text-xs" /><Input value={(evidenceForm[row._id]?.sourceDate ?? row.sourceDate ?? "")} onChange={(event) => setEvidenceField(row._id, "sourceDate", event.target.value)} placeholder="Source date (YYYY-MM-DD)" className="rounded-xl border-white/85 bg-white/70 text-xs" /><Input value={(evidenceForm[row._id]?.distressScore ?? (row.distressScore !== undefined ? String(row.distressScore) : ""))} onChange={(event) => setEvidenceField(row._id, "distressScore", event.target.value)} placeholder="Distress score (0-100)" type="number" min="0" max="100" className="rounded-xl border-white/85 bg-white/70 text-xs" /></div><div className="mt-2 flex justify-end"><Button type="button" onClick={() => void handleFillEvidence(row)} className="h-9 rounded-xl bg-amber-700 text-xs hover:bg-amber-800">Save evidence</Button></div></div>}{row.status === "ARCHIVED" && row.candidateLeadId ? <p className="mt-1 text-[0.68rem] text-teal-700">Promoted to candidate lead {row.candidateLeadId.slice(-6)}</p> : null}{row.rejectReason && <p className="mt-2 text-[0.68rem] text-slate-500">{row.rejectReason}</p>}</article>)}</div>}
+          {staging.length === 0 ? <div className="flex min-h-32 items-center justify-center px-6 text-center"><p className="text-sm text-slate-500">No staged sources yet. Queue a public source in the Toolkit and it will appear here for review.</p></div> : <div className="divide-y divide-white/70">{staging.map((row) => <article key={row._id} className="p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{row.title ?? row.rawJson?.title ?? row.sourceUrl ?? row.rawJson?.url ?? "Untitled staged source"}</p><p className="mt-1 truncate text-xs text-slate-500">{row.sourceUrl ?? row.rawJson?.url ?? "No source URL recorded"}</p><div className="mt-2 flex flex-wrap items-center gap-1.5"><Badge variant="outline" className={row.status === "NEW" ? "border-teal-200/80 bg-teal-50/60 text-[0.65rem] text-teal-800" : row.status === "NEEDS_EVIDENCE" ? "border-amber-200/80 bg-amber-50/60 text-[0.65rem] text-amber-800" : "border-white/90 bg-white/55 text-[0.65rem] text-slate-600"}>{pretty(row.status)}</Badge>{row.distressScore !== undefined && <Badge variant="outline" className="border-white/90 bg-white/55 text-[0.65rem] text-slate-600">Score {row.distressScore}</Badge>}{row.scoreMismatch === "SCORE_MISMATCH" && <Badge className="border-0 bg-rose-100/80 text-[0.65rem] text-rose-800">{row.scoreMismatch}</Badge>}{row.missingEvidence && row.missingEvidence.length > 0 && <span className="text-[0.68rem] text-amber-700">Missing: {row.missingEvidence.join(", ")}</span>}</div></div><div className="flex flex-wrap items-center gap-2">{(row.status === "NEW" || row.status === "NEEDS_EVIDENCE") && <Button type="button" variant={row.status === "NEW" ? "default" : "outline"} onClick={() => void handlePromoteStaged(row)} className={row.status === "NEW" ? "h-9 rounded-xl bg-teal-700 text-xs hover:bg-teal-800" : "h-9 rounded-xl border-amber-200/80 bg-amber-50/45 px-3 text-xs text-amber-800"}>Promote to lead</Button>}<Button type="button" variant="outline" onClick={() => void handleRemoveStaged(row)} className="h-9 rounded-xl border-rose-200/80 bg-rose-50/45 px-3 text-xs text-rose-700 hover:bg-rose-50"><Trash2 className="size-3.5" /> Remove</Button></div></div>{row.status === "NEEDS_EVIDENCE" && <div className="mt-3 rounded-2xl border border-amber-100/80 bg-amber-50/35 p-3"><p className="text-[0.68rem] font-semibold uppercase tracking-wide text-amber-800">Fill source evidence</p><div className="mt-2 grid gap-2 sm:grid-cols-2"><Input value={(evidenceForm[row._id]?.sourceUrl ?? row.sourceUrl ?? "")} onChange={(event) => setEvidenceField(row._id, "sourceUrl", event.target.value)} placeholder="https://… source URL" className="rounded-xl border-white/85 bg-white/70 text-xs" /><Input value={(evidenceForm[row._id]?.sourceRef ?? row.sourceRef ?? "")} onChange={(event) => setEvidenceField(row._id, "sourceRef", event.target.value)} placeholder="Source reference (case/parcel/sale id)" className="rounded-xl border-white/85 bg-white/70 text-xs" /><Input value={(evidenceForm[row._id]?.sourceDate ?? row.sourceDate ?? "")} onChange={(event) => setEvidenceField(row._id, "sourceDate", event.target.value)} placeholder="Source date (YYYY-MM-DD)" className="rounded-xl border-white/85 bg-white/70 text-xs" /><Input value={(evidenceForm[row._id]?.distressScore ?? (row.distressScore !== undefined ? String(row.distressScore) : ""))} onChange={(event) => setEvidenceField(row._id, "distressScore", event.target.value)} placeholder="Distress score (0-100)" type="number" min="0" max="100" className="rounded-xl border-white/85 bg-white/70 text-xs" /></div><div className="mt-2 flex justify-end"><Button type="button" onClick={() => void handleFillEvidence(row)} className="h-9 rounded-xl bg-amber-700 text-xs hover:bg-amber-800">Save evidence</Button></div></div>}{row.status === "ARCHIVED" && row.candidateLeadId ? <p className="mt-1 text-[0.68rem] text-teal-700">Promoted to candidate lead {row.candidateLeadId.slice(-6)}</p> : null}{row.rejectReason && <p className="mt-2 text-[0.68rem] text-slate-500">{row.rejectReason}</p>}</article>)}</div>}
         </section>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

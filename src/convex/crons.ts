@@ -39,4 +39,15 @@ crons.interval(
   {},
 );
 
+// Daily sweep: delete import-staging rows that are empty garbage (no source
+// URL anywhere and no readable content). The fetch/crawl paths nest their
+// evidence in rawJson, so rows that are truly contentless can never be
+// reviewed or promoted — see src/convex/stagingCleanup.ts.
+crons.daily(
+  "sweep empty staged sources",
+  { hourUTC: 6, minuteUTC: 0 },
+  internal.stagingCleanup.sweepEmptyStagedSources,
+  {},
+);
+
 export default crons;

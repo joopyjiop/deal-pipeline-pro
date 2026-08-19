@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import { auth } from "./auth";
 import { messageContent, normalizeThreadId, sanitizeRefs, shouldNotifyOwner } from "./sharedConversation";
 import { assertPublicOutboundUrl, clientIpFromRequest, constantTimeEqual, isIpAllowed } from "./networkGuard";
+import { type ApiScope } from "./apiAccessCore";
 
 const http = httpRouter();
 
@@ -66,7 +67,9 @@ function isMcpSourceType(value: unknown): value is McpSourceType {
 const queueN8nSource = httpAction(async (ctx, request) => {
   const expectedSecret = process.env.CONVEX_N8N_WEBHOOK_SECRET;
   const receivedSecret = request.headers.get("x-convex-n8n-secret");
-  if (!expectedSecret || !receivedSecret || !constantTimeEqual(receivedSecret, expectedSecret)) {
+  const ownerMatch = Boolean(expectedSecret && receivedSecret && constantTimeEqual(receivedSecret, expectedSecret));
+  const registryMatch = ownerMatch ? false : await registryAuthorized(ctx, request, "n8n", ["x-convex-n8n-secret"]);
+  if (!ownerMatch && !registryMatch) {
     return json({ error: "Unauthorized" }, 401);
   }
 
@@ -119,29 +122,56 @@ function adminIpAllowed(request: Request) {
   return isIpAllowed(clientIpFromRequest(request), allowlist);
 }
 
-function adminAuthorized(request: Request) {
+// ── API access registry ─────────────────────────────────────────────────────
+// Every API surface accepts either the owner's master key (checked first,
+// constant-time) OR a scoped credential issued from the api_credentials
+// registry (the "whoever I gave permission to" path). The registry is managed
+// owner-only in the Dashboard and via src/convex/apiAccess.ts; tokens are
+// stored only as hashes and can be revoked instantly.
+
+function extractToken(request: Request, headerNames: string[]): string | null {
+  for (const header of headerNames) {
+    if (header === "authorization") {
+      const authorization = request.headers.get("authorization") ?? "";
+      const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+      if (bearer) return bearer;
+    } else {
+      const value = request.headers.get(header)?.trim();
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
+async function registryAuthorized(ctx: ActionCtx, request: Request, scope: ApiScope, headerNames: string[]): Promise<boolean> {
+  const token = extractToken(request, headerNames);
+  if (!token) return false;
+  const result = await ctx.runAction(internal.apiAccess.checkApiCredential, { token, scope });
+  return result.ok === true;
+}
+
+async function adminAuthorized(ctx: ActionCtx, request: Request) {
   const expectedSecret = process.env.ADMIN_API_KEY;
   if (!expectedSecret) return false;
   if (!adminIpAllowed(request)) return false;
   const authorization = request.headers.get("authorization") ?? "";
   const receivedSecret = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
-  return Boolean(receivedSecret && constantTimeEqual(receivedSecret, expectedSecret));
+  if (receivedSecret && constantTimeEqual(receivedSecret, expectedSecret)) return true;
+  return registryAuthorized(ctx, request, "admin", ["authorization", "x-admin-api-key"]);
 }
 
 // /api/mcp/admin uses the same ADMIN_API_KEY as the REST admin API — sent as a
 // standard Bearer token (canonical, matches /api/admin) or as the
 // x-admin-api-key header (for MCP clients that cannot set Authorization).
-function adminMcpAuthorized(request: Request) {
+async function adminMcpAuthorized(ctx: ActionCtx, request: Request) {
   const expectedSecret = process.env.ADMIN_API_KEY;
   if (!expectedSecret) return false;
   if (!adminIpAllowed(request)) return false;
   const authorization = request.headers.get("authorization") ?? "";
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   const apiKey = request.headers.get("x-admin-api-key")?.trim();
-  return Boolean(
-    (bearer && constantTimeEqual(bearer, expectedSecret)) ||
-    (apiKey && constantTimeEqual(apiKey, expectedSecret)),
-  );
+  if ((bearer && constantTimeEqual(bearer, expectedSecret)) || (apiKey && constantTimeEqual(apiKey, expectedSecret))) return true;
+  return registryAuthorized(ctx, request, "admin", ["authorization", "x-admin-api-key"]);
 }
 
 function adminErrorStatus(message: string) {
@@ -149,7 +179,7 @@ function adminErrorStatus(message: string) {
 }
 
 const adminApi = httpAction(async (ctx, request) => {
-  if (!adminAuthorized(request)) return json({ error: "Unauthorized" }, 401, { "cache-control": "no-store" });
+  if (!(await adminAuthorized(ctx, request))) return json({ error: "Unauthorized" }, 401, { "cache-control": "no-store" });
 
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > 512_000) return json({ error: "Request body is too large" }, 413);
@@ -273,7 +303,7 @@ async function notifyOdysseusPost(payload: {
 //   GET  /api/shared-thread?threadId=...&limit=500 → read one thread
 //   POST /api/shared-thread            → { threadId, content, kind?, refs? }
 const sharedThreadApi = httpAction(async (ctx, request) => {
-  if (!mcpAuthorized(request)) return json({ error: "Unauthorized" }, 401, { "cache-control": "no-store" });
+  if (!(await mcpAuthorized(ctx, request, "threads"))) return json({ error: "Unauthorized" }, 401, { "cache-control": "no-store" });
 
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > 32_768) return json({ error: "Request body is too large" }, 413, { "cache-control": "no-store" });
@@ -374,9 +404,9 @@ function mcpUnauthorized() {
   });
 }
 
-function mcpGetFor(authorize: (request: Request) => boolean) {
-  return httpAction(async (_, request) => {
-    if (!authorize(request)) return mcpUnauthorized();
+function mcpGetFor(authorize: (ctx: ActionCtx, request: Request) => Promise<boolean>) {
+  return httpAction(async (ctx, request) => {
+    if (!(await authorize(ctx, request))) return mcpUnauthorized();
     const accept = request.headers.get("accept") ?? "";
     if (!accept.includes("text/event-stream")) {
       return json({ error: "Streamable HTTP GET requires Accept: text/event-stream" }, 406, mcpHeaders);
@@ -386,7 +416,7 @@ function mcpGetFor(authorize: (request: Request) => boolean) {
   });
 }
 
-const mcpGet = mcpGetFor(mcpAuthorized);
+const mcpGet = mcpGetFor(async (ctx, request) => mcpAuthorized(ctx, request, "mcp"));
 const adminMcpGet = mcpGetFor(adminMcpAuthorized);
 
 function mcpJsonRpcResult(id: JsonRpcId, value: unknown) {
@@ -404,16 +434,14 @@ function mcpError(id: JsonRpcId, code: number, message: string) {
   return json({ jsonrpc: "2.0", id, error: { code, message } }, 200, mcpHeaders);
 }
 
-function mcpAuthorized(request: Request) {
+async function mcpAuthorized(ctx: ActionCtx, request: Request, scope: ApiScope = "mcp") {
   const expectedSecret = process.env.MCP_TOOL_SERVER_SECRET;
   if (!expectedSecret) return false;
   const authorization = request.headers.get("authorization") ?? "";
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   const apiKey = request.headers.get("x-mcp-api-key")?.trim();
-  return Boolean(
-    (bearer && constantTimeEqual(bearer, expectedSecret)) ||
-    (apiKey && constantTimeEqual(apiKey, expectedSecret)),
-  );
+  if ((bearer && constantTimeEqual(bearer, expectedSecret)) || (apiKey && constantTimeEqual(apiKey, expectedSecret))) return true;
+  return registryAuthorized(ctx, request, scope, ["authorization", "x-mcp-api-key"]);
 }
 
 function mcpTools() {
@@ -438,6 +466,7 @@ function mcpTools() {
     { name: "shared_threads_list", description: "List every shared conversation thread with message count, last sender, last kind, and last content preview. Use it to discover the threadId to read or continue.", inputSchema: { type: "object", properties: { limit: { type: "number", minimum: 1, maximum: 100 } }, additionalProperties: false } },
     { name: "shared_thread_read", description: "Read the full shared conversation thread (oldest first) between Odysseus and the website. Thread ids follow the convention deal:<leadId>, task:<stagedId>, buyer:<buyerId>, or ops:<topic>.", inputSchema: { type: "object", properties: { threadId: { type: "string", description: "e.g. deal:<leadId> or task:<stagedId>" }, limit: { type: "number", minimum: 1, maximum: 500 } }, required: ["threadId"], additionalProperties: false } },
     { name: "shared_thread_post", description: "Post a message to a shared conversation thread as Odysseus. Use it when you hit something outside your strengths and need the website or owner (REQUEST), when you are blocked (ESCALATION), when you resolve an open item (RESOLUTION), or for a general note (MESSAGE). Never paste secrets or unnecessary PII; never claim verification that did not happen. Threads recommend and coordinate — they never approve a deal.", inputSchema: { type: "object", properties: { threadId: { type: "string", description: "e.g. deal:<leadId> or task:<stagedId>" }, content: { type: "string", description: "Message body (max 8000 chars)" }, kind: { type: "string", enum: ["MESSAGE", "REQUEST", "ESCALATION", "RESOLUTION"] }, refs: { type: "array", items: { type: "string" }, description: "Optional context: lead/staged/buyer ids or URLs" } }, required: ["threadId", "content"], additionalProperties: false } },
+    { name: "request_api_access", description: "Request a scoped API credential for this agent instead of sharing the master secret. Creates a PENDING request that only the owner can approve in the Dashboard; no token is issued until approval. Scopes: mcp (agent tools), threads (shared conversations), admin (full CRUD), n8n (automation queue).", inputSchema: { type: "object", properties: { name: { type: "string", description: "Agent or integration name, e.g. 'Odysseus' or 'n8n'" }, scopes: { type: "array", items: { type: "string", enum: ["mcp", "threads", "admin", "n8n"] }, description: "What this credential may call" }, note: { type: "string", description: "Optional note for the owner" } }, required: ["name", "scopes"], additionalProperties: false } },
   ];
 }
 
@@ -625,6 +654,17 @@ async function callMcpTool(ctx: ActionCtx, name: string, rawArguments: unknown) 
     });
     await scheduleWebsiteReply(ctx);
     return { ok: true, messageId, sender: "odysseus" };
+  }
+  if (name === "request_api_access") {
+    if (typeof rawArguments.name !== "string" || !rawArguments.name.trim()) throw new Error("request_api_access requires a name");
+    if (!Array.isArray(rawArguments.scopes) || rawArguments.scopes.length === 0) throw new Error("request_api_access requires at least one scope (mcp, threads, admin, n8n)");
+    const note = optionalString(rawArguments.note);
+    if (note === "__invalid__") throw new Error("note must be a string when provided");
+    return ctx.runAction(internal.apiAccess.requestApiAccess, {
+      name: rawArguments.name,
+      scopes: rawArguments.scopes as string[],
+      note: note as string | undefined,
+    });
   }
   throw new Error(`Unknown MCP tool: ${name}`);
 }

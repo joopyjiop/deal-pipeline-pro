@@ -10,6 +10,8 @@
 
 import type * as admin from "../admin.js";
 import type * as agents from "../agents.js";
+import type * as apiAccess from "../apiAccess.js";
+import type * as apiAccessCore from "../apiAccessCore.js";
 import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
 import type * as camofox from "../camofox.js";
@@ -46,6 +48,8 @@ import type {
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   agents: typeof agents;
+  apiAccess: typeof apiAccess;
+  apiAccessCore: typeof apiAccessCore;
   auth: typeof auth;
   "auth/emailOtp": typeof auth_emailOtp;
   camofox: typeof camofox;

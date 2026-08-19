@@ -5,8 +5,10 @@ import {
   Users, Target, Database, ChevronRight, Sparkles,
   TrendingUp, Clock, Award, Phone, Star, Quote,
   ChevronDown, ChevronUp, BarChart3, Layers, Globe,
-  Lock, Eye, GitBranch, Workflow, BadgeCheck, Rocket
+  Lock, Eye, GitBranch, Workflow, BadgeCheck, Rocket,
+  MapPin, Building2, Mail, MousePointer2
 } from "lucide-react";
+import { BUYER_NETWORK, NETWORK_STATS, MarketBuyers } from "@/data/buyerNetwork";
 import { Logo } from "@/components/Logo";
 import { cn } from "@/lib/utils";
 
@@ -79,6 +81,9 @@ const faqs = [
 const logos = ["Foreclosure.com", "Auction.com", "CoreLogic", "ATTOM", "County Records"];
 
 export default function Landing() {
+  const [activeMarket, setActiveMarket] = useState<string>("Detroit");
+  const activeMarketData = BUYER_NETWORK.find(m => m.market === activeMarket);
+
   return (
     <div className="min-h-screen bg-slate-950 font-sans antialiased text-white overflow-x-hidden">
       {/* Nav */}
@@ -255,6 +260,135 @@ export default function Landing() {
                   {i < 3 && <div className="hidden lg:block absolute top-1/2 -right-3 -translate-y-1/2"><ChevronRight className="size-5 text-slate-700 group-hover:text-indigo-500 transition-colors" /></div>}
                 </article>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Buyer Network */}
+        <section id="buyer-network" className="py-24">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="text-center max-w-2xl mx-auto mb-16">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 mb-4">BUYER NETWORK</div>
+              <h2 className="text-3xl sm:text-4xl font-bold mb-4">
+                Verified buyers across <span className="bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">{NETWORK_STATS.totalMarkets} markets</span>
+              </h2>
+              <p className="text-lg text-slate-400">Every buyer discovered through live web search — phone, email, and specialty verified. Not scraped. Not fabricated.</p>
+            </div>
+
+            {/* Network Stats Bar */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
+              <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/5 text-center">
+                <div className="text-3xl font-bold bg-gradient-to-b from-emerald-400 to-teal-400 bg-clip-text text-transparent">{NETWORK_STATS.totalBuyers}</div>
+                <div className="text-sm text-slate-400 mt-1">Verified Buyers</div>
+              </div>
+              <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/5 text-center">
+                <div className="text-3xl font-bold bg-gradient-to-b from-emerald-400 to-teal-400 bg-clip-text text-transparent">{NETWORK_STATS.totalMarkets}</div>
+                <div className="text-sm text-slate-400 mt-1">Active Markets</div>
+              </div>
+              <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/5 text-center">
+                <div className="text-3xl font-bold bg-gradient-to-b from-emerald-400 to-teal-400 bg-clip-text text-transparent">{NETWORK_STATS.states}</div>
+                <div className="text-sm text-slate-400 mt-1">States Covered</div>
+              </div>
+              <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/5 text-center">
+                <div className="text-3xl font-bold bg-gradient-to-b from-emerald-400 to-teal-400 bg-clip-text text-transparent">100%</div>
+                <div className="text-sm text-slate-400 mt-1">Live Verified</div>
+              </div>
+            </div>
+
+            {/* Market Tabs */}
+            <div className="mb-8">
+              <div className="flex flex-wrap gap-2 justify-center mb-8">
+                {BUYER_NETWORK.map((market) => (
+                  <button
+                    key={market.market}
+                    onClick={() => setActiveMarket(market.market)}
+                    className={cn(
+                      "px-5 py-2 rounded-full text-sm font-medium transition-all",
+                      activeMarket === market.market
+                        ? "bg-emerald-600 text-white shadow-lg shadow-emerald-500/25"
+                        : "bg-white/5 text-slate-300 border border-white/5 hover:border-emerald-500/30 hover:text-white"
+                    )}
+                  >
+                    {market.market}, {market.state} ({market.buyers.length})
+                  </button>
+                ))}
+              </div>
+
+              {/* Buyer Cards Grid */}
+              {activeMarketData && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {activeMarketData.buyers.map((buyer) => (
+                    <article key={buyer.name} className="group relative p-5 rounded-2xl bg-white/[0.02] border border-white/5 hover:border-emerald-500/30 hover:bg-white/[0.04] transition-all duration-300">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="size-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                          <Building2 className="size-5" />
+                        </div>
+                        <span className="text-[10px] font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/10">VERIFIED</span>
+                      </div>
+                      <h3 className="text-base font-semibold text-white mb-2">{buyer.name}</h3>
+                      <p className="text-xs text-slate-400 mb-3 line-clamp-2">{buyer.specialty}</p>
+                      
+                      <div className="space-y-2 text-xs">
+                        {buyer.address && (
+                          <div className="flex items-center gap-2 text-slate-500">
+                            <MapPin className="size-3.5 text-emerald-400 shrink-0" />
+                            <span className="truncate">{buyer.address}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 text-slate-500">
+                          <Phone className="size-3.5 text-emerald-400 shrink-0" />
+                          <span>{buyer.phone || "—"}</span>
+                        </div>
+                        {buyer.email && (
+                          <a href={`mailto:${buyer.email}`} className="flex items-center gap-2 text-slate-500 hover:text-emerald-400 transition-colors">
+                            <Mail className="size-3.5 text-emerald-400 shrink-0" />
+                            <span className="truncate">{buyer.email}</span>
+                          </a>
+                        )}
+                        {buyer.website && (
+                          <a href={buyer.website.startsWith("http") ? buyer.website : `https://${buyer.website}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-slate-500 hover:text-emerald-400 transition-colors">
+                            <MousePointer2 className="size-3.5 text-emerald-400 shrink-0" />
+                            <span className="truncate">{buyer.website.replace(/^https?:\/\//, "")}</span>
+                          </a>
+                        )}
+                        <div className="flex items-center gap-2 text-slate-500 pt-1 border-t border-white/5">
+                          <MapPin className="size-3.5 text-emerald-400 shrink-0" />
+                          <span className="truncate">{buyer.coverage}</span>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* All Markets Summary */}
+            <div className="mt-12 rounded-2xl bg-white/[0.02] border border-white/5 overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/5">
+                <h3 className="text-lg font-semibold text-white">All Markets at a Glance</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/5 bg-white/[0.02]">
+                      <th className="px-4 py-3 text-left font-medium text-slate-400">Market</th>
+                      <th className="px-4 py-3 text-left font-medium text-slate-400">Buyers</th>
+                      <th className="px-4 py-3 text-left font-medium text-slate-400">Coverage Highlights</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {BUYER_NETWORK.map((market) => (
+                      <tr key={market.market} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer" onClick={() => setActiveMarket(market.market)}>
+                        <td className="px-4 py-3 font-medium text-white">{market.market}, {market.state}</td>
+                        <td className="px-4 py-3 text-emerald-400 font-semibold">{market.buyers.length} verified</td>
+                        <td className="px-4 py-3 text-slate-400 max-w-xs truncate">
+                          {market.buyers.slice(0, 3).map(b => b.coverage).join(", ")}{market.buyers.length > 3 ? "..." : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>

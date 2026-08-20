@@ -10,8 +10,8 @@ import {
   hashApiToken,
   isApiScope,
   normalizeScopes,
-  mongoUriHasCredentials,
-  selectMongoUri,
+  MONGO_AUTH_SETUP_MESSAGE,
+  mongoUriCandidates,
   sanitizeName,
   sanitizeNote,
   toPublicCredential,
@@ -44,30 +44,55 @@ async function getStoredMongoUri(ctx: ActionCtx): Promise<string | null> {
 }
 
 async function connectWithUri(uri: string): Promise<MongoClient> {
+  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });
   try {
-    const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });
     await client.connect();
+    // MongoClient.connect() can resolve before authentication is exercised.
+    // Probe the registry collection so an `auth required` failure is caught
+    // here and the next configured URI can be tried instead of poisoning the
+    // cached client promise.
+    await client.db().collection(API_CREDENTIALS_COLLECTION).findOne({}, { projection: { _id: 1 } });
     return client;
   } catch (error) {
-    clientPromise = null;
-    if (cachedMongoUri && cachedMongoUri !== uri) {
-      const fallback = new MongoClient(cachedMongoUri, { serverSelectionTimeoutMS: 10_000 });
-      await fallback.connect();
-      return fallback;
-    }
+    await client.close().catch(() => undefined);
     throw error;
   }
 }
 
 async function getMongoClient(ctx: ActionCtx) {
-  const envUri = process.env.MONGODB_URI?.trim();
-  if (!envUri || !mongoUriHasCredentials(envUri)) {
-    cachedMongoUri ??= await getStoredMongoUri(ctx);
+  if (!clientPromise) {
+    clientPromise = (async () => {
+      const envUri = process.env.MONGODB_URI?.trim();
+      const storedUri = await getStoredMongoUri(ctx);
+      const candidates = mongoUriCandidates(envUri, storedUri ?? undefined);
+      if (candidates.length === 0) {
+        throw new Error(MONGO_AUTH_SETUP_MESSAGE);
+      }
+
+      let lastError: unknown;
+      for (const uri of candidates) {
+        try {
+          const client = await connectWithUri(uri);
+          cachedMongoUri = uri;
+          return client;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      // Keep the client-facing error free of connection strings and provider
+      // details. The original error is still available in the Convex function
+      // log through the failed connection attempt.
+      void lastError;
+      throw new Error(MONGO_AUTH_SETUP_MESSAGE);
+    })();
   }
-  const uri = selectMongoUri(envUri, cachedMongoUri ?? undefined);
-  if (!uri) throw new Error("MONGODB_URI is not configured");
-  if (!clientPromise) clientPromise = connectWithUri(uri);
-  return clientPromise;
+
+  try {
+    return await clientPromise;
+  } catch (error) {
+    clientPromise = null;
+    throw error;
+  }
 }
 
 async function getDatabase(ctx: ActionCtx) {

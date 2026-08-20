@@ -8,6 +8,8 @@ import {
   generateApiToken,
   hashApiToken,
   isApiScope,
+  MONGO_AUTH_SETUP_MESSAGE,
+  mongoUriCandidates,
   mongoUriHasCredentials,
   normalizeScopes,
   sanitizeName,
@@ -31,6 +33,19 @@ describe("Mongo URI selection", () => {
     expect(selectMongoUri("mongodb+srv://env-user:env-pass@example.mongodb.net/app", fallback)).toContain("env-user");
     expect(selectMongoUri("mongodb+srv://example.mongodb.net/app", fallback)).toBe(fallback);
     expect(selectMongoUri(undefined, fallback)).toBe(fallback);
+  });
+
+  test("tries the saved, connection-tested URI before a stale env URI", () => {
+    const fallback = "mongodb+srv://saved-user:saved-pass@example.mongodb.net/app";
+    const env = "mongodb+srv://env-user:env-pass@example.mongodb.net/app";
+    expect(mongoUriCandidates(env, fallback)).toEqual([fallback, env]);
+    expect(mongoUriCandidates("mongodb+srv://example.mongodb.net/app", fallback)).toEqual([fallback]);
+    expect(mongoUriCandidates(undefined, undefined)).toEqual([]);
+  });
+
+  test("provides a safe setup message without exposing a URI", () => {
+    expect(MONGO_AUTH_SETUP_MESSAGE).toMatch(/Toolkit.*MongoDB Atlas.*credentialed/i);
+    expect(MONGO_AUTH_SETUP_MESSAGE).not.toContain("mongodb+srv://user:pass@");
   });
 });
 

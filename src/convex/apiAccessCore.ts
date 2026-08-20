@@ -44,6 +44,24 @@ export function selectMongoUri(envUri: string | undefined, fallbackUri: string |
   return env && mongoUriHasCredentials(env) ? env : fallback || env;
 }
 
+/**
+ * Return every usable URI in safe retry order. The owner-saved URI is first
+ * because it was connection-tested when it was saved; the deployment env URI
+ * is the fallback for deployments where no saved setting exists. Credentialless
+ * managed values are excluded because the Mongo driver will report `auth
+ * required` against them.
+ */
+export function mongoUriCandidates(envUri: string | undefined, fallbackUri: string | undefined): string[] {
+  const candidates = [fallbackUri?.trim(), envUri?.trim()].filter(
+    (uri): uri is string => Boolean(uri) && mongoUriHasCredentials(uri),
+  );
+  return [...new Set(candidates)];
+}
+
+/** Human-safe setup error when neither configured URI can authenticate. */
+export const MONGO_AUTH_SETUP_MESSAGE =
+  "MongoDB credentials were rejected. Open Toolkit → MongoDB Atlas, save a credentialed mongodb:// or mongodb+srv:// URI, then refresh API access.";
+
 export function isApiScope(value: unknown): value is ApiScope {
   return typeof value === "string" && (API_SCOPES as readonly string[]).includes(value);
 }

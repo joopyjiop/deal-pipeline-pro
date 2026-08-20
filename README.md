@@ -304,7 +304,7 @@ Set in the Convex dashboard (or `npx convex env set`). Never in the browser bund
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `MONGODB_URI` | ✅ | MongoDB connection string for the primary data store. A Convex-stored fallback (`mongoUri` setting) is used when the env var is absent/unreachable |
+| `MONGODB_URI` | ✅ | MongoDB connection string for the primary data store. API credential actions prefer the owner-saved, connection-tested `mongoUri` fallback and retry the env URI; credentialless managed values are ignored |
 | `ADMIN_API_KEY` | ✅ (if using admin API) | Bearer key for `/api/admin/*` |
 | `ADMIN_ALLOWED_IPS` | optional | Comma-separated client IPs or IPv4 CIDRs allowed to call `/api/admin*` and `/api/mcp/admin` (e.g. `203.0.113.0/24`). Off by default (allow all). Read from `x-forwarded-for` / `x-real-ip` / `cf-connecting-ip`, so put the authoritative allow-list at your proxy/edge for hard enforcement |
 | `MCP_TOOL_SERVER_SECRET` | ✅ (if using MCP or shared thread API) | Bearer / `x-mcp-api-key` for `/api/mcp` and `/api/shared-thread(s)` |

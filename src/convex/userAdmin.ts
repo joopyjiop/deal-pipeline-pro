@@ -49,3 +49,53 @@ export const purgeAnonymousUsersAction = action({
     return await ctx.runMutation(internal.userAdmin.purgeAnonymousUsers, {});
   },
 });
+
+/**
+ * Owner-only: list every user account with access-level metadata.
+ * Returns users sorted by creation date (newest first) with their
+ * role, subscription status, and join date.
+ */
+export const listAllUsers = action({
+  args: {},
+  handler: async (ctx): Promise<{
+    users: Array<{
+      id: string;
+      name: string | undefined;
+      email: string | undefined;
+      role: string | undefined;
+      isAnonymous: boolean | undefined;
+      subscriptionStatus: string | null;
+      joinedAt: number;
+    }>;
+  }> => {
+    await requireOwner(ctx);
+
+    const users = await ctx.runQuery(internal.users.listUsers, {});
+    const userIds = users.map((u) => String(u._id));
+
+    // Fetch subscription status for each user in parallel
+    const subscriptionResults = await Promise.all(
+      userIds.map((userId) =>
+        ctx.runQuery(internal.subscriptions.getSubscriptionByUserId, { userId }).catch(() => null),
+      ),
+    );
+
+    const subscriptionMap = new Map<string, string | null>();
+    userIds.forEach((userId, i) => {
+      const sub = subscriptionResults[i];
+      subscriptionMap.set(userId, sub?.status ?? null);
+    });
+
+    return {
+      users: users.map((u) => ({
+        id: String(u._id),
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        isAnonymous: u.isAnonymous,
+        subscriptionStatus: subscriptionMap.get(String(u._id)) ?? null,
+        joinedAt: u._creationTime,
+      })),
+    };
+  },
+});

@@ -36,6 +36,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
+  Users,
   UserX,
   Wrench,
   X,
@@ -256,12 +257,36 @@ export default function Dashboard() {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showApiAccess, setShowApiAccess] = useState(false);
+  const [showUsers, setShowUsers] = useState(false);
+  const [usersList, setUsersList] = useState<Array<{
+    id: string;
+    name: string | undefined;
+    email: string | undefined;
+    role: string | undefined;
+    isAnonymous: boolean | undefined;
+    subscriptionStatus: string | null;
+    joinedAt: number;
+  }>>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const listAllUsers = useAction(api.userAdmin.listAllUsers);
   const [apiCreds, setApiCreds] = useState<ApiCredential[]>([]);
   const [apiLoading, setApiLoading] = useState(false);
   const [apiNewName, setApiNewName] = useState("");
   const [apiNewScopes, setApiNewScopes] = useState<string[]>(["threads"]);
   const [apiRevealed, setApiRevealed] = useState<{ id: string; token: string; tokenPrefix: string } | null>(null);
   const [showAiUsage, setShowAiUsage] = useState(false);
+
+  const handleLoadUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const result = await listAllUsers();
+      setUsersList(result.users);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not load users.");
+    } finally {
+      setUsersLoading(false);
+    }
+  };
   const [aiUsageLoading, setAiUsageLoading] = useState(false);
   const [aiUsageData, setAiUsageData] = useState<{
     limits: { ratePerMinute: number; userDailyCap: number; globalDailyCap: number };
@@ -613,6 +638,7 @@ export default function Dashboard() {
             <Link to="/shared-conversation" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><MessageSquare className="size-4" /> Odysseus</Link>
             {isOwner && <button type="button" onClick={() => { setShowApiAccess(true); void loadApiCredentials(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><KeyRound className="size-4" /> API access <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
             {isOwner && <button type="button" onClick={() => { setShowAiUsage(true); void loadAiUsage(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Activity className="size-4" /> AI usage <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
+            {isOwner && <button type="button" onClick={() => { setShowUsers(true); void handleLoadUsers(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Users className="size-4" /> Users <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
             {isOwner && <button type="button" onClick={() => void handlePurgeGuests()} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/60 hover:text-rose-700"><UserX className="size-4" /> Purge guest accounts</button>}
           </nav>
           <div className="mt-auto rounded-2xl border border-teal-100/90 bg-teal-50/55 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-teal-800"><ShieldCheck className="size-4" /> Integrity mode on</div><p className="mt-2 text-xs leading-5 text-teal-900/65">Only verified, non-fabricated records are surfaced.</p></div>
@@ -847,6 +873,60 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {showUsers && isOwner && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/15 p-3 backdrop-blur-sm sm:items-center" onClick={(event) => { if (event.target === event.currentTarget) setShowUsers(false); }}>
+          <div className="glass-panel-strong max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-[1.75rem] p-5 sm:p-7">
+            <div className="flex items-start justify-between gap-5">
+              <div>
+                <p className="eyebrow">Owner control</p>
+                <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">User accounts</h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Every registered user account with their access level and subscription status.</p>
+              </div>
+              <button type="button" onClick={() => setShowUsers(false)} className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500" aria-label="Close user list"><X className="size-4" /></button>
+            </div>
+
+            <div className="mt-5">
+              <Button type="button" variant="outline" onClick={handleLoadUsers} disabled={usersLoading} className="gap-1.5 rounded-xl text-xs">
+                {usersLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Users className="size-3.5" />}
+                {usersList.length > 0 ? "Refresh" : "Load users"}
+              </Button>
+            </div>
+
+            {usersList.length > 0 && (
+              <div className="mt-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{usersList.length} account{usersList.length === 1 ? "" : "s"}</p>
+                <div className="mt-2 space-y-2">
+                  {usersList.map((u) => (
+                    <div key={u.id} className="rounded-2xl border border-white/80 bg-white/45 px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-slate-800">{u.name || u.email || "Anonymous"}</p>
+                            {u.role === "admin" && <Badge className="border-0 bg-sky-100/80 text-sky-800">Owner</Badge>}
+                            {u.isAnonymous && <Badge variant="outline" className="border-slate-200/80 bg-slate-50/60 text-slate-500">Guest</Badge>}
+                            {u.subscriptionStatus === "active" && <Badge className="border-0 bg-teal-100/80 text-teal-800">Subscribed</Badge>}
+                            {u.subscriptionStatus && u.subscriptionStatus !== "active" && <Badge variant="outline" className="border-amber-200/80 bg-amber-50/60 text-amber-700">{u.subscriptionStatus}</Badge>}
+                          </div>
+                          {u.email && <p className="mt-0.5 text-xs text-slate-500">{u.email}</p>}
+                          <p className="mt-0.5 text-[0.65rem] text-slate-400">Joined {new Date(u.joinedAt).toLocaleDateString()}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {usersList.length === 0 && !usersLoading && (
+              <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-white/40 p-6 text-center">
+                <Users className="mx-auto size-5 text-slate-300" />
+                <p className="mt-2 text-xs leading-5 text-slate-500">Click "Load users" to see all registered accounts.</p>
+              </div>
+            )}
           </div>
         </div>
       )}

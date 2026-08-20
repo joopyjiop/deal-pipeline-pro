@@ -8,7 +8,7 @@
  * `getSubscription` returns the signed-in user's subscription for the
  * marketing site / dashboard to display.
  */
-import { internalMutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, query } from "./_generated/server";
 import { v } from "convex/values";
 
 /** Upsert a subscription row for a user. Internal only. */
@@ -34,6 +34,18 @@ export const upsertSubscription = internalMutation({
     }
     const id = await ctx.db.insert("subscriptions", { ...args, createdAt: now, updatedAt: now });
     return { id };
+  },
+});
+
+/** Fetch a user's subscription by userId (internal, for admin queries). */
+export const getSubscriptionByUserId = internalQuery({
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
+    const sub = await ctx.db
+      .query("subscriptions")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .first();
+    return sub ?? null;
   },
 });
 

@@ -1,6 +1,7 @@
 import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
+import { RequireSubscription } from "@/components/RequireSubscription";
 import { OwnerOnly } from "@/components/OwnerOnly";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { InstrumentationProvider } from "@/instrumentation.tsx";
@@ -68,14 +69,14 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/demo" element={<Demo />} />
             <Route
               path="/auth"
-              element={<AuthPage redirectAfterAuth="/dashboard" />}
+              element={<AuthPage redirectAfterAuth="/#pricing" />}
             />
             <Route
               path="/dashboard"
               element={
-                <RequireAuth>
+                <RequireSubscription>
                   <Dashboard />
-                </RequireAuth>
+                </RequireSubscription>
               }
             />
             <Route path="/buyers" element={<BuyerIntake />} />

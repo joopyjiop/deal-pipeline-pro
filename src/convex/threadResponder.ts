@@ -304,7 +304,6 @@ async function generateReply(ctx: ActionCtx, threadId: string, messages: Message
     ],
     maxTokens: 700,
     temperature: 0.2,
-    actor: "thread-responder",
   });
   return { content, model: MODEL };
 }

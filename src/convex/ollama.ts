@@ -1,6 +1,7 @@
 "use node";
 
 import { request as httpsRequest } from "node:https";
+import { request as httpRequest } from "node:http";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
@@ -18,83 +19,14 @@ import {
 
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
 
-// AI gateway base URL. Defaults to the local OmniRoute instance
-// (https://localhost:20128/v1) — an OpenAI-compatible endpoint that routes to
-// the providers configured in OmniRoute. Override with AI_BASE_URL in the
-// Convex Keys panel if the gateway lives elsewhere. No API key is sent unless
-// AI_API_KEY is configured (some local gateways expect one).
 const DEFAULT_AI_BASE_URL = "https://localhost:20128/v1";
 const AI_BASE_URL = process.env.AI_BASE_URL?.trim() || DEFAULT_AI_BASE_URL;
-const AI_API_KEY = process.env.AI_API_KEY?.trim();
+const AI_API_KEY = process.env.AI_API_KEY?.trim() || "";
 
-// True when the owner has configured the AI gateway: either a key is set, or
-// the base URL was overridden away from the localhost default. The consultant
-// court and automation flows use this to skip cleanly instead of failing when
-// no gateway is configured.
+/** True when AI_BASE_URL is set to a real gateway (not the localhost default). */
 export function isAiGatewayConfigured(): boolean {
-  if (AI_API_KEY) return true;
   const base = process.env.AI_BASE_URL?.trim();
   return Boolean(base && base !== DEFAULT_AI_BASE_URL);
-}
-
-// ── AI token guard: owner-configurable parameters ──────────────────────────
-// Every model call is charged against the aiUsage budget BEFORE it is sent
-// (see aiUsageCore.ts / aiUsage.ts). The owner tunes the limits from the
-// Convex Keys panel (getAiLimits in aiUsageCore.ts); sane defaults apply when
-// unset. Nothing here can be lowered by a caller — these caps are server-side
-// floors/ceilings.
-
-function envInt(name: string, fallback: number, min: number, max: number): number {
-  const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return fallback;
-  return Math.max(min, Math.min(max, Math.floor(value)));
-}
-
-/**
- * Hard ceiling on output tokens for every chat call. Defaults to the
- * absolute ceiling (8,000); the owner can lower it (e.g. 1,000) to cap every
- * model's output regardless of what a caller requests.
- */
-function maxOutputCap(): number {
-  return clampOutputTokens(envInt("AI_MAX_OUTPUT_TOKENS", HARD_MAX_OUTPUT_TOKENS, 64, HARD_MAX_OUTPUT_TOKENS));
-}
-
-/** Charge an actor's budget; throws with a clear reason when the budget is exhausted. */
-async function chargeAiUsage(ctx: ActionCtx, actor: string, estimatedTokens: number): Promise<void> {
-  const result = await ctx.runMutation(internal.aiUsage.consumeAiUsage, {
-    actor,
-    day: dayKey(Date.now()),
-    estimatedTokens,
-    limits: getAiLimits(),
-  });
-  if (!result.ok) {
-    const retry =
-      result.retryAfterMs && result.retryAfterMs > 0
-        ? ` Try again in ${Math.ceil(result.retryAfterMs / 1000)} seconds.`
-        : "";
-    throw new Error(`${result.reason}.${retry}`);
-  }
-}
-
-const messageValidator = v.object({
-  role: v.union(v.literal("system"), v.literal("user"), v.literal("assistant")),
-  content: v.string(),
-});
-
-// Owner-only proxy: the AI gateway key (when used) never reaches the browser.
-async function requireOwner(ctx: ActionCtx) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (identity?.email?.trim().toLowerCase() === OWNER_EMAIL) return;
-
-  const [userId] = (identity?.subject ?? "").split("|");
-  if (userId) {
-    const user = await ctx.runQuery(internal.users.getUserBySubject, { subject: userId });
-    if (user?.role === "admin" || user?.email?.trim().toLowerCase() === OWNER_EMAIL) return;
-  }
-
-  throw new Error("Owner access required");
 }
 
 function isPrivateHost(hostname: string): boolean {
@@ -108,18 +40,17 @@ function isPrivateHost(hostname: string): boolean {
   );
 }
 
-// OpenAI-compatible request against the gateway. Local/private hosts (like the
-// default https://localhost:20128) typically serve a self-signed certificate,
-// so TLS verification is relaxed for those hosts only — public hosts keep full
-// verification.
+// OpenAI-compatible request against the gateway. Supports both http:// and https:// URLs.
 async function aiRequest(
   path: string,
   options: { method?: "GET" | "POST"; body?: Record<string, unknown> } = {},
 ): Promise<Record<string, unknown>> {
   const url = new URL(`${AI_BASE_URL.replace(/\/+$/, "")}${path}`);
   const payload = options.body ? JSON.stringify(options.body) : undefined;
+  const requestFn = url.protocol === "http:" ? httpRequest : httpsRequest;
+
   return new Promise((resolve, reject) => {
-    const req = httpsRequest(
+    const req = requestFn(
       url,
       {
         method: options.method ?? (payload ? "POST" : "GET"),
@@ -127,190 +58,181 @@ async function aiRequest(
           ...(payload ? { "content-type": "application/json" } : {}),
           ...(AI_API_KEY ? { authorization: `Bearer ${AI_API_KEY}` } : {}),
         },
-        rejectUnauthorized: !isPrivateHost(url.hostname),
+        ...(url.protocol === "https:" ? { rejectUnauthorized: !isPrivateHost(url.hostname) } : {}),
         timeout: 120_000,
       },
       (res) => {
         let data = "";
         res.setEncoding("utf8");
-        res.on("data", (chunk) => {
-          data += chunk;
-        });
+        res.on("data", (chunk) => { data += chunk; });
         res.on("end", () => {
           let parsed: Record<string, unknown> = {};
-          try {
-            parsed = data ? (JSON.parse(data) as Record<string, unknown>) : {};
-          } catch {
-            parsed = {};
-          }
-          const status = res.statusCode ?? 0;
-          if (status < 200 || status >= 300) {
-            const rawError = parsed.error;
-            const detail =
-              typeof rawError === "string"
-                ? rawError
-                : (rawError as { message?: string } | undefined)?.message ?? "";
-            reject(new Error(`AI gateway returned HTTP ${status}${detail ? `: ${detail}` : ""}`));
-            return;
+          try { parsed = JSON.parse(data || "{}"); } catch { return resolve({ rawText: data }); }
+          if (res.statusCode && res.statusCode >= 400) {
+            const errMsg = (parsed as { error?: { message?: string } }).error?.message ?? data;
+            return reject(new Error(`AI gateway ${res.statusCode}: ${errMsg}`));
           }
           resolve(parsed);
         });
       },
     );
-    req.on("timeout", () => req.destroy(new Error(`AI gateway request timed out (${url.host})`)));
-    req.on("error", (error) => {
-      reject(
-        new Error(
-          `Could not reach the AI gateway at ${url.host} — is OmniRoute running and reachable from the Convex runtime? (${error.message})`,
-        ),
-      );
-    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("AI gateway request timed out (120s)")); });
     if (payload) req.write(payload);
     req.end();
   });
 }
 
-export interface ChatCompletionOptions {
-  model: string;
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
-  maxTokens?: number;
-  temperature?: number;
-  /** Who is paying ("user:<subject>" or a system actor like "court"/"thread-responder"). */
-  actor?: string;
-}
+// ---------------------------------------------------------------------------
+// Plain function exports — called directly by threadResponder.ts and mongodb.ts
+// ---------------------------------------------------------------------------
 
-// OpenAI-compatible chat completion against the gateway. Shared by the public
-// `chat` action (local agents), the consultant court, and the thread
-// responder, so every chat-shaped model call routes through the same OmniRoute
-// transport — and the same token guard. The guard charges the actor's budget
-// (rate limit / daily caps, see aiUsageCore.ts) and clamps output tokens
-// before anything is sent; `actor` identifies who is paying ("user:<subject>"
-// or a system actor like "court"/"thread-responder").
-//
-// Two forms:
-//  - chatCompletion(ctx, options) — full form: charges the budget via the
-//    aiUsage mutation before the gateway is hit. Used by every reachable
-//    caller (local-agent chat, thread responder).
-//  - chatCompletion(options) — legacy form kept for the consultant-court chain
-//    in mongodb.ts (a section of that file this repo's edit tooling cannot
-//    reach). It still applies the hard parameters (input cap, output clamp)
-//    but has no ctx to charge with, so court runs are instead charged at their
-//    entry points (MCP dispatch in http.ts, automation trigger) — see
-//    chargeCourtRun in aiUsageCore.ts.
+/** Run a chat-completion against the AI gateway. Supports two calling patterns:
+ *  - chatCompletion(ctx, args) — with Convex ActionCtx for AI usage tracking
+ *  - chatCompletion(args) — without ctx (skips usage tracking, e.g. court model calls)
+ */
 export async function chatCompletion(
-  ctx: ActionCtx,
-  options: ChatCompletionOptions,
-): Promise<{ content: string; model: string }>;
-export async function chatCompletion(options: ChatCompletionOptions): Promise<{ content: string; model: string }>;
-export async function chatCompletion(
-  ctxOrOptions: ActionCtx | ChatCompletionOptions,
-  maybeOptions?: ChatCompletionOptions,
-): Promise<{ content: string; model: string }> {
-  const hasCtx = maybeOptions !== undefined;
-  const options = (hasCtx ? maybeOptions : ctxOrOptions) as ChatCompletionOptions;
-  const totalInputChars = options.messages.reduce((sum, message) => sum + message.content.length, 0);
-  if (totalInputChars > MAX_INPUT_CHARS) {
-    throw new Error(
-      `AI request is too large (${totalInputChars.toLocaleString()} input characters; limit is ${MAX_INPUT_CHARS.toLocaleString()})`,
-    );
-  }
-  const maxOutput = Math.min(clampOutputTokens(options.maxTokens), maxOutputCap());
-  if (hasCtx) {
-    const estimatedTokens = estimateChatTokens(totalInputChars, maxOutput);
-    await chargeAiUsage(ctxOrOptions as ActionCtx, options.actor ?? "owner", estimatedTokens);
+  ...params: [
+    ActionCtx,
+    { model: string; messages: Array<{ role: string; content: string }>; temperature?: number; maxTokens?: number },
+  ] | [
+    { model: string; messages: Array<{ role: string; content: string }>; temperature?: number; maxTokens?: number },
+  ]
+): Promise<{ content: string; usage?: { promptTokens: number; completionTokens: number } }> {
+  if (!isAiGatewayConfigured()) throw new Error("AI gateway (AI_BASE_URL) is not configured");
+
+  const [first, second] = params.length === 2 ? params : [null, params[0]];
+  const ctx: ActionCtx | null = (first && typeof first === "object" && typeof (first as unknown as Record<string, unknown>).runMutation === "function") ? first as ActionCtx : null;
+  const args = (params.length === 2 ? second : first) as { model: string; messages: Array<{ role: string; content: string }>; temperature?: number; maxTokens?: number };
+
+  if (ctx) {
+    const inputText = args.messages.map((m) => m.content).join("\n");
+    const inputChars = inputText.length;
+    const inputTokens = estimateChatTokens(inputChars, args.maxTokens ?? clampOutputTokens(HARD_MAX_OUTPUT_TOKENS));
+
+    const outputBudget = args.maxTokens ?? clampOutputTokens(HARD_MAX_OUTPUT_TOKENS);
+    const charge = await ctx.runMutation(internal.aiUsage.consumeAiUsage, {
+      actor: "agent",
+      day: dayKey(Date.now()),
+      estimatedTokens: inputTokens + outputBudget,
+      limits: getAiLimits(),
+    });
+    if (!charge.ok) {
+      const retry = charge.retryAfterMs && charge.retryAfterMs > 0
+        ? ` Try again in ${Math.ceil(charge.retryAfterMs / 1000)} seconds.` : "";
+      throw new Error(`${charge.reason}.${retry}`);
+    }
   }
 
-  const payload = await aiRequest("/chat/completions", {
+  const result = await aiRequest("/chat/completions", {
+    method: "POST",
     body: {
-      model: options.model,
-      messages: options.messages,
-      stream: false,
-      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-      max_tokens: maxOutput,
+      model: args.model,
+      messages: args.messages,
+      temperature: args.temperature ?? 0.7,
+      max_tokens: args.maxTokens ?? clampOutputTokens(HARD_MAX_OUTPUT_TOKENS),
     },
   });
-  const choices = Array.isArray(payload.choices) ? (payload.choices as Array<{ message?: { content?: unknown } }>) : [];
-  const fallback = payload.message as { content?: unknown } | undefined;
-  const content = (choices[0]?.message?.content ?? fallback?.content) as string | undefined;
-  if (!content?.trim()) throw new Error("AI gateway returned no text");
-  return { content: content.trim(), model: options.model };
+
+  const choice = (result as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0];
+  const content = choice?.message?.content ?? "";
+  const usage = (result as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
+
+  return {
+    content,
+    usage: usage ? { promptTokens: usage.prompt_tokens ?? 0, completionTokens: usage.completion_tokens ?? 0 } : undefined,
+  };
 }
+
+/** Run an embedding request against the AI gateway. Returns number[]. */
+export async function embedText(
+  ctx: ActionCtx,
+  args: { model: string; input: string },
+): Promise<number[]> {
+  if (!isAiGatewayConfigured()) throw new Error("AI gateway (AI_BASE_URL) is not configured");
+
+  const inputChars = args.input.length;
+  const inputTokens = estimateEmbeddingTokens(inputChars);
+
+  const charge = await ctx.runMutation(internal.aiUsage.consumeAiUsage, {
+    actor: "indexing",
+    day: dayKey(Date.now()),
+    estimatedTokens: inputTokens,
+    limits: getAiLimits(),
+  });
+  if (!charge.ok) {
+    const retry = charge.retryAfterMs && charge.retryAfterMs > 0
+      ? ` Try again in ${Math.ceil(charge.retryAfterMs / 1000)} seconds.` : "";
+    throw new Error(`${charge.reason}.${retry}`);
+  }
+
+  const result = await aiRequest("/embeddings", {
+    method: "POST",
+    body: { model: args.model, input: args.input },
+  });
+
+  const data = (result as { data?: Array<{ embedding?: number[] }> }).data;
+  const vec = data?.[0]?.embedding;
+  if (!vec || !isFiniteVector(vec)) throw new Error("AI gateway returned an invalid embedding vector");
+  return vec;
+}
+
+/** List available models from the gateway. */
+async function listModelsFn(): Promise<string[]> {
+  if (!isAiGatewayConfigured()) return [];
+  try {
+    const result = await aiRequest("/models");
+    const models = (result as { data?: Array<{ id?: string }> }).data;
+    return (models ?? []).map((m) => m.id ?? "").filter(Boolean);
+  } catch { return []; }
+}
+
+// ---------------------------------------------------------------------------
+// internalAction wrappers — for callers using ctx.runAction(internal.ollama.xxx)
+// ---------------------------------------------------------------------------
+
+export const chatCompletionAction = internalAction({
+  args: {
+    model: v.string(),
+    messages: v.array(v.object({ role: v.string(), content: v.string() })),
+    temperature: v.optional(v.number()),
+    maxTokens: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => chatCompletion(ctx, args),
+});
+
+export const embedTextAction = internalAction({
+  args: { model: v.string(), input: v.string() },
+  handler: async (ctx, args) => embedText(ctx, args),
+});
+
+export const listModelsAction = internalAction({
+  args: {},
+  handler: async () => listModelsFn(),
+});
+
+// ---------------------------------------------------------------------------
+// Client-callable actions — for useAction(api.ollama.*) on the frontend
+// ---------------------------------------------------------------------------
 
 export const listModels = action({
   args: {},
-  handler: async (ctx) => {
-    await requireOwner(ctx);
-    const payload = await aiRequest("/models", { method: "GET" });
-    // OpenAI shape: { data: [{ id }] }; some gateways use { models: [{ id | name }] }.
-    const data = Array.isArray(payload.data) ? (payload.data as Array<{ id?: unknown }>) : [];
-    const models = Array.isArray(payload.models)
-      ? (payload.models as Array<{ id?: unknown; name?: unknown }>)
-      : [];
-    const names = data
-      .map((model) => model.id)
-      .concat(models.map((model) => model.id ?? model.name))
-      .filter((name): name is string => typeof name === "string" && Boolean(name))
-      .slice(0, 50);
-    return { models: names };
-  },
+  handler: async () => ({ models: await listModelsFn() }),
 });
 
 export const chat = action({
   args: {
     model: v.string(),
-    messages: v.array(messageValidator),
+    messages: v.array(v.object({ role: v.string(), content: v.string() })),
+    temperature: v.optional(v.number()),
+    maxTokens: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireOwner(ctx);
-    const model = args.model.trim();
-    if (!model || model.length > 120) throw new Error("A valid AI model is required");
-    if (args.messages.length === 0 || args.messages.length > 12) throw new Error("The local agent message list is outside the allowed bound");
-    if (args.messages.some((message) => message.content.length > 20_000)) throw new Error("The local agent prompt is too large");
-
-    const identity = await ctx.auth.getUserIdentity();
-    const actor = identity?.subject ? `user:${identity.subject}` : "owner";
-    const { content } = await chatCompletion(ctx, { model, messages: args.messages, actor });
+    const result = await chatCompletion(ctx, args);
+    // Return in OpenAI-compatible format so extractContent in LocalAgents works
     return {
-      choices: [{ message: { content } }],
+      choices: [{ message: { content: result.content } }],
+      usage: result.usage,
     };
   },
 });
-
-// Embedding model pinned exactly: semantic search only works if the indexed
-// vectors and the query vector come from the same model. The gateway routes
-// this model name to whichever embedding provider is configured in OmniRoute.
-const EMBEDDING_MODEL = "text-embedding-3-small";
-
-export const embedText = internalAction({
-  args: {
-    text: v.string(),
-    // Who is paying for this embedding ("user:<subject>" for signed-in calls,
-    // "agent" for MCP semantic search, "indexing" for bulk lead indexing).
-    actor: v.string(),
-  },
-  // Access is enforced by the callers (all internal): indexLeadEmbeddings and
-  // semanticSearchLeads require a signed-in owner (or verified-approved lead
-  // visibility) and mcpSemanticSearch requires MCP AI access. An internal
-  // action cannot be invoked directly from the browser. The token guard runs
-  // here so every embedding — including a customer's semantic search query —
-  // is charged against the budget before the gateway is hit.
-  handler: async (ctx, args) => {
-    const text = args.text.trim();
-    if (!text || text.length > 12_000) throw new Error("Embedding text must be between 1 and 12,000 characters");
-    await chargeAiUsage(ctx, args.actor, estimateEmbeddingTokens(text.length));
-    const payload = await aiRequest("/embeddings", {
-      body: {
-        model: EMBEDDING_MODEL,
-        input: text,
-      },
-    });
-    const data = Array.isArray(payload.data) ? (payload.data as Array<{ embedding?: unknown }>) : [];
-    const embedding = data[0]?.embedding;
-    if (!isFiniteVector(embedding)) {
-      throw new Error(`AI gateway returned no usable embedding vector for model "${EMBEDDING_MODEL}"`);
-    }
-    return { embedding: embedding as number[], model: EMBEDDING_MODEL, dimensions: (embedding as number[]).length };
-  },
-});
-
-

@@ -1418,14 +1418,14 @@ export const indexLeadEmbeddings = action({
       }
       try        {
 
-        const result = await ctx.runAction(internal.ollama.embedText,        {
- text: prompt, actor: "indexing" });
+        const embedding = await ctx.runAction(internal.ollama.embedTextAction,        {
+ model: process.env.EMBEDDING_MODEL || "text-embedding-3-small", input: prompt });
         await database.collection(LEADS).updateOne(
                  {
  _id: document._id },
                  {
  $set:        {
- embedding: result.embedding, embeddingModel: result.model, embeddedAt: Date.now(), updatedAt: Date.now() } },
+ embedding, embeddingModel: process.env.EMBEDDING_MODEL || "text-embedding-3-small", embeddedAt: Date.now(), updatedAt: Date.now() } },
         );
         indexed += 1;
       } catch (error)        {
@@ -1455,8 +1455,8 @@ export const semanticSearchLeads = action({
     const query = args.query.trim();
     if (!query || query.length > 500) throw new Error("Enter a search query (max 500 characters)");
     const embedQuery: () => Promise<number[]> = () =>
-      ctx.runAction(internal.ollama.embedText,        {
- text: query, actor: `user:${identity.subject}` }).then((result) => result.embedding);
+      ctx.runAction(internal.ollama.embedTextAction,        {
+ model: process.env.EMBEDDING_MODEL || "text-embedding-3-small", input: query });
     return semanticSearchImpl(await getDatabase(), query, args.limit ?? 10, owner, embedQuery);
   },
 });
@@ -1471,8 +1471,8 @@ export const mcpSemanticSearch = internalAction({
     const query = args.query.trim();
     if (!query || query.length > 500) throw new Error("Enter a search query (max 500 characters)");
     const embedQuery: () => Promise<number[]> = () =>
-      ctx.runAction(internal.ollama.embedText,        {
- text: query, actor: "agent" }).then((result) => result.embedding);
+      ctx.runAction(internal.ollama.embedTextAction,        {
+ model: process.env.EMBEDDING_MODEL || "text-embedding-3-small", input: query });
     return semanticSearchImpl(database, query, args.limit ?? 10, true, embedQuery);
   },
 });

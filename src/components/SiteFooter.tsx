@@ -1,10 +1,10 @@
 import { Link, useLocation } from "react-router";
 import { Logo } from "@/components/Logo";
-import { Mail, MapPin } from "lucide-react";
+import { Mail } from "lucide-react";
 
 /** Public business contact for the Deal Forge marketing site. */
 export const CONTACT_EMAIL = "support@dealforge.homes";
-export const SUPPORT_ADDRESS = "Deal Forge LLC · 100 Congress Ave, Suite 1100 · Austin, TX 78701";
+export const SUPPORT_ADDRESS = "Mailing address available to customers upon request.";
 
 /**
  * Standard professional site footer shared by the landing page and the legal
@@ -55,8 +55,8 @@ export function SiteFooter() {
               fabricated data.
             </p>
             <div className="mt-5 flex items-start gap-2 text-sm text-slate-400">
-              <MapPin className="mt-0.5 size-4 shrink-0 text-emerald-400" />
-              <span>100 Congress Ave, Suite 1100, Austin, TX 78701</span>
+              <Mail className="mt-0.5 size-4 shrink-0 text-emerald-400" />
+              <span>{SUPPORT_ADDRESS}</span>
             </div>
           </div>
 

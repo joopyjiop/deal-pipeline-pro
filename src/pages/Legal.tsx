@@ -285,7 +285,7 @@ export default function Legal() {
             <div className="flex items-start gap-3 rounded-xl border border-white/10 bg-navy-900/60 p-5">
               <MapPin className="mt-0.5 size-5 shrink-0 text-emerald-400" />
               <div>
-                <div className="text-sm font-semibold text-slate-100">Support address</div>
+                <div className="text-sm font-semibold text-slate-100">Business mailing address</div>
                 <div className="mt-1 text-sm text-slate-400">{SUPPORT_ADDRESS}</div>
               </div>
             </div>

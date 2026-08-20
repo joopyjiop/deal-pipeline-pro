@@ -4,7 +4,7 @@ import { Mail } from "lucide-react";
 
 /** Public business contact for the Deal Forge marketing site. */
 export const CONTACT_EMAIL = "support@dealforge.homes";
-export const SUPPORT_ADDRESS = "Mailing address available to customers upon request.";
+export const SUPPORT_ADDRESS = "No public street address is currently listed. Contact us by email.";
 
 /**
  * Standard professional site footer shared by the landing page and the legal

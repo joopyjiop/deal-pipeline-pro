@@ -556,7 +556,7 @@ export default function Landing() {
                   <MapPin className="size-5" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-slate-100">Business mailing address</div>
+                  <div className="text-sm font-semibold text-slate-100">Business address status</div>
                   <div className="mt-1 text-sm text-slate-400">{SUPPORT_ADDRESS}</div>
                 </div>
               </div>

@@ -1,7 +1,7 @@
 "use node";
 
-import { request as httpsRequest } from "node:https";
-import { request as httpRequest } from "node:http";
+// node:http / node:https are not available in the Convex runtime;
+// use the built-in fetch API instead.
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
@@ -40,47 +40,43 @@ function isPrivateHost(hostname: string): boolean {
   );
 }
 
-// OpenAI-compatible request against the gateway. Supports both http:// and https:// URLs.
+// OpenAI-compatible request against the gateway.
+// Uses the built-in fetch API (available in both browser and Convex runtime)
+// instead of node:http/node:https which are not available in Convex.
 async function aiRequest(
   path: string,
   options: { method?: "GET" | "POST"; body?: Record<string, unknown> } = {},
 ): Promise<Record<string, unknown>> {
-  const url = new URL(`${AI_BASE_URL.replace(/\/+$/, "")}${path}`);
+  const url = `${AI_BASE_URL.replace(/\/+$/, "")}${path}`;
   const payload = options.body ? JSON.stringify(options.body) : undefined;
-  const requestFn = url.protocol === "http:" ? httpRequest : httpsRequest;
+  const method = options.method ?? (payload ? "POST" : "GET");
 
-  return new Promise((resolve, reject) => {
-    const req = requestFn(
-      url,
-      {
-        method: options.method ?? (payload ? "POST" : "GET"),
-        headers: {
-          ...(payload ? { "content-type": "application/json" } : {}),
-          ...(AI_API_KEY ? { authorization: `Bearer ${AI_API_KEY}` } : {}),
-        },
-        ...(url.protocol === "https:" ? { rejectUnauthorized: !isPrivateHost(url.hostname) } : {}),
-        timeout: 120_000,
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120_000);
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        ...(payload ? { "content-type": "application/json" } : {}),
+        ...(AI_API_KEY ? { authorization: `Bearer ${AI_API_KEY}` } : {}),
       },
-      (res) => {
-        let data = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk) => { data += chunk; });
-        res.on("end", () => {
-          let parsed: Record<string, unknown> = {};
-          try { parsed = JSON.parse(data || "{}"); } catch { return resolve({ rawText: data }); }
-          if (res.statusCode && res.statusCode >= 400) {
-            const errMsg = (parsed as { error?: { message?: string } }).error?.message ?? data;
-            return reject(new Error(`AI gateway ${res.statusCode}: ${errMsg}`));
-          }
-          resolve(parsed);
-        });
-      },
-    );
-    req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("AI gateway request timed out (120s)")); });
-    if (payload) req.write(payload);
-    req.end();
-  });
+      body: payload,
+      signal: controller.signal,
+    });
+
+    const text = await res.text();
+    if (!res.ok) {
+      let parsed: Record<string, unknown> = {};
+      try { parsed = JSON.parse(text || "{}"); } catch { /* use raw text */ }
+      const errMsg = (parsed as { error?: { message?: string } }).error?.message ?? text;
+      throw new Error(`AI gateway ${res.status}: ${errMsg}`);
+    }
+
+    try { return JSON.parse(text || "{}") as Record<string, unknown>; } catch { return { rawText: text }; }
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // ---------------------------------------------------------------------------

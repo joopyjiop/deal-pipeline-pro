@@ -735,9 +735,17 @@ function objectId(id: string)        {
 }
 
 function mongoIdCandidates(id: string): Array<string | ObjectId> {
-  const candidates: Array<string | ObjectId> = [id];
-  if (ObjectId.isValid(id)) candidates.push(new ObjectId(id));
+  const value = id.trim();
+  const candidates: Array<string | ObjectId> = [value];
+  if (ObjectId.isValid(value)) candidates.push(new ObjectId(value));
   return candidates;
+}
+
+function mongoIdFilter(id: string): Document {
+  const candidates = mongoIdCandidates(id);
+  return candidates.length === 1
+    ? { _id: candidates[0] }
+    : { $or: candidates.map((candidate) => ({ _id: candidate })) };
 }
 
 // Off-market source presets for the sourcing agent: probate filings, tax
@@ -1665,8 +1673,8 @@ async function validateMatch(
     throw new Error("Match score must be between 0 and 100");
   }
   const [lead, buyer] = await Promise.all([
-    database.collection(LEADS).findOne({ _id: objectId(match.leadId) }),
-    database.collection(BUYERS).findOne({ _id: objectId(match.buyerId) }),
+    database.collection(LEADS).findOne(mongoIdFilter(match.leadId)),
+    database.collection(BUYERS).findOne(mongoIdFilter(match.buyerId)),
   ]);
   if (!lead || lead.fabricated === true || lead.pipelineStatus !== "APPROVED" || lead.verificationStatus !== "VERIFIED")        {
 

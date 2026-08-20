@@ -32,6 +32,18 @@ export const API_CREDENTIALS_COLLECTION = "api_credentials";
 
 export const TOKEN_PREFIX = "dp_";
 
+/** Return whether a MongoDB URI contains driver credentials in its userinfo. */
+export function mongoUriHasCredentials(uri: unknown): uri is string {
+  return typeof uri === "string" && /^mongodb(\+srv)?:\/\/[^/@]+@/.test(uri.trim());
+}
+
+/** Prefer a credentialed environment URI, otherwise use the owner-saved fallback. */
+export function selectMongoUri(envUri: string | undefined, fallbackUri: string | undefined): string | undefined {
+  const env = envUri?.trim();
+  const fallback = fallbackUri?.trim();
+  return env && mongoUriHasCredentials(env) ? env : fallback || env;
+}
+
 export function isApiScope(value: unknown): value is ApiScope {
   return typeof value === "string" && (API_SCOPES as readonly string[]).includes(value);
 }

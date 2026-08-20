@@ -10,6 +10,8 @@ import {
   hashApiToken,
   isApiScope,
   normalizeScopes,
+  mongoUriHasCredentials,
+  selectMongoUri,
   sanitizeName,
   sanitizeNote,
   toPublicCredential,
@@ -34,21 +36,42 @@ import {
 const OWNER_EMAIL = "jacobvierra8@gmail.com";
 
 let clientPromise: Promise<MongoClient> | null = null;
+let cachedMongoUri: string | null = null;
+const MONGO_URI_SETTING_KEY = "mongoUri";
 
-function getMongoClient() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error("MONGODB_URI is not configured");
-  if (!clientPromise) {
-    clientPromise = new MongoClient(uri).connect().catch((error) => {
-      clientPromise = null;
-      throw error;
-    });
+async function getStoredMongoUri(ctx: ActionCtx): Promise<string | null> {
+  return (await ctx.runQuery(internal.settings.getByKey, { key: MONGO_URI_SETTING_KEY })) ?? null;
+}
+
+async function connectWithUri(uri: string): Promise<MongoClient> {
+  try {
+    const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });
+    await client.connect();
+    return client;
+  } catch (error) {
+    clientPromise = null;
+    if (cachedMongoUri && cachedMongoUri !== uri) {
+      const fallback = new MongoClient(cachedMongoUri, { serverSelectionTimeoutMS: 10_000 });
+      await fallback.connect();
+      return fallback;
+    }
+    throw error;
   }
+}
+
+async function getMongoClient(ctx: ActionCtx) {
+  const envUri = process.env.MONGODB_URI?.trim();
+  if (!envUri || !mongoUriHasCredentials(envUri)) {
+    cachedMongoUri ??= await getStoredMongoUri(ctx);
+  }
+  const uri = selectMongoUri(envUri, cachedMongoUri ?? undefined);
+  if (!uri) throw new Error("MONGODB_URI is not configured");
+  if (!clientPromise) clientPromise = connectWithUri(uri);
   return clientPromise;
 }
 
-async function getDatabase() {
-  return (await getMongoClient()).db();
+async function getDatabase(ctx: ActionCtx) {
+  return (await getMongoClient(ctx)).db();
 }
 
 function objectId(value: string) {
@@ -92,7 +115,7 @@ export const createApiCredential = action({
       createdAt: Date.now(),
       note: sanitizeNote(args.note),
     };
-    const result = await (await getDatabase()).collection(API_CREDENTIALS_COLLECTION).insertOne(doc);
+    const result = await (await getDatabase(ctx)).collection(API_CREDENTIALS_COLLECTION).insertOne(doc);
     return { id: String(result.insertedId), token, tokenPrefix, name, scopes, status: "ACTIVE" };
   },
 });
@@ -102,7 +125,7 @@ export const listApiCredentials = action({
   args: {},
   handler: async (ctx) => {
     await requireOwner(ctx);
-    const rows = await (await getDatabase())
+    const rows = await (await getDatabase(ctx))
       .collection(API_CREDENTIALS_COLLECTION)
       .find({})
       .sort({ createdAt: -1 })
@@ -117,7 +140,7 @@ export const revokeApiCredential = action({
   args: { id: v.string() },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
-    const result = await (await getDatabase())
+    const result = await (await getDatabase(ctx))
       .collection(API_CREDENTIALS_COLLECTION)
       .updateOne({ _id: objectId(args.id) }, { $set: { status: "REVOKED" as CredentialStatus, updatedAt: Date.now() } });
     if (result.matchedCount === 0) throw new Error("Credential not found");
@@ -130,7 +153,7 @@ export const enableApiCredential = action({
   args: { id: v.string() },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
-    const result = await (await getDatabase())
+    const result = await (await getDatabase(ctx))
       .collection(API_CREDENTIALS_COLLECTION)
       .updateOne({ _id: objectId(args.id) }, { $set: { status: "ACTIVE" as CredentialStatus, updatedAt: Date.now() } });
     if (result.matchedCount === 0) throw new Error("Credential not found");
@@ -144,7 +167,7 @@ export const renewApiCredential = action({
   handler: async (ctx, args) => {
     await requireOwner(ctx);
     const { token, tokenHash, tokenPrefix } = generateApiToken();
-    const result = await (await getDatabase())
+    const result = await (await getDatabase(ctx))
       .collection(API_CREDENTIALS_COLLECTION)
       .updateOne({ _id: objectId(args.id) }, { $set: { tokenHash, tokenPrefix, status: "ACTIVE" as CredentialStatus, updatedAt: Date.now() } });
     if (result.matchedCount === 0) throw new Error("Credential not found");
@@ -158,7 +181,7 @@ export const approveApiCredential = action({
   handler: async (ctx, args) => {
     await requireOwner(ctx);
     const { token, tokenHash, tokenPrefix } = generateApiToken();
-    const result = await (await getDatabase())
+    const result = await (await getDatabase(ctx))
       .collection(API_CREDENTIALS_COLLECTION)
       .updateOne(
         { _id: objectId(args.id), status: "PENDING" },
@@ -174,7 +197,7 @@ export const deleteApiCredential = action({
   args: { id: v.string() },
   handler: async (ctx, args) => {
     await requireOwner(ctx);
-    const result = await (await getDatabase()).collection(API_CREDENTIALS_COLLECTION).deleteOne({ _id: objectId(args.id) });
+    const result = await (await getDatabase(ctx)).collection(API_CREDENTIALS_COLLECTION).deleteOne({ _id: objectId(args.id) });
     if (result.deletedCount === 0) throw new Error("Credential not found");
     return { ok: true, id: args.id };
   },
@@ -191,7 +214,7 @@ export const checkApiCredential = internalAction({
   handler: async (ctx, args) => {
     if (!args.token || !isApiScope(args.scope)) return { ok: false };
     const tokenHash = hashApiToken(args.token);
-    const collection = (await getDatabase()).collection(API_CREDENTIALS_COLLECTION);
+    const collection = (await getDatabase(ctx)).collection(API_CREDENTIALS_COLLECTION);
     const doc = await collection.findOne({ tokenHash });
     if (!doc || doc.status !== "ACTIVE" || !doc.scopes.includes(args.scope)) {
       return { ok: false };
@@ -216,7 +239,7 @@ export const requestApiAccess = internalAction({
     scopes: v.array(v.string()),
     note: v.optional(v.string()),
   },
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args) => {
     const name = sanitizeName(args.name);
     const scopes = normalizeScopes(args.scopes);
     const { tokenHash, tokenPrefix } = generateApiToken();
@@ -230,7 +253,7 @@ export const requestApiAccess = internalAction({
       createdAt: Date.now(),
       note: sanitizeNote(args.note),
     };
-    const result = await (await getDatabase()).collection(API_CREDENTIALS_COLLECTION).insertOne(doc);
+    const result = await (await getDatabase(ctx)).collection(API_CREDENTIALS_COLLECTION).insertOne(doc);
     return {
       id: String(result.insertedId),
       status: "PENDING",

@@ -8,14 +8,31 @@ import {
   generateApiToken,
   hashApiToken,
   isApiScope,
+  mongoUriHasCredentials,
   normalizeScopes,
   sanitizeName,
   sanitizeNote,
   scopeLabel,
+  selectMongoUri,
   tokenPrefixOf,
   toPublicCredential,
   TOKEN_PREFIX,
 } from "../src/convex/apiAccessCore";
+
+describe("Mongo URI selection", () => {
+  test("recognizes credentialed Mongo URIs only", () => {
+    expect(mongoUriHasCredentials("mongodb+srv://user:pass@example.mongodb.net/app")).toBe(true);
+    expect(mongoUriHasCredentials("mongodb+srv://example.mongodb.net/app")).toBe(false);
+    expect(mongoUriHasCredentials(undefined)).toBe(false);
+  });
+
+  test("prefers the credentialed env URI and otherwise uses the saved fallback", () => {
+    const fallback = "mongodb+srv://saved-user:saved-pass@example.mongodb.net/app";
+    expect(selectMongoUri("mongodb+srv://env-user:env-pass@example.mongodb.net/app", fallback)).toContain("env-user");
+    expect(selectMongoUri("mongodb+srv://example.mongodb.net/app", fallback)).toBe(fallback);
+    expect(selectMongoUri(undefined, fallback)).toBe(fallback);
+  });
+});
 
 describe("normalizeScopes", () => {
   test("accepts every registered scope", () => {

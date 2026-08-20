@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
-import { useAction } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import {
   Activity,
   ArrowUpRight,
@@ -264,6 +264,7 @@ export default function Dashboard() {
     email: string | undefined;
     role: string | undefined;
     isAnonymous: boolean | undefined;
+    premiumAccess: boolean | undefined;
     subscriptionStatus: string | null;
     joinedAt: number;
   }>>([]);
@@ -285,6 +286,16 @@ export default function Dashboard() {
       toast.error(error instanceof Error ? error.message : "Could not load users.");
     } finally {
       setUsersLoading(false);
+    }
+  };
+  const togglePremiumAccess = useMutation(api.users.togglePremiumAccess);
+  const handleTogglePremium = async (userId: string) => {
+    try {
+      const result = await togglePremiumAccess({ userId: userId as any });
+      setUsersList((prev) => prev.map((u) => u.id === userId ? { ...u, premiumAccess: result.premiumAccess } : u));
+      toast.success(result.premiumAccess ? "Premium access granted" : "Premium access revoked");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not toggle premium access.");
     }
   };
   const [aiUsageLoading, setAiUsageLoading] = useState(false);
@@ -908,12 +919,19 @@ export default function Dashboard() {
                             <p className="text-sm font-semibold text-slate-800">{u.name || u.email || "Anonymous"}</p>
                             {u.role === "admin" && <Badge className="border-0 bg-sky-100/80 text-sky-800">Owner</Badge>}
                             {u.isAnonymous && <Badge variant="outline" className="border-slate-200/80 bg-slate-50/60 text-slate-500">Guest</Badge>}
+                            {u.premiumAccess && <Badge className="border-0 bg-violet-100/80 text-violet-800">Premium (free)</Badge>}
                             {u.subscriptionStatus === "active" && <Badge className="border-0 bg-teal-100/80 text-teal-800">Subscribed</Badge>}
                             {u.subscriptionStatus && u.subscriptionStatus !== "active" && <Badge variant="outline" className="border-amber-200/80 bg-amber-50/60 text-amber-700">{u.subscriptionStatus}</Badge>}
                           </div>
                           {u.email && <p className="mt-0.5 text-xs text-slate-500">{u.email}</p>}
                           <p className="mt-0.5 text-[0.65rem] text-slate-400">Joined {new Date(u.joinedAt).toLocaleDateString()}</p>
                         </div>
+                        {u.role !== "admin" && !u.isAnonymous && (
+                          <Button type="button" variant="outline" onClick={() => handleTogglePremium(u.id)} className="h-8 gap-1.5 shrink-0 rounded-lg border-violet-200/80 bg-violet-50/45 px-3 text-xs text-violet-700 hover:bg-violet-50">
+                            {u.premiumAccess ? <UserX className="size-3.5" /> : <Check className="size-3.5" />}
+                            {u.premiumAccess ? "Revoke premium" : "Grant premium"}
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}

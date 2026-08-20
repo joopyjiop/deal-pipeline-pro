@@ -1,6 +1,52 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { internalQuery, query, QueryCtx } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query, QueryCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
+
+const OWNER_EMAIL = "jacobvierra8@gmail.com";
+
+/** Check if a given user document is the owner (admin or permanent owner email). */
+export const isOwnerUser = internalQuery({
+  args: { userId: v.string() },
+  handler: async (ctx, { userId }) => {
+    const id = ctx.db.normalizeId("users", userId);
+    if (id === null) return false;
+    const user = await ctx.db.get(id);
+    if (!user) return false;
+    return user.role === "admin" || user.email?.trim().toLowerCase() === OWNER_EMAIL;
+  },
+});
+
+/** Owner-only: toggle a user's premiumAccess flag. */
+export const togglePremiumAccess = mutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+
+    const [rawId] = identity.subject.split("|");
+    const isOwner = await ctx.runQuery(internal.users.isOwnerUser, { userId: rawId });
+    if (!isOwner) throw new Error("Owner access required");
+
+    const target = await ctx.db.get(args.userId);
+    if (!target) throw new Error("User not found");
+
+    const current = Boolean(target.premiumAccess);
+    await ctx.db.patch(args.userId, { premiumAccess: !current });
+    return { premiumAccess: !current };
+  },
+});
+
+/** The current user's premium access flag (for RequireSubscription). */
+export const getMyPremiumAccess = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return null;
+    const user = await ctx.db.get(userId);
+    return user?.premiumAccess ?? false;
+  },
+});
 
 /**
  * Get the current signed in user. Returns null if the user is not signed in.

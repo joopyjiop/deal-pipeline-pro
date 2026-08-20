@@ -11,6 +11,7 @@ import { Link, Navigate, useLocation } from "react-router";
  * - Authenticated users without an active subscription are shown a
  *   paywall screen that routes them to the pricing section.
  * - The permanent owner bypasses the subscription check entirely.
+ * - Owner-granted premiumAccess users also bypass the subscription gate.
  */
 export function RequireSubscription({ children }: { children: ReactNode }) {
   const { isLoading: authLoading, isAuthenticated, user } = useAuth();
@@ -20,6 +21,9 @@ export function RequireSubscription({ children }: { children: ReactNode }) {
   const isOwner = Boolean(
     user && (user.role === "admin" || user.email?.trim().toLowerCase() === "jacobvierra8@gmail.com"),
   );
+
+  // Owner-granted premium access (bypasses Stripe subscription)
+  const premiumAccess = useQuery(api.users.getMyPremiumAccess);
 
   // Still loading auth state
   if (authLoading) {
@@ -46,8 +50,13 @@ export function RequireSubscription({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
+  // Owner-granted premium access also bypasses the gate
+  if (premiumAccess === true) {
+    return <>{children}</>;
+  }
+
   // Subscription query still loading — show spinner
-  if (subscription === undefined) {
+  if (subscription === undefined || premiumAccess === undefined) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />

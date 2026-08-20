@@ -98,6 +98,9 @@ const schema = defineSchema(
       emailVerificationTime: v.optional(v.number()),
       isAnonymous: v.optional(v.boolean()),
       role: v.optional(roleValidator),
+      // Owner-granted premium access: lets a user bypass the Stripe
+      // subscription gate without paying. Toggled via the owner Users panel.
+      premiumAccess: v.optional(v.boolean()),
     }).index("email", ["email"]),
 
     appSettings: defineTable({

@@ -101,6 +101,16 @@ const schema = defineSchema(
       // Owner-granted premium access: lets a user bypass the Stripe
       // subscription gate without paying. Toggled via the owner Users panel.
       premiumAccess: v.optional(v.boolean()),
+      // Tiered access control set by the owner: "disabled" (no dashboard),
+      // "standard" (limited leads), "premium" (full access).
+      accessTier: v.optional(v.union(
+        v.literal("disabled"),
+        v.literal("standard"),
+        v.literal("premium"),
+      )),
+      // Maximum number of leads a standard-tier user can view. Undefined or
+      // null means the platform default (currently 10).
+      leadLimit: v.optional(v.number()),
     }).index("email", ["email"]),
 
     appSettings: defineTable({

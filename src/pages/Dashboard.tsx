@@ -265,9 +265,13 @@ export default function Dashboard() {
     role: string | undefined;
     isAnonymous: boolean | undefined;
     premiumAccess: boolean | undefined;
+    accessTier: string | undefined;
+    leadLimit: number | undefined;
     subscriptionStatus: string | null;
     joinedAt: number;
   }>>([]);
+  const [editingTierUserId, setEditingTierUserId] = useState<string | null>(null);
+  const [standardLeadLimit, setStandardLeadLimit] = useState<string>("10");
   const [usersLoading, setUsersLoading] = useState(false);
   const listAllUsers = useAction(api.userAdmin.listAllUsers);
   const [apiCreds, setApiCreds] = useState<ApiCredential[]>([]);
@@ -296,6 +300,18 @@ export default function Dashboard() {
       toast.success(result.premiumAccess ? "Premium access granted" : "Premium access revoked");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not toggle premium access.");
+    }
+  };
+  const setUserTier = useMutation(api.users.setUserTier);
+  const handleSetUserTier = async (userId: string, tier: "disabled" | "standard" | "premium", leadLimit?: number) => {
+    try {
+      const result = await setUserTier({ userId: userId as any, tier, leadLimit });
+      setUsersList((prev) => prev.map((u) => u.id === userId ? { ...u, accessTier: result.accessTier, leadLimit: result.leadLimit ?? undefined, premiumAccess: tier === "premium" } : u));
+      setEditingTierUserId(null);
+      const labels: Record<string, string> = { disabled: "Access disabled", standard: `Standard (${result.leadLimit ?? 10} leads)`, premium: "Premium (full access)" };
+      toast.success(labels[tier] ?? "Tier updated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update tier.");
     }
   };
   const [aiUsageLoading, setAiUsageLoading] = useState(false);
@@ -919,7 +935,7 @@ export default function Dashboard() {
                             <p className="text-sm font-semibold text-slate-800">{u.name || u.email || "Anonymous"}</p>
                             {u.role === "admin" && <Badge className="border-0 bg-sky-100/80 text-sky-800">Owner</Badge>}
                             {u.isAnonymous && <Badge variant="outline" className="border-slate-200/80 bg-slate-50/60 text-slate-500">Guest</Badge>}
-                            {u.premiumAccess && <Badge className="border-0 bg-violet-100/80 text-violet-800">Premium (free)</Badge>}
+                            {u.accessTier === "disabled" && <Badge className="border-0 bg-red-100/80 text-red-800">Disabled</Badge>}{u.accessTier === "standard" && <Badge className="border-0 bg-amber-100/80 text-amber-800">Standard ({u.leadLimit ?? 10} leads)</Badge>}{u.accessTier === "premium" && <Badge className="border-0 bg-violet-100/80 text-violet-800">Premium</Badge>}{!u.accessTier && u.premiumAccess && <Badge className="border-0 bg-violet-100/80 text-violet-800">Premium (free)</Badge>}
                             {u.subscriptionStatus === "active" && <Badge className="border-0 bg-teal-100/80 text-teal-800">Subscribed</Badge>}
                             {u.subscriptionStatus && u.subscriptionStatus !== "active" && <Badge variant="outline" className="border-amber-200/80 bg-amber-50/60 text-amber-700">{u.subscriptionStatus}</Badge>}
                           </div>
@@ -927,10 +943,30 @@ export default function Dashboard() {
                           <p className="mt-0.5 text-[0.65rem] text-slate-400">Joined {new Date(u.joinedAt).toLocaleDateString()}</p>
                         </div>
                         {u.role !== "admin" && !u.isAnonymous && (
-                          <Button type="button" variant="outline" onClick={() => handleTogglePremium(u.id)} className="h-8 gap-1.5 shrink-0 rounded-lg border-violet-200/80 bg-violet-50/45 px-3 text-xs text-violet-700 hover:bg-violet-50">
-                            {u.premiumAccess ? <UserX className="size-3.5" /> : <Check className="size-3.5" />}
-                            {u.premiumAccess ? "Revoke premium" : "Grant premium"}
-                          </Button>
+                          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                            <Button type="button" variant="outline" onClick={() => handleSetUserTier(u.id, "disabled")} className={`h-8 gap-1.5 rounded-lg px-3 text-xs ${u.accessTier === "disabled" ? "border-red-300 bg-red-100/80 text-red-800" : "border-white/85 bg-white/60 text-slate-500 hover:bg-red-50 hover:text-red-700"}`}>
+                              <UserX className="size-3.5" /> Disabled
+                            </Button>
+                            <Button type="button" variant="outline" onClick={() => { setEditingTierUserId(editingTierUserId === u.id ? null : u.id); setStandardLeadLimit(String(u.leadLimit ?? 10)); }} className={`h-8 gap-1.5 rounded-lg px-3 text-xs ${u.accessTier === "standard" ? "border-amber-300 bg-amber-100/80 text-amber-800" : "border-white/85 bg-white/60 text-slate-500 hover:bg-amber-50 hover:text-amber-700"}`}>
+                              <Check className="size-3.5" /> Standard
+                            </Button>
+                            <Button type="button" variant="outline" onClick={() => handleSetUserTier(u.id, "premium")} className={`h-8 gap-1.5 rounded-lg px-3 text-xs ${u.accessTier === "premium" ? "border-violet-300 bg-violet-100/80 text-violet-800" : "border-white/85 bg-white/60 text-slate-500 hover:bg-violet-50 hover:text-violet-700"}`}>
+                              <Check className="size-3.5" /> Premium
+                            </Button>
+                          
+                        {editingTierUserId === u.id && u.role !== "admin" && !u.isAnonymous && (
+                          <div className="mt-3 rounded-2xl border border-amber-200/80 bg-amber-50/45 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">Set lead limit for standard tier</p>
+                            <div className="mt-2 flex items-center gap-2">
+                              <Input type="number" min="1" max="500" value={standardLeadLimit} onChange={(e) => setStandardLeadLimit(e.target.value)} className="h-8 w-24 rounded-lg border-amber-200/80 bg-white/70 text-xs" />
+                              <span className="text-xs text-slate-500">leads</span>
+                              <Button type="button" onClick={() => handleSetUserTier(u.id, "standard", Number(standardLeadLimit) || 10)} className="h-8 gap-1 rounded-lg bg-amber-600 px-3 text-xs hover:bg-amber-700">
+                                <Check className="size-3" /> Apply
+                              </Button>
+                              <Button type="button" variant="ghost" onClick={() => setEditingTierUserId(null)} className="h-8 gap-1 rounded-lg px-3 text-xs text-slate-500">Cancel</Button>
+                            </div>
+                          </div>
+                        )}</div>
                         )}
                       </div>
                     </div>

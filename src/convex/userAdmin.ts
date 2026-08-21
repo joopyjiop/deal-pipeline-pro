@@ -65,6 +65,8 @@ export const listAllUsers = action({
       role: string | undefined;
       isAnonymous: boolean | undefined;
       premiumAccess: boolean | undefined;
+      accessTier: string | undefined;
+      leadLimit: number | undefined;
       subscriptionStatus: string | null;
       joinedAt: number;
     }>;
@@ -95,6 +97,8 @@ export const listAllUsers = action({
         role: u.role,
         isAnonymous: u.isAnonymous,
         premiumAccess: u.premiumAccess,
+        accessTier: u.accessTier,
+        leadLimit: u.leadLimit,
         subscriptionStatus: subscriptionMap.get(String(u._id)) ?? null,
         joinedAt: u._creationTime,
       })),

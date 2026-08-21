@@ -37,6 +37,42 @@ export const togglePremiumAccess = mutation({
   },
 });
 
+/** Owner-only: set a user's access tier (disabled / standard / premium). */
+export const setUserTier = mutation({
+  args: {
+    userId: v.id("users"),
+    tier: v.union(
+      v.literal("disabled"),
+      v.literal("standard"),
+      v.literal("premium"),
+    ),
+    leadLimit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+
+    const [rawId] = identity.subject.split("|");
+    const isOwner = await ctx.runQuery(internal.users.isOwnerUser, { userId: rawId });
+    if (!isOwner) throw new Error("Owner access required");
+
+    const target = await ctx.db.get(args.userId);
+    if (!target) throw new Error("User not found");
+
+    const patch: Record<string, unknown> = { accessTier: args.tier };
+    // Keep premiumAccess in sync for backward compatibility
+    patch.premiumAccess = args.tier === "premium";
+    // Set lead limit only for standard tier; clear it for others
+    if (args.tier === "standard") {
+      patch.leadLimit = args.leadLimit ?? 10;
+    } else {
+      patch.leadLimit = undefined;
+    }
+    await ctx.db.patch(args.userId, patch);
+    return { accessTier: args.tier, leadLimit: (patch.leadLimit as number | undefined) ?? null };
+  },
+});
+
 /** The current user's premium access flag (for RequireSubscription). */
 export const getMyPremiumAccess = query({
   args: {},
@@ -45,6 +81,22 @@ export const getMyPremiumAccess = query({
     if (!userId) return null;
     const user = await ctx.db.get(userId);
     return user?.premiumAccess ?? false;
+  },
+});
+
+/** The current user's access tier and lead limit. */
+export const getMyTier = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return null;
+    const user = await ctx.db.get(userId);
+    if (!user) return null;
+    return {
+      accessTier: user.accessTier ?? null,
+      leadLimit: user.leadLimit ?? null,
+      premiumAccess: user.premiumAccess ?? false,
+    };
   },
 });
 

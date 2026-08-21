@@ -247,7 +247,7 @@ export default function Landing() {
       return;
     }
     if (!isAuthenticated) {
-      navigate("/auth?returnTo=/#pricing");
+      navigate("/auth?returnTo=/dashboard");
       return;
     }
     setCheckingOut(planKey);
@@ -281,10 +281,10 @@ export default function Landing() {
           </nav>
           <div className="flex items-center gap-1.5 sm:gap-3">
             <Link
-              to="/auth"
+              to={isAuthenticated ? "/dashboard" : "/auth"}
               className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-400/45 bg-emerald-400/10 px-3 text-sm font-semibold text-emerald-200 transition-all hover:border-emerald-300 hover:bg-emerald-400/20 hover:text-emerald-100"
             >
-              Log in
+              {isAuthenticated ? "Dashboard" : "Log in"}
             </Link>
             <a
               href="#pricing"

@@ -69,7 +69,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/demo" element={<Demo />} />
             <Route
               path="/auth"
-              element={<AuthPage redirectAfterAuth="/#pricing" />}
+              element={<AuthPage redirectAfterAuth="/dashboard" />}
             />
             <Route
               path="/dashboard"

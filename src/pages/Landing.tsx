@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
@@ -23,17 +24,14 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
+  TrendingUp,
+  Users,
+  Zap,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { SiteFooter, CONTACT_EMAIL, SUPPORT_ADDRESS } from "@/components/SiteFooter";
 import { cn } from "@/lib/utils";
 
-/**
- * Stripe Price IDs for the monthly subscription plans.
- * ⚠️ REPLACE these with the real Price IDs from your Stripe dashboard
- * (Products → your product → the monthly recurring price → API ID). Until then
- * the Subscribe buttons will report that checkout isn't configured.
- */
 const PRICE_IDS: Record<string, string> = {
   starter: "price_replace_with_your_starter_price_id",
   pro: "price_replace_with_your_pro_price_id",
@@ -53,6 +51,13 @@ const sources = [
   "County sheriff sales",
   "Assessor & recorder records",
   "ATTOM",
+];
+
+const stats = [
+  { value: "500+", label: "Verified leads sourced", icon: Building2 },
+  { value: "98%", label: "Source-verified accuracy", icon: BadgeCheck },
+  { value: "48hr", label: "New leads weekly", icon: Zap },
+  { value: "0", label: "Fabricated data points", icon: ShieldCheck },
 ];
 
 const steps = [
@@ -171,12 +176,25 @@ const faqs = [
   },
 ];
 
+const fadeUp = {
+  hidden: { opacity: 0, y: 24 },
+  visible: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.1, duration: 0.5, ease: [0.22, 1, 0.36, 1] as const },
+  }),
+};
+
+const stagger = {
+  visible: { transition: { staggerChildren: 0.08 } },
+};
+
 function FAQItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="border-b border-white/10">
       <button
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between gap-4 py-5 text-left"
         aria-expanded={open}
       >
@@ -187,7 +205,14 @@ function FAQItem({ q, a }: { q: string; a: string }) {
           <ChevronDown className="size-5 shrink-0 text-slate-500" />
         )}
       </button>
-      {open && <p className="pb-5 text-[15px] leading-relaxed text-slate-400">{a}</p>}
+      <motion.div
+        initial={false}
+        animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
+        transition={{ duration: 0.25, ease: "easeInOut" }}
+        className="overflow-hidden"
+      >
+        <p className="pb-5 text-[15px] leading-relaxed text-slate-400">{a}</p>
+      </motion.div>
     </div>
   );
 }
@@ -199,8 +224,6 @@ export default function Landing() {
   const createCheckout = useAction(api.stripe.createCheckoutSession);
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
 
-  // Smooth-scroll to the section named by the URL hash (e.g. /#pricing, or a
-  // return from the auth flow), and jump to the top when there's no hash.
   useEffect(() => {
     if (hash) {
       const el = document.querySelector(hash);
@@ -224,7 +247,6 @@ export default function Landing() {
       return;
     }
     if (!isAuthenticated) {
-      // Sign in first, then return them to the pricing section.
       navigate("/auth?returnTo=/#pricing");
       return;
     }
@@ -247,7 +269,7 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-navy-950 font-sans text-slate-100 antialiased">
       {/* Nav */}
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-navy-950/85 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-navy-950/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Logo size="md" tone="light" />
           <nav className="hidden items-center gap-7 lg:flex" aria-label="Main">
@@ -260,14 +282,14 @@ export default function Landing() {
           <div className="flex items-center gap-1.5 sm:gap-3">
             <Link
               to="/auth"
-              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-emerald-400/45 bg-emerald-400/10 px-3 text-sm font-semibold text-emerald-200 transition-colors hover:border-emerald-300 hover:bg-emerald-400/20 hover:text-emerald-100"
+              className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-400/45 bg-emerald-400/10 px-3 text-sm font-semibold text-emerald-200 transition-all hover:border-emerald-300 hover:bg-emerald-400/20 hover:text-emerald-100"
             >
               Log in
             </Link>
             <a
               href="#pricing"
               aria-label="Subscribe"
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-emerald-400 px-3 text-sm font-semibold text-navy-950 shadow-[0_4px_16px_rgb(16_185_129_/_0.35)] transition-all hover:bg-emerald-300 hover:shadow-[0_6px_22px_rgb(16_185_129_/_0.45)] sm:px-4"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-400 px-3 text-sm font-semibold text-navy-950 shadow-[0_4px_16px_rgb(16_185_129/_0.35)] transition-all hover:bg-emerald-300 hover:shadow-[0_6px_22px_rgb(16_185_129/_0.45)] sm:px-4"
             >
               <span className="hidden sm:inline">Subscribe</span>
               <ArrowRight className="size-4" />
@@ -277,60 +299,108 @@ export default function Landing() {
       </header>
 
       <main>
-        {/* Hero */}
+        {/* ═══════════ HERO ═══════════ */}
         <section className="relative overflow-hidden">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_0%,rgb(16_185_129/0.14),transparent_60%)]" />
-          <div className="pointer-events-none absolute -top-24 right-0 size-[34rem] rounded-full bg-emerald-500/10 blur-3xl" />
+          {/* Animated gradient mesh background */}
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute -left-1/4 -top-1/4 h-[600px] w-[600px] rounded-full bg-emerald-500/12 blur-[120px]" />
+            <div className="absolute -right-1/4 top-1/3 h-[500px] w-[500px] rounded-full bg-teal-400/10 blur-[100px]" />
+            <div className="absolute bottom-0 left-1/3 h-[400px] w-[400px] rounded-full bg-cyan-400/8 blur-[80px]" />
+          </div>
+          {/* Grid pattern */}
+          <div
+            className="pointer-events-none absolute inset-0 opacity-[0.03]"
+            style={{
+              backgroundImage: `linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,
+              backgroundSize: "60px 60px",
+            }}
+          />
           <div className="relative mx-auto max-w-7xl px-4 pb-20 pt-16 sm:px-6 lg:px-8 lg:pb-28 lg:pt-24">
-            <div className="mx-auto max-w-3xl text-center">
-              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-1.5 text-sm font-medium text-emerald-300">
+            <div className="mx-auto max-w-4xl text-center">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] as const }}
+                className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-1.5 text-sm font-medium text-emerald-300 backdrop-blur-sm"
+              >
                 <Sparkles className="size-4" />
                 Distressed property leads, sourced &amp; verified
-              </div>
-              <h1 className="text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+              </motion.div>
+
+              <motion.h1
+                initial={{ opacity: 0, y: 24 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.7, delay: 0.1, ease: [0.22, 1, 0.36, 1] as const }}
+                className="text-4xl font-bold tracking-tight sm:text-5xl lg:text-[3.5rem] lg:leading-[1.1]"
+              >
                 Distressed property leads,
-                <span className="block bg-gradient-to-r from-emerald-300 to-teal-400 bg-clip-text text-transparent">
+                <span className="mt-1 block bg-gradient-to-r from-emerald-300 via-teal-300 to-cyan-300 bg-clip-text text-transparent">
                   verified before you buy.
                 </span>
-              </h1>
-              <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-400">
+              </motion.h1>
+
+              <motion.p
+                initial={{ opacity: 0, y: 24 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.7, delay: 0.2, ease: [0.22, 1, 0.36, 1] as const }}
+                className="mx-auto mt-7 max-w-2xl text-lg leading-relaxed text-slate-400"
+              >
                 Deal Forge gives subscribers a steady stream of source-verified distressed property
                 leads — sheriff sales, tax sales, and foreclosures — each backed by public-record
                 evidence. No fabricated data. No guessing.
-              </p>
-              <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              </motion.p>
+
+              <motion.div
+                initial={{ opacity: 0, y: 24 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.7, delay: 0.3, ease: [0.22, 1, 0.36, 1] as const }}
+                className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row"
+              >
                 <a
                   href="#pricing"
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-400 px-7 py-3.5 text-base font-semibold text-navy-950 shadow-[0_8px_28px_rgb(16_185_129_/_0.35)] transition-all hover:bg-emerald-300 hover:shadow-[0_10px_36px_rgb(16_185_129_/_0.45)] sm:w-auto"
+                  className="group inline-flex w-full items-center justify-center gap-2.5 rounded-2xl bg-emerald-400 px-8 py-4 text-base font-semibold text-navy-950 shadow-[0_8px_32px_rgb(16_185_129/_0.4)] transition-all hover:bg-emerald-300 hover:shadow-[0_12px_44px_rgb(16_185_129/_0.5)] sm:w-auto"
                 >
-                  Subscribe now <ArrowRight className="size-5" />
+                  Subscribe now
+                  <ArrowRight className="size-5 transition-transform group-hover:translate-x-0.5" />
                 </a>
                 <Link
                   to="/demo"
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-7 py-3.5 text-base font-semibold text-slate-200 backdrop-blur transition-colors hover:border-emerald-400/40 hover:text-emerald-300 sm:w-auto"
+                  className="group inline-flex w-full items-center justify-center gap-2.5 rounded-2xl border border-white/10 bg-white/5 px-8 py-4 text-base font-semibold text-slate-200 backdrop-blur transition-all hover:border-emerald-400/40 hover:bg-white/[0.08] hover:text-emerald-300 sm:w-auto"
                 >
-                  <Play className="size-4" /> Watch demo
+                  <Play className="size-4 transition-transform group-hover:scale-110" />
+                  Watch demo
                 </Link>
-              </div>
-              <div className="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-slate-400">
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.7, delay: 0.5 }}
+                className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-slate-500"
+              >
                 <span className="inline-flex items-center gap-1.5">
-                  <Lock className="size-4 text-emerald-400" /> Secure Stripe checkout
+                  <Lock className="size-3.5 text-emerald-500/70" /> Secure Stripe checkout
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <RefreshCcw className="size-4 text-emerald-400" /> Cancel anytime
+                  <RefreshCcw className="size-3.5 text-emerald-500/70" /> Cancel anytime
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <ShieldCheck className="size-4 text-emerald-400" /> No fabricated data
+                  <ShieldCheck className="size-3.5 text-emerald-500/70" /> No fabricated data
                 </span>
-              </div>
+              </motion.div>
             </div>
 
-            {/* Lead preview card */}
-            <div className="mx-auto mt-16 max-w-3xl">
-              <div className="rounded-2xl border border-white/10 bg-navy-900/70 p-6 shadow-[0_20px_60px_-20px_rgb(0_0_0/0.6)] backdrop-blur">
+            {/* Lead preview card — glass morphism */}
+            <motion.div
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, delay: 0.5, ease: [0.22, 1, 0.36, 1] as const }}
+              className="mx-auto mt-16 max-w-3xl"
+            >
+              <div className="rounded-3xl border border-white/[0.08] bg-white/[0.03] p-6 shadow-[0_24px_80px_-20px_rgb(0_0_0/0.7)] backdrop-blur-xl sm:p-8">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="flex size-11 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
+                    <div className="flex size-12 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-400 ring-1 ring-emerald-400/20">
                       <Building2 className="size-6" />
                     </div>
                     <div>
@@ -338,41 +408,69 @@ export default function Landing() {
                       <div className="text-sm text-slate-400">Detroit, MI · Wayne County</div>
                     </div>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3.5 py-1 text-xs font-semibold text-emerald-300">
                     <BadgeCheck className="size-3.5" /> VERIFIED
                   </span>
                 </div>
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <div className="mt-6 grid gap-3 sm:grid-cols-3">
                   {[
                     { label: "Distress score", value: "86 / 100" },
                     { label: "Source", value: "Sheriff sale" },
                     { label: "Evidence", value: "Public record ✓" },
                   ].map((item) => (
-                    <div key={item.label} className="rounded-xl border border-white/10 bg-navy-950/60 p-4">
+                    <div key={item.label} className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 ring-1 ring-inset ring-white/[0.04]">
                       <div className="text-xs font-medium text-slate-500">{item.label}</div>
-                      <div className="mt-1 text-base font-semibold text-slate-100">{item.value}</div>
+                      <div className="mt-1.5 text-base font-semibold text-slate-100">{item.value}</div>
                     </div>
                   ))}
                 </div>
-                <div className="mt-4 flex items-center justify-between rounded-xl border border-white/10 bg-navy-950/60 px-4 py-3 text-sm">
+                <div className="mt-4 flex items-center justify-between rounded-2xl border border-white/[0.06] bg-white/[0.02] px-5 py-3.5 text-sm ring-1 ring-inset ring-white/[0.04]">
                   <span className="text-slate-400">Est. spread (ARV − repairs − purchase)</span>
-                  <span className="font-semibold text-emerald-400">$32,400</span>
+                  <span className="font-bold text-emerald-400">$32,400</span>
                 </div>
               </div>
-              <p className="mt-4 text-center text-xs text-slate-500">
+              <p className="mt-4 text-center text-xs text-slate-600">
                 Illustrative lead summary — every real lead ships with its source URL, reference, and date.
               </p>
-            </div>
+            </motion.div>
           </div>
         </section>
 
-        {/* Sources */}
-        <section className="border-y border-white/5 bg-navy-900/40">
+        {/* ═══════════ STATS ═══════════ */}
+        <section className="relative border-y border-white/5 bg-white/[0.01]">
+          <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-40px" }}
+              variants={stagger}
+              className="grid grid-cols-2 gap-6 md:grid-cols-4"
+            >
+              {stats.map((stat, i) => (
+                <motion.div
+                  key={stat.label}
+                  custom={i}
+                  variants={fadeUp}
+                  className="group text-center"
+                >
+                  <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400 transition-colors group-hover:bg-emerald-400/15">
+                    <stat.icon className="size-5" />
+                  </div>
+                  <div className="text-2xl font-bold tracking-tight text-slate-100 sm:text-3xl">{stat.value}</div>
+                  <div className="mt-1 text-sm text-slate-500">{stat.label}</div>
+                </motion.div>
+              ))}
+            </motion.div>
+          </div>
+        </section>
+
+        {/* ═══════════ SOURCES ═══════════ */}
+        <section className="border-b border-white/5 bg-navy-900/40">
           <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
             <p className="text-center text-sm text-slate-500">Leads sourced from public records &amp; trusted marketplaces</p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-x-10 gap-y-4">
               {sources.map((source) => (
-                <span key={source} className="text-sm font-semibold text-slate-500">
+                <span key={source} className="text-sm font-semibold text-slate-500/80 transition-colors hover:text-slate-400">
                   {source}
                 </span>
               ))}
@@ -380,101 +478,157 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* How it works */}
-        <section id="how-it-works" className="scroll-mt-20 py-20 lg:py-24">
+        {/* ═══════════ HOW IT WORKS ═══════════ */}
+        <section id="how-it-works" className="scroll-mt-20 py-20 lg:py-28">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-2xl text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">How it works</span>
-              <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-60px" }}
+              variants={stagger}
+              className="mx-auto max-w-2xl text-center"
+            >
+              <motion.span custom={0} variants={fadeUp} className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">
+                How it works
+              </motion.span>
+              <motion.h2 custom={1} variants={fadeUp} className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
                 From subscription to closed deal in three steps
-              </h2>
-              <p className="mt-4 text-lg text-slate-400">
+              </motion.h2>
+              <motion.p custom={2} variants={fadeUp} className="mt-4 text-lg text-slate-400">
                 A simple, honest pipeline — no spreadsheets, no guesswork.
-              </p>
-            </div>
-            <div className="mt-14 grid gap-6 md:grid-cols-3">
+              </motion.p>
+            </motion.div>
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-40px" }}
+              variants={stagger}
+              className="mt-14 grid gap-6 md:grid-cols-3"
+            >
               {steps.map((step, index) => (
-                <div key={step.title} className="relative rounded-2xl border border-white/10 bg-navy-900/60 p-7">
-                  <div className="absolute -top-3 left-7 rounded-full bg-emerald-400 px-3 py-0.5 text-xs font-bold text-navy-950">
+                <motion.div
+                  key={step.title}
+                  custom={index}
+                  variants={fadeUp}
+                  className="group relative overflow-hidden rounded-3xl border border-white/[0.08] bg-white/[0.02] p-8 transition-all hover:border-emerald-400/20 hover:bg-white/[0.04]"
+                >
+                  {/* Subtle glow on hover */}
+                  <div className="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-emerald-400/0 transition-all duration-500 group-hover:bg-emerald-400/5" />
+                  <div className="absolute -top-3 left-8 rounded-full bg-emerald-400 px-3.5 py-1 text-xs font-bold text-navy-950 shadow-[0_2px_12px_rgb(16_185_129/_0.4)]">
                     Step {index + 1}
                   </div>
-                  <div className="mt-4 flex size-12 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
+                  <div className="relative mt-4 flex size-13 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-400 ring-1 ring-emerald-400/15 transition-colors group-hover:bg-emerald-400/15">
                     <step.icon className="size-6" />
                   </div>
-                  <h3 className="mt-5 text-lg font-semibold text-slate-100">{step.title}</h3>
-                  <p className="mt-2 text-[15px] leading-relaxed text-slate-400">{step.desc}</p>
-                </div>
+                  <h3 className="relative mt-5 text-lg font-semibold text-slate-100">{step.title}</h3>
+                  <p className="relative mt-2.5 text-[15px] leading-relaxed text-slate-400">{step.desc}</p>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           </div>
         </section>
 
-        {/* Features */}
-        <section id="features" className="scroll-mt-20 border-t border-white/5 bg-navy-900/40 py-20 lg:py-24">
+        {/* ═══════════ FEATURES ═══════════ */}
+        <section id="features" className="scroll-mt-20 border-t border-white/5 bg-white/[0.01] py-20 lg:py-28">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-2xl text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">Features</span>
-              <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-60px" }}
+              variants={stagger}
+              className="mx-auto max-w-2xl text-center"
+            >
+              <motion.span custom={0} variants={fadeUp} className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">
+                Features
+              </motion.span>
+              <motion.h2 custom={1} variants={fadeUp} className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
                 Everything you need to trust the deal
-              </h2>
-              <p className="mt-4 text-lg text-slate-400">
+              </motion.h2>
+              <motion.p custom={2} variants={fadeUp} className="mt-4 text-lg text-slate-400">
                 Built for wholesalers who demand proof before they commit capital.
-              </p>
-            </div>
-            <div className="mt-14 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-              {features.map((feature) => (
-                <div
+              </motion.p>
+            </motion.div>
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-40px" }}
+              variants={stagger}
+              className="mt-14 grid gap-5 md:grid-cols-2 lg:grid-cols-3"
+            >
+              {features.map((feature, i) => (
+                <motion.div
                   key={feature.title}
-                  className="rounded-2xl border border-white/10 bg-navy-900/60 p-6 transition-all hover:-translate-y-0.5 hover:border-emerald-400/30 hover:shadow-[0_12px_36px_-12px_rgb(16_185_129_/_0.25)]"
+                  custom={i}
+                  variants={fadeUp}
+                  className="group relative overflow-hidden rounded-3xl border border-white/[0.08] bg-white/[0.02] p-7 transition-all duration-300 hover:-translate-y-1 hover:border-emerald-400/25 hover:bg-white/[0.04] hover:shadow-[0_16px_48px_-12px_rgb(16_185_129/_0.2)]"
                 >
-                  <div className="flex size-11 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
+                  <div className="pointer-events-none absolute -right-16 -top-16 h-32 w-32 rounded-full bg-emerald-400/0 transition-all duration-500 group-hover:bg-emerald-400/5" />
+                  <div className="relative flex size-12 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-400 ring-1 ring-emerald-400/15 transition-all group-hover:bg-emerald-400/15 group-hover:ring-emerald-400/25">
                     <feature.icon className="size-5" />
                   </div>
-                  <h3 className="mt-4 text-lg font-semibold text-slate-100">{feature.title}</h3>
-                  <p className="mt-2 text-[15px] leading-relaxed text-slate-400">{feature.desc}</p>
-                </div>
+                  <h3 className="relative mt-5 text-lg font-semibold text-slate-100">{feature.title}</h3>
+                  <p className="relative mt-2.5 text-[15px] leading-relaxed text-slate-400">{feature.desc}</p>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           </div>
         </section>
 
-        {/* Pricing */}
-        <section id="pricing" className="scroll-mt-20 py-20 lg:py-24">
+        {/* ═══════════ PRICING ═══════════ */}
+        <section id="pricing" className="scroll-mt-20 py-20 lg:py-28">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-2xl text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">Pricing</span>
-              <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-60px" }}
+              variants={stagger}
+              className="mx-auto max-w-2xl text-center"
+            >
+              <motion.span custom={0} variants={fadeUp} className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">
+                Pricing
+              </motion.span>
+              <motion.h2 custom={1} variants={fadeUp} className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
                 Simple monthly plans, cancel anytime
-              </h2>
-              <p className="mt-4 text-lg text-slate-400">
+              </motion.h2>
+              <motion.p custom={2} variants={fadeUp} className="mt-4 text-lg text-slate-400">
                 Billed securely through Stripe. No contracts, no hidden fees.
-              </p>
-            </div>
-            <div className="mx-auto mt-14 grid max-w-5xl gap-6 md:grid-cols-3">
-              {plans.map((plan) => (
-                <div
+              </motion.p>
+            </motion.div>
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-40px" }}
+              variants={stagger}
+              className="mx-auto mt-14 grid max-w-5xl gap-6 md:grid-cols-3"
+            >
+              {plans.map((plan, i) => (
+                <motion.div
                   key={plan.key}
+                  custom={i}
+                  variants={fadeUp}
                   className={cn(
-                    "relative flex flex-col rounded-2xl border bg-navy-900/60 p-7",
+                    "relative flex flex-col rounded-3xl border bg-white/[0.02] p-8 transition-all duration-300",
                     plan.popular
-                      ? "border-emerald-400/70 shadow-[0_20px_60px_-20px_rgb(16_185_129_/_0.35)]"
-                      : "border-white/10",
+                      ? "border-emerald-400/50 shadow-[0_24px_80px_-20px_rgb(16_185_129/_0.3)] hover:shadow-[0_32px_100px_-20px_rgb(16_185_129/_0.4)]"
+                      : "border-white/[0.08] hover:border-emerald-400/20",
                   )}
                 >
                   {plan.popular && (
-                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-emerald-400 px-4 py-1 text-xs font-bold text-navy-950">
-                      MOST POPULAR
-                    </span>
+                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
+                      <span className="rounded-full bg-emerald-400 px-5 py-1.5 text-xs font-bold text-navy-950 shadow-[0_4px_16px_rgb(16_185_129/_0.4)]">
+                        MOST POPULAR
+                      </span>
+                    </div>
                   )}
                   <h3 className="text-lg font-semibold text-slate-100">{plan.name}</h3>
                   <p className="mt-1 text-sm text-slate-400">{plan.desc}</p>
-                  <div className="mt-5 flex items-baseline gap-1">
+                  <div className="mt-6 flex items-baseline gap-1">
                     {plan.price === null ? (
                       <span className="text-4xl font-bold text-slate-100">Custom</span>
                     ) : (
                       <>
-                        <span className="text-4xl font-bold text-slate-100">${plan.price}</span>
-                        <span className="text-sm text-slate-400">/ month</span>
+                        <span className="text-4xl font-bold tracking-tight text-slate-100">${plan.price}</span>
+                        <span className="text-sm text-slate-500">/ month</span>
                       </>
                     )}
                   </div>
@@ -486,27 +640,27 @@ export default function Landing() {
                     }
                     disabled={checkingOut !== null}
                     className={cn(
-                      "mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all",
+                      "mt-7 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold transition-all",
                       plan.popular
-                        ? "bg-emerald-400 text-navy-950 hover:bg-emerald-300 hover:shadow-[0_8px_24px_rgb(16_185_129_/_0.35)]"
-                        : "border border-white/15 bg-white/5 text-slate-200 hover:border-emerald-400/40 hover:text-emerald-300",
+                        ? "bg-emerald-400 text-navy-950 shadow-[0_4px_16px_rgb(16_185_129/_0.3)] hover:bg-emerald-300 hover:shadow-[0_8px_28px_rgb(16_185_129/_0.4)]"
+                        : "border border-white/10 bg-white/[0.04] text-slate-200 hover:border-emerald-400/30 hover:bg-white/[0.08] hover:text-emerald-300",
                       checkingOut !== null && "cursor-wait opacity-60",
                     )}
                   >
                     {checkingOut === plan.key ? "Opening checkout…" : plan.cta}
                     {checkingOut !== plan.key && <ArrowRight className="size-4" />}
                   </button>
-                  <ul className="mt-7 space-y-3">
+                  <ul className="mt-8 space-y-3.5">
                     {plan.features.map((feature) => (
                       <li key={feature} className="flex items-start gap-3 text-sm text-slate-400">
-                        <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" />
+                        <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400/80" />
                         {feature}
                       </li>
                     ))}
                   </ul>
-                </div>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
             <p className="mt-8 text-center text-sm text-slate-400">
               Questions about which plan fits?{" "}
               <a href="#contact" className="font-medium text-emerald-400 hover:text-emerald-300">
@@ -517,37 +671,62 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* FAQ */}
-        <section id="faq" className="scroll-mt-20 border-t border-white/5 bg-navy-900/40 py-20">
+        {/* ═══════════ FAQ ═══════════ */}
+        <section id="faq" className="scroll-mt-20 border-t border-white/5 bg-white/[0.01] py-20">
           <div className="mx-auto max-w-3xl px-4 sm:px-6">
-            <div className="text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">FAQ</span>
-              <h2 className="mt-3 text-3xl font-bold tracking-tight">Frequently asked questions</h2>
-            </div>
-            <div className="mt-10 divide-y divide-white/10 border-t border-white/10">
-              {faqs.map((faq) => (
-                <FAQItem key={faq.q} q={faq.q} a={faq.a} />
-              ))}
-            </div>
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-40px" }}
+              variants={stagger}
+            >
+              <motion.div custom={0} variants={fadeUp} className="text-center">
+                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">FAQ</span>
+                <h2 className="mt-3 text-3xl font-bold tracking-tight">Frequently asked questions</h2>
+              </motion.div>
+              <motion.div custom={1} variants={fadeUp} className="mt-10 divide-y divide-white/10 border-t border-white/10">
+                {faqs.map((faq) => (
+                  <FAQItem key={faq.q} q={faq.q} a={faq.a} />
+                ))}
+              </motion.div>
+            </motion.div>
           </div>
         </section>
 
-        {/* Contact */}
-        <section id="contact" className="scroll-mt-20 py-20 lg:py-24">
+        {/* ═══════════ CONTACT ═══════════ */}
+        <section id="contact" className="scroll-mt-20 py-20 lg:py-28">
           <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-2xl text-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">Contact</span>
-              <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">We're here to help</h2>
-              <p className="mt-4 text-lg text-slate-400">
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-60px" }}
+              variants={stagger}
+              className="mx-auto max-w-2xl text-center"
+            >
+              <motion.span custom={0} variants={fadeUp} className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">
+                Contact
+              </motion.span>
+              <motion.h2 custom={1} variants={fadeUp} className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+                We're here to help
+              </motion.h2>
+              <motion.p custom={2} variants={fadeUp} className="mt-4 text-lg text-slate-400">
                 Questions about a plan, a lead, or your subscription? Reach out any time.
-              </p>
-            </div>
-            <div className="mt-12 grid gap-5 sm:grid-cols-2">
-              <a
+              </motion.p>
+            </motion.div>
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-40px" }}
+              variants={stagger}
+              className="mt-12 grid gap-5 sm:grid-cols-2"
+            >
+              <motion.a
+                custom={0}
+                variants={fadeUp}
                 href={`mailto:${CONTACT_EMAIL}`}
-                className="flex items-start gap-4 rounded-2xl border border-white/10 bg-navy-900/60 p-6 transition-colors hover:border-emerald-400/30 hover:shadow-[0_12px_36px_-12px_rgb(16_185_129_/_0.25)]"
+                className="group flex items-start gap-4 rounded-3xl border border-white/[0.08] bg-white/[0.02] p-7 transition-all duration-300 hover:border-emerald-400/25 hover:bg-white/[0.04] hover:shadow-[0_16px_48px_-12px_rgb(16_185_129/_0.2)]"
               >
-                <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-400 ring-1 ring-emerald-400/15 transition-colors group-hover:bg-emerald-400/15">
                   <Mail className="size-5" />
                 </div>
                 <div>
@@ -555,41 +734,54 @@ export default function Landing() {
                   <div className="mt-1 text-sm text-slate-400">{CONTACT_EMAIL}</div>
                   <div className="mt-1 text-sm text-slate-500">We reply within 2 business days.</div>
                 </div>
-              </a>
-              <div className="flex items-start gap-4 rounded-2xl border border-white/10 bg-navy-900/60 p-6">
-                <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
+              </motion.a>
+              <motion.div
+                custom={1}
+                variants={fadeUp}
+                className="flex items-start gap-4 rounded-3xl border border-white/[0.08] bg-white/[0.02] p-7"
+              >
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-400 ring-1 ring-emerald-400/15">
                   <MapPin className="size-5" />
                 </div>
                 <div>
                   <div className="text-sm font-semibold text-slate-100">Business address status</div>
                   <div className="mt-1 text-sm text-slate-400">{SUPPORT_ADDRESS}</div>
                 </div>
-              </div>
-            </div>
+              </motion.div>
+            </motion.div>
           </div>
         </section>
 
-        {/* Final CTA */}
+        {/* ═══════════ FINAL CTA ═══════════ */}
         <section className="pb-20">
           <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-400 via-emerald-500 to-teal-700 px-8 py-14 text-center shadow-[0_24px_80px_-24px_rgb(16_185_129_/_0.5)]">
-              <div className="pointer-events-none absolute -right-16 -top-16 size-64 rounded-full bg-white/15 blur-2xl" />
-              <div className="pointer-events-none absolute -bottom-20 -left-16 size-64 rounded-full bg-navy-950/20 blur-2xl" />
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-40px" }}
+              transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] as const }}
+              className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-emerald-400 via-emerald-500 to-teal-600 px-8 py-16 text-center shadow-[0_24px_80px_-24px_rgb(16_185_129/_0.55)] sm:px-12"
+            >
+              {/* Decorative orbs */}
+              <div className="pointer-events-none absolute -right-20 -top-20 size-80 rounded-full bg-white/15 blur-3xl" />
+              <div className="pointer-events-none absolute -bottom-24 -left-20 size-72 rounded-full bg-navy-950/15 blur-3xl" />
+              <div className="pointer-events-none absolute right-1/4 top-1/2 size-40 -translate-y-1/2 rounded-full bg-white/10 blur-2xl" />
               <div className="relative">
-                <h2 className="text-3xl font-bold tracking-tight text-navy-950 sm:text-4xl">
+                <h2 className="text-3xl font-bold tracking-tight text-navy-950 sm:text-4xl lg:text-5xl">
                   Stop guessing. Start closing.
                 </h2>
-                <p className="mx-auto mt-4 max-w-xl text-lg text-navy-900/80">
+                <p className="mx-auto mt-5 max-w-xl text-lg text-navy-900/70">
                   Join wholesalers who verify every lead before they spend a dollar on outreach.
                 </p>
                 <a
                   href="#pricing"
-                  className="mt-8 inline-flex items-center gap-2 rounded-xl bg-navy-950 px-8 py-3.5 text-base font-semibold text-emerald-300 shadow-sm transition-all hover:bg-navy-900 hover:shadow-lg"
+                  className="group mt-9 inline-flex items-center gap-2.5 rounded-2xl bg-navy-950 px-9 py-4 text-base font-semibold text-emerald-300 shadow-lg transition-all hover:bg-navy-900 hover:shadow-xl"
                 >
-                  Subscribe now <ArrowRight className="size-5" />
+                  Subscribe now
+                  <ArrowRight className="size-5 transition-transform group-hover:translate-x-0.5" />
                 </a>
               </div>
-            </div>
+            </motion.div>
           </div>
         </section>
       </main>

@@ -256,6 +256,7 @@ export default function Dashboard() {
   const [workspace, setWorkspace] = useState<MongoWorkspace>();
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [showAdminTools, setShowAdminTools] = useState(false);
   const [showApiAccess, setShowApiAccess] = useState(false);
   const [showUsers, setShowUsers] = useState(false);
   const [usersList, setUsersList] = useState<Array<{
@@ -739,11 +740,7 @@ export default function Dashboard() {
             <Link to="/toolkit" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Wrench className="size-4" /> Toolkit</Link>
             <Link to="/local-agents" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Bot className="size-4" /> Local agents</Link>
             <Link to="/shared-conversation" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><MessageSquare className="size-4" /> Odysseus</Link>
-            {isOwner && <button type="button" onClick={() => { setShowApiAccess(true); void loadApiCredentials(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><KeyRound className="size-4" /> API access <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
-            {isOwner && <button type="button" onClick={() => { setShowAiUsage(true); void loadAiUsage(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Activity className="size-4" /> AI usage <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
-            {isOwner && <button type="button" onClick={() => { setShowUsers(true); void handleLoadUsers(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Users className="size-4" /> Users <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
-            {isOwner && <button type="button" onClick={() => void handlePurgeGuests()} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/60 hover:text-rose-700"><UserX className="size-4" /> Purge guest accounts</button>}
-            {isOwner && <button type="button" onClick={() => setShowFileUpload(true)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-emerald-800"><FilePlus2 className="size-4" /> Upload CSV leads <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-emerald-500">Owner</Badge></button>}
+            {isOwner && <button type="button" onClick={() => setShowAdminTools(true)} className="flex w-full items-center gap-3 rounded-xl bg-sky-50/70 px-3 py-2.5 text-sm font-semibold text-sky-800 shadow-sm transition-colors hover:bg-sky-100/80"><Wrench className="size-4" /> Admin tools <Badge variant="outline" className="ml-auto border-sky-200/80 bg-white/70 text-[0.6rem] text-sky-700">5</Badge></button>}
           </nav>
           <div className="mt-auto rounded-2xl border border-teal-100/90 bg-teal-50/55 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-teal-800"><ShieldCheck className="size-4" /> Integrity mode on</div><p className="mt-2 text-xs leading-5 text-teal-900/65">Only verified, non-fabricated records are surfaced.</p></div>
           <button type="button" onClick={handleSignOut} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/65 hover:text-slate-800"><LogOut className="size-4" /> Sign out</button>
@@ -783,12 +780,47 @@ export default function Dashboard() {
               <Link to="/toolkit" onClick={() => setMobileNavOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Wrench className="size-4" /> Toolkit</Link>
               <Link to="/local-agents" onClick={() => setMobileNavOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Bot className="size-4" /> Local agents</Link>
               <Link to="/shared-conversation" onClick={() => setMobileNavOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><MessageSquare className="size-4" /> Odysseus</Link>
-              {isOwner && <button type="button" onClick={() => { setMobileNavOpen(false); setShowApiAccess(true); void loadApiCredentials(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><KeyRound className="size-4" /> API access <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
-              {isOwner && <button type="button" onClick={() => { setMobileNavOpen(false); setShowAiUsage(true); void loadAiUsage(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Activity className="size-4" /> AI usage <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
-              {isOwner && <button type="button" onClick={() => { setMobileNavOpen(false); void handlePurgeGuests(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/60 hover:text-rose-700"><UserX className="size-4" /> Purge guest accounts</button>}
+              {isOwner && <button type="button" onClick={() => { setMobileNavOpen(false); setShowAdminTools(true); }} className="flex w-full items-center gap-3 rounded-xl bg-sky-50/70 px-3 py-2.5 text-sm font-semibold text-sky-800 shadow-sm transition-colors hover:bg-sky-100/80"><Wrench className="size-4" /> Admin tools <Badge variant="outline" className="ml-auto border-sky-200/80 bg-white/70 text-[0.6rem] text-sky-700">5</Badge></button>}
             </nav>
             <div className="mt-auto rounded-2xl border border-teal-100/90 bg-teal-50/55 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-teal-800"><ShieldCheck className="size-4" /> Integrity mode on</div><p className="mt-2 text-xs leading-5 text-teal-900/65">Only verified, non-fabricated records are surfaced.</p></div>
             <button type="button" onClick={handleSignOut} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/65 hover:text-slate-800"><LogOut className="size-4" /> Sign out</button>
+          </div>
+        </div>
+      )}
+
+      {showAdminTools && isOwner && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/15 p-3 backdrop-blur-sm sm:items-center" onClick={(event) => { if (event.target === event.currentTarget) setShowAdminTools(false); }}>
+          <div className="w-full max-w-3xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-5 shadow-xl sm:p-7">
+            <div className="flex items-start justify-between gap-5">
+              <div>
+                <p className="eyebrow">Owner workspace</p>
+                <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Admin tools</h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Access, operations, and data utilities are grouped here so the lead board stays focused.</p>
+              </div>
+              <button type="button" onClick={() => setShowAdminTools(false)} className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:text-slate-800" aria-label="Close admin tools"><X className="size-4" /></button>
+            </div>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <button type="button" onClick={() => { setShowAdminTools(false); setShowApiAccess(true); void loadApiCredentials(); }} className="group rounded-lg border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-sky-300 hover:bg-sky-50/70">
+                <div className="flex items-center justify-between"><span className="flex size-9 items-center justify-center rounded-lg bg-sky-100 text-sky-700"><KeyRound className="size-4" /></span><ArrowUpRight className="size-4 text-slate-300 transition-colors group-hover:text-sky-600" /></div>
+                <p className="mt-4 text-sm font-semibold text-slate-900">API access</p><p className="mt-1 text-xs leading-5 text-slate-500">Issue, approve, rotate, revoke, and manage agent credentials.</p>
+              </button>
+              <button type="button" onClick={() => { setShowAdminTools(false); setShowUsers(true); void handleLoadUsers(); }} className="group rounded-lg border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-violet-300 hover:bg-violet-50/70">
+                <div className="flex items-center justify-between"><span className="flex size-9 items-center justify-center rounded-lg bg-violet-100 text-violet-700"><Users className="size-4" /></span><ArrowUpRight className="size-4 text-slate-300 transition-colors group-hover:text-violet-600" /></div>
+                <p className="mt-4 text-sm font-semibold text-slate-900">User access</p><p className="mt-1 text-xs leading-5 text-slate-500">Review accounts and assign disabled, standard, or premium access.</p>
+              </button>
+              <button type="button" onClick={() => { setShowAdminTools(false); setShowAiUsage(true); void loadAiUsage(); }} className="group rounded-lg border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-teal-300 hover:bg-teal-50/70">
+                <div className="flex items-center justify-between"><span className="flex size-9 items-center justify-center rounded-lg bg-teal-100 text-teal-700"><Activity className="size-4" /></span><ArrowUpRight className="size-4 text-slate-300 transition-colors group-hover:text-teal-600" /></div>
+                <p className="mt-4 text-sm font-semibold text-slate-900">AI usage</p><p className="mt-1 text-xs leading-5 text-slate-500">Monitor request limits, daily caps, and current token spend.</p>
+              </button>
+              <button type="button" onClick={() => { setShowAdminTools(false); setShowFileUpload(true); }} className="group rounded-lg border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-emerald-300 hover:bg-emerald-50/70">
+                <div className="flex items-center justify-between"><span className="flex size-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700"><FilePlus2 className="size-4" /></span><ArrowUpRight className="size-4 text-slate-300 transition-colors group-hover:text-emerald-600" /></div>
+                <p className="mt-4 text-sm font-semibold text-slate-900">Import leads</p><p className="mt-1 text-xs leading-5 text-slate-500">Upload a source-backed CSV and send records through the owner import flow.</p>
+              </button>
+            </div>
+            <div className="mt-3 flex flex-col gap-3 rounded-lg border border-rose-200 bg-rose-50/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-rose-100 text-rose-700"><UserX className="size-4" /></span><div><p className="text-sm font-semibold text-slate-900">Purge guest accounts</p><p className="mt-1 text-xs leading-5 text-slate-600">Remove leftover anonymous accounts and invalidate their sessions.</p></div></div>
+              <Button type="button" variant="outline" onClick={() => { setShowAdminTools(false); void handlePurgeGuests(); }} className="h-9 shrink-0 gap-2 rounded-lg border-rose-200 bg-white text-xs text-rose-700 hover:bg-rose-100"><Trash2 className="size-3.5" /> Run cleanup</Button>
+            </div>
           </div>
         </div>
       )}

@@ -193,6 +193,54 @@
   .eyebrow {
     @apply text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-indigo-700;
   }
+
+  .admin-dashboard {
+    background: transparent;
+  }
+
+  .admin-dashboard .glass-panel {
+    @apply rounded-xl border-slate-200 bg-white shadow-sm;
+  }
+
+  .admin-dashboard .glass-panel-strong {
+    @apply rounded-xl border-slate-200 bg-white shadow-xl;
+  }
+
+  .admin-dashboard .glass-inset {
+    @apply rounded-lg border-slate-200 bg-slate-50;
+  }
+
+  .admin-dashboard [class*="rounded-[1.75rem]"],
+  .admin-dashboard [class*="rounded-[1.5rem]"],
+  .admin-dashboard [class*="rounded-2xl"] {
+    border-radius: 0.75rem;
+  }
+
+  .admin-dashboard .glass-panel button:not(.bg-sky-700),
+  .admin-dashboard .glass-panel a {
+    transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+  }
+
+  .admin-dashboard .border-white\/85,
+  .admin-dashboard .border-white\/90,
+  .admin-dashboard .border-white\/80 {
+    border-color: var(--border);
+  }
+
+  .admin-dashboard .bg-white\/65,
+  .admin-dashboard .bg-white\/62,
+  .admin-dashboard .bg-white\/60,
+  .admin-dashboard .bg-white\/55,
+  .admin-dashboard .bg-white\/50,
+  .admin-dashboard .bg-white\/45,
+  .admin-dashboard .bg-white\/40 {
+    background-color: color-mix(in oklch, white 86%, transparent);
+  }
+
+  .admin-dashboard .divide-white\/70 > :not(:last-child),
+  .admin-dashboard .border-white\/70 {
+    border-color: var(--border);
+  }
 }
 
 /* Toolkit grouped tabs: the toolkit container is a single-column grid so the

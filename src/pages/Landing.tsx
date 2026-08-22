@@ -26,6 +26,7 @@ import {
   Target,
   TrendingUp,
   Users,
+  Award,
   Zap,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
@@ -33,8 +34,8 @@ import { SiteFooter, CONTACT_EMAIL, SUPPORT_ADDRESS } from "@/components/SiteFoo
 import { cn } from "@/lib/utils";
 
 const PRICE_IDS: Record<string, string> = {
-  starter: "price_replace_with_your_starter_price_id",
-  pro: "price_replace_with_your_pro_price_id",
+  starter: "price_1U6fOLBDysO4CeCRT6k0Rdc2",
+  pro: "price_1U6fOMBDysO4CeCRXLGhPl7s",
 };
 
 const navLinks = [

@@ -41,7 +41,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 
@@ -280,6 +280,12 @@ export default function Dashboard() {
   const [apiNewScopes, setApiNewScopes] = useState<string[]>(["threads"]);
   const [apiRevealed, setApiRevealed] = useState<{ id: string; token: string; tokenPrefix: string } | null>(null);
   const [showAiUsage, setShowAiUsage] = useState(false);
+  const [showFileUpload, setShowFileUpload] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleLoadUsers = async () => {
     setUsersLoading(true);
@@ -293,6 +299,7 @@ export default function Dashboard() {
     }
   };
   const togglePremiumAccess = useMutation(api.users.togglePremiumAccess);
+  const createLead = useMutation(api.leads.create);
   const handleTogglePremium = async (userId: string) => {
     try {
       const result = await togglePremiumAccess({ userId: userId as any });
@@ -312,6 +319,75 @@ export default function Dashboard() {
       toast.success(labels[tier] ?? "Tier updated");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update tier.");
+    }
+  };
+
+  const handleFileUpload = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!file) return;
+
+    setUploading(true);
+    setUploadResult(null);
+    setUploadError(null);
+
+    try {
+      const text = await file.text();
+      const lines = text.trim().split("\n");
+      if (lines.length < 2) {
+        throw new Error("CSV must have at least a header row and one data row");
+      }
+
+      const headers = lines[0].split(",").map(h => h.trim().replace(/"/g, ""));
+      const requiredHeaders = ["source", "address", "owner_name", "phone", "email", "score", "raw_data"];
+      const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+      if (missingHeaders.length > 0) {
+        throw new Error(`Missing required columns: ${missingHeaders.join(", ")}`);
+      }
+
+      const leads = [];
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(",").map(v => v.trim().replace(/^"|"$/g, ""));
+        if (values.length !== headers.length) continue;
+        const lead: Record<string, string> = {};
+        headers.forEach((h, idx) => { lead[h] = values[idx] || ""; });
+        leads.push(lead);
+      }
+
+      let imported = 0;
+      for (const lead of leads) {
+        await createLead({
+          propertyAddress: lead.address,
+          city: lead.city || "",
+          state: lead.state || "",
+          zip: lead.zip || "",
+          county: lead.county || "Thurston",
+          sourceType: "MANUAL",
+          sourceUrl: lead.sourceUrl || "unspecified",
+          sourceRef: lead.sourceRef || "csv-import",
+          sourceDate: new Date().toISOString().split("T")[0],
+          distressScore: Number(lead.score) || 0,
+          distressSignals: [],
+          verificationStatus: "UNVERIFIED",
+          pipelineStatus: "SOURCED",
+          absenteeOwner: false,
+          needsSkipTrace: true,
+          listedPhone: Boolean(lead.phone),
+          notes: [lead.phone ? `phone: ${lead.phone}` : null, lead.email ? `email: ${lead.email}` : null, lead.raw_data ? `raw: ${lead.raw_data}` : null].filter(Boolean).join(" | "),
+        });
+        imported++;
+      }
+
+      setUploadResult(`Successfully imported ${imported} leads`);
+      toast.success(`Imported ${imported} leads`);
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setTimeout(() => setShowFileUpload(false), 2000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Import failed";
+      setUploadError(message);
+      toast.error(message);
+    } finally {
+      setUploading(false);
     }
   };
   const [aiUsageLoading, setAiUsageLoading] = useState(false);
@@ -667,6 +743,7 @@ export default function Dashboard() {
             {isOwner && <button type="button" onClick={() => { setShowAiUsage(true); void loadAiUsage(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Activity className="size-4" /> AI usage <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
             {isOwner && <button type="button" onClick={() => { setShowUsers(true); void handleLoadUsers(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-sky-800"><Users className="size-4" /> Users <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-slate-500">Owner</Badge></button>}
             {isOwner && <button type="button" onClick={() => void handlePurgeGuests()} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/60 hover:text-rose-700"><UserX className="size-4" /> Purge guest accounts</button>}
+            {isOwner && <button type="button" onClick={() => setShowFileUpload(true)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-white/60 hover:text-emerald-800"><FilePlus2 className="size-4" /> Upload CSV leads <Badge variant="outline" className="ml-auto border-white/80 bg-white/45 text-[0.6rem] text-emerald-500">Owner</Badge></button>}
           </nav>
           <div className="mt-auto rounded-2xl border border-teal-100/90 bg-teal-50/55 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-teal-800"><ShieldCheck className="size-4" /> Integrity mode on</div><p className="mt-2 text-xs leading-5 text-teal-900/65">Only verified, non-fabricated records are surfaced.</p></div>
           <button type="button" onClick={handleSignOut} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-white/65 hover:text-slate-800"><LogOut className="size-4" /> Sign out</button>
@@ -984,6 +1061,51 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-    </main>
+
+      {showFileUpload && isOwner && (
+                  <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/15 p-3 backdrop-blur-sm sm:items-center" onClick={(event) => { if (event.target === event.currentTarget) setShowFileUpload(false); }}>
+                    <div className="glass-panel-strong max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-[1.75rem] p-5 sm:p-7">
+                      <div className="flex items-start justify-between gap-5">
+                        <div>
+                          <p className="eyebrow">Owner input</p>
+                          <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Upload CSV leads</h2>
+                          <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Upload a CSV file with verified leads. Columns: source, address, owner_name, phone, email, score, raw_data. Only non-fabricated, source-backed records accepted.</p>
+                        </div>
+                        <button type="button" onClick={() => setShowFileUpload(false)} className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-white/85 bg-white/60 text-slate-500" aria-label="Close upload"><X className="size-4" /></button>
+                      </div>
+                      <form onSubmit={handleFileUpload} className="mt-7 grid gap-5" encType="multipart/form-data">
+                        <div>
+                          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">CSV file</p>
+                          <label className="flex flex-col items-center justify-center w-full h-32 rounded-2xl border-2 border-dashed border-slate-300 bg-white/50 cursor-pointer hover:border-emerald-400 hover:bg-emerald-50 transition-colors">
+                            <FilePlus2 className="mx-auto size-8 text-slate-400" />
+                            <p className="mt-3 text-sm text-slate-600">Drag & drop CSV or click to browse</p>
+                            <input type="file" ref={fileInputRef} accept=".csv" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                          </label>
+                          {file && <p className="mt-2 text-sm font-medium text-emerald-700">{file.name} ({(file.size / 1024).toFixed(1)} KB)</p>}
+                        </div>
+                        <div className="flex gap-3 justify-end">
+                          <Button type="button" variant="outline" onClick={() => { setFile(null); setShowFileUpload(false); }} className="h-10 gap-2 rounded-xl text-xs">Cancel</Button>
+                          <Button type="submit" disabled={!file || uploading} className="h-10 gap-2 rounded-xl bg-emerald-600 px-4 text-xs hover:bg-emerald-700">
+                            {uploading ? <Loader2 className="size-3.5 animate-spin" /> : <FilePlus2 className="size-3.5" />}
+                            {uploading ? "Uploading…" : "Import leads"}
+                          </Button>
+                        </div>
+                      </form>
+                      {uploadResult && (
+                        <div className="mt-6 rounded-2xl border border-teal-200/80 bg-teal-50/60 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-teal-800">Import complete</p>
+                          <p className="mt-2 text-sm text-teal-900">{uploadResult}</p>
+                        </div>
+                      )}
+                      {uploadError && (
+                        <div className="mt-6 rounded-2xl border border-rose-200/80 bg-rose-50/60 p-4">
+                          <p className="xs font-semibold uppercase tracking-wide text-rose-800">Import failed</p>
+                          <p className="mt-2 text-sm text-rose-900">{uploadError}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </main>
   );
 }

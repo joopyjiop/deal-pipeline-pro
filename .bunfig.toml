@@ -1,2 +1,6 @@
-[install]
-cache = false
+# Freebuff's build server had a corrupted global package cache, which caused
+# `bun install` to fail with PathAlreadyExists / FileNotFound / ENOENT errors.
+# Disable loading from the global cache so every install downloads fresh from
+# the registry (slightly slower, but immune to stale/corrupt cache entries).
+[install.cache]
+disable = true

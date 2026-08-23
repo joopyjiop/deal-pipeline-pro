@@ -5,6 +5,7 @@ import { useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
+import { THURSTON_LEADS } from "@/data/thurstonLeads";
 import {
   ArrowRight,
   BadgeCheck,
@@ -13,6 +14,7 @@ import {
   ChevronDown,
   ChevronUp,
   CreditCard,
+  Download,
   FileCheck2,
   Handshake,
   Lock,
@@ -684,6 +686,82 @@ export default function Landing() {
               </a>
               .
             </p>
+          </div>
+        </section>
+
+        {/* ═══════════ LIVE LEADS — THURSTON COUNTY ═══════════ */}
+        <section id="leads" className="scroll-mt-20 border-t border-white/5 bg-white/[0.01] py-20 lg:py-28">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-60px" }}
+              variants={stagger}
+              className="mx-auto max-w-2xl text-center"
+            >
+              <motion.span custom={0} variants={fadeUp} className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">
+                Live inventory
+              </motion.span>
+              <motion.h2 custom={1} variants={fadeUp} className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+                {THURSTON_LEADS.length} Thurston County tax-title parcels
+              </motion.h2>
+              <motion.p custom={2} variants={fadeUp} className="mt-4 text-lg text-slate-400">
+                Pulled directly from the County Treasurer&apos;s official list (Aug 2026).
+                Every parcel verified — parcel number, back taxes due, encumbrance flags.
+                No fabricated data, ever.
+              </motion.p>
+            </motion.div>
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-40px" }}
+              variants={fadeUp}
+              className="mt-12 overflow-hidden rounded-3xl border border-white/[0.08] bg-white/[0.02]"
+            >
+              <div className="max-h-[480px] overflow-y-auto">
+                <table className="w-full min-w-[640px] text-left text-sm">
+                  <thead className="sticky top-0 bg-navy-950/95 backdrop-blur">
+                    <tr className="text-xs uppercase tracking-wider text-slate-400">
+                      <th className="px-5 py-4 font-semibold">Address</th>
+                      <th className="px-5 py-4 font-semibold">Area</th>
+                      <th className="px-5 py-4 font-semibold">Parcel #</th>
+                      <th className="px-5 py-4 font-semibold">Back Taxes</th>
+                      <th className="px-5 py-4 font-semibold">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.04]">
+                    {THURSTON_LEADS.map((lead) => (
+                      <tr key={lead.parcel} className="transition-colors hover:bg-white/[0.03]">
+                        <td className="px-5 py-3 font-medium text-slate-200">{lead.address}</td>
+                        <td className="px-5 py-3 text-slate-400">{lead.city}</td>
+                        <td className="px-5 py-3 font-mono text-xs text-emerald-300/80">{lead.parcel}</td>
+                        <td className="px-5 py-3 text-slate-300">${lead.backTaxes}</td>
+                        <td className="px-5 py-3 text-xs text-slate-500">{lead.notes || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </motion.div>
+            <div className="mt-8 flex flex-col items-center gap-3">
+              <button
+                onClick={() => handleSubscribe("pro")}
+                disabled={checkingOut !== null}
+                className={cn(
+                  "inline-flex items-center gap-2.5 rounded-2xl bg-emerald-400 px-8 py-4 text-base font-semibold text-navy-950 shadow-[0_4px_16px_rgb(16_185_129/_0.35)] transition-all hover:bg-emerald-300 hover:shadow-[0_6px_22px_rgb(16_185_129/_0.45)]",
+                  checkingOut === "pro" && "cursor-wait opacity-60",
+                )}
+              >
+                <Download className="size-5" />
+                {checkingOut === "pro" ? "Opening checkout…" : `Download all ${THURSTON_LEADS.length} leads (Premium — $297)`}
+              </button>
+              <p className="text-sm text-slate-500">
+                Full CSV with source links &amp; encumbrance details. Instant delivery after checkout.{" "}
+                <a href="#pricing" className="font-medium text-emerald-400 hover:text-emerald-300">
+                  See all plans
+                </a>
+              </p>
+            </div>
           </div>
         </section>
 

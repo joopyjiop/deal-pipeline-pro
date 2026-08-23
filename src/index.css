@@ -241,6 +241,167 @@
   .admin-dashboard .border-white\/70 {
     border-color: var(--border);
   }
+
+  /* Owner board: a deliberately stronger template treatment than the public app. */
+  .admin-dashboard {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 70% -10%, rgb(99 102 241 / 0.12), transparent 28rem),
+      #f6f7fb;
+  }
+
+  .admin-dashboard .admin-sidebar {
+    min-height: calc(100vh - 3rem);
+    position: sticky;
+    top: 1.5rem;
+    background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+    box-shadow: 0 18px 45px rgb(15 23 42 / 0.18);
+  }
+
+  .admin-dashboard .admin-sidebar a,
+  .admin-dashboard .admin-sidebar button {
+    color: rgb(226 232 240 / 0.78);
+  }
+
+  .admin-dashboard .admin-sidebar a:hover,
+  .admin-dashboard .admin-sidebar button:hover {
+    color: white;
+    background: rgb(255 255 255 / 0.1);
+  }
+
+  .admin-dashboard .admin-sidebar > a span {
+    background: rgb(255 255 255 / 0.12);
+    box-shadow: none;
+  }
+
+  .admin-dashboard .admin-sidebar > a svg,
+  .admin-dashboard .admin-sidebar > a p {
+    color: white;
+  }
+
+  .admin-dashboard .admin-sidebar > a p:last-child {
+    color: rgb(148 163 184 / 0.75);
+  }
+
+  .admin-dashboard .admin-sidebar nav > div:first-child {
+    background: #4f46e5;
+    color: white;
+    box-shadow: 0 8px 18px rgb(79 70 229 / 0.28);
+  }
+
+  .admin-dashboard .admin-sidebar nav > button {
+    background: rgb(99 102 241 / 0.18);
+    color: #c7d2fe;
+    box-shadow: none;
+  }
+
+  .admin-dashboard .admin-sidebar nav > button:hover {
+    background: rgb(99 102 241 / 0.3);
+    color: white;
+  }
+
+  .admin-dashboard .admin-sidebar .border-teal-100\/90 {
+    border-color: rgb(45 212 191 / 0.18);
+    background: rgb(20 184 166 / 0.1);
+  }
+
+  .admin-dashboard .admin-sidebar .text-teal-800,
+  .admin-dashboard .admin-sidebar .text-teal-900\/65 {
+    color: rgb(153 246 228 / 0.85);
+  }
+
+  .admin-dashboard .admin-topbar {
+    border-color: #e2e8f0;
+    background: rgb(255 255 255 / 0.92);
+    box-shadow: 0 8px 25px rgb(15 23 42 / 0.06);
+  }
+
+  .admin-dashboard .admin-stat-card {
+    position: relative;
+    overflow: hidden;
+    border-radius: 0.9rem;
+    transition: transform 160ms ease, box-shadow 160ms ease;
+  }
+
+  .admin-dashboard .admin-stat-card::after {
+    content: "";
+    position: absolute;
+    inset: auto -1.5rem -2.5rem auto;
+    width: 7rem;
+    height: 7rem;
+    border-radius: 999px;
+    background: rgb(99 102 241 / 0.07);
+  }
+
+  .admin-dashboard .admin-stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 24px rgb(15 23 42 / 0.08);
+  }
+
+  .admin-dashboard .admin-queue-card,
+  .admin-dashboard .admin-quality-card {
+    border-radius: 0.9rem;
+    box-shadow: 0 8px 22px rgb(15 23 42 / 0.045);
+  }
+
+  .admin-dashboard .admin-tools-modal {
+    max-height: min(880px, 94vh);
+  }
+
+  .admin-dashboard .admin-tools-hero {
+    background:
+      radial-gradient(circle at 90% 20%, rgb(99 102 241 / 0.22), transparent 18rem),
+      linear-gradient(135deg, #0f172a 0%, #111827 58%, #172554 100%);
+  }
+
+  .admin-dashboard .admin-tools-card {
+    position: relative;
+  }
+
+  .admin-dashboard .admin-tools-card p:first-of-type {
+    letter-spacing: -0.01em;
+  }
+
+  .admin-dashboard .admin-tools-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    box-shadow: inset 0 0 0 1px rgb(99 102 241 / 0.12);
+    transition: opacity 160ms ease;
+  }
+
+  .admin-dashboard .admin-tools-card:hover::before {
+    opacity: 1;
+  }
+
+  .admin-dashboard .admin-tools-modal > .p-5 > .mt-3 {
+    margin-top: 1rem;
+  }
+
+  .admin-dashboard .admin-tools-modal > .p-5 > .mt-3.border-rose-200,
+  .admin-dashboard .admin-tools-modal > .p-8 > .mt-3.border-rose-200 {
+    border-radius: 0.9rem;
+  }
+
+  .admin-dashboard .admin-tools-modal > .grid {
+    gap: 0.75rem;
+  }
+
+  .admin-dashboard .admin-tools-card {
+    min-height: 10.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.03);
+  }
+
+  .admin-dashboard .admin-tools-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 22px rgb(15 23 42 / 0.08);
+  }
 }
 
 /* Toolkit grouped tabs: the toolkit container is a single-column grid so the

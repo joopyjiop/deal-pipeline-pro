@@ -252,8 +252,23 @@ export default function Landing() {
       return;
     }
     setCheckingOut(planKey);
+    const origin = window.location.origin;
+    // Primary path: DealForge API worker (Stripe Checkout, no auth required)
     try {
-      const origin = window.location.origin;
+      const res = await fetch("https://dealforge-api.jacobvierra8.workers.dev/api/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ product_key: planKey }),
+      });
+      if (!res.ok) throw new Error(`checkout api ${res.status}`);
+      const data = (await res.json()) as { url?: string };
+      if (!data.url) throw new Error("no checkout url");
+      window.location.href = data.url;
+      return;
+    } catch {
+      // Fallback: Convex server-side session (requires sign-in + Convex Stripe key)
+    }
+    try {
       const { url } = await createCheckout({
         priceId,
         successUrl: `${origin}/dashboard`,

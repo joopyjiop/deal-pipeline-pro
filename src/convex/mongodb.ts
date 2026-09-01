@@ -3781,6 +3781,46 @@ export const estimateDeal = action({
   },
 });
 
+export const estimateByAddress = action({
+  args: { address: v.string(), acquisitionPrice: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const address = args.address.trim();
+    if (!address) throw new Error("Enter a property address");
+    const access = await (await getDatabase()).collection<ToolAccessDocument>(TOOL_ACCESS).findOne({ _id: "admin_tools" });
+    if (access?.estimatorEnabled === false) throw new Error("The estimator tool is disabled in Tool access settings");
+    const data = await rentcastFetchImpl({ address, radius: 5, saleDateRange: 365, compsLimit: 12 });
+    const property = data.property;
+    if (!property) throw new Error("RentCast could not find a property record for this address");
+    const squareFeet = property.squareFootage;
+    if (!squareFeet || squareFeet <= 0) throw new Error("RentCast matched the address but has no square-footage record - add it manually or flag NEEDS_APPRAISAL");
+    const yearBuilt = property.yearBuilt;
+    const compValues = data.comps.soldPrices.filter((value) => value > 0);
+    const repairs = repairEstimate(squareFeet, "MEDIUM", yearBuilt);
+    const arv = arvFromComps(compValues);
+    const targetPct = 70;
+    const wholesaleFee = 10000;
+    const closingCosts = 5000;
+    const holdingCosts = 5000;
+    const mao = arv === undefined ? undefined : {
+      conservative: Math.round(arv.conservative * targetPct / 100 - repairs.total - wholesaleFee - closingCosts - holdingCosts),
+      median: Math.round(arv.median * targetPct / 100 - repairs.total - wholesaleFee - closingCosts - holdingCosts),
+      aggressive: Math.round(arv.aggressive * targetPct / 100 - repairs.total - wholesaleFee - closingCosts - holdingCosts),
+    };
+    const estimatedProfit = mao && args.acquisitionPrice !== undefined ? mao.median - args.acquisitionPrice : undefined;
+    return {
+      estimateStatus: (arv ? "READY" : "NEEDS_APPRAISAL") as "READY" | "NEEDS_APPRAISAL",
+      compCount: compValues.length,
+      compMedian: arv?.compMedian,
+      arv: arv ? { conservative: arv.conservative, median: arv.median, aggressive: arv.aggressive } : undefined,
+      repairs,
+      mao,
+      estimatedProfit,
+      source: { provider: "rentcast" as const, address, propertyId: property.id, rentEstimate: data.rentEstimate?.rent, compsUsed: compValues.length },
+    };
+  },
+});
+
 export const insertLead = action({
   args: { lead: leadValidator },
   handler: async (ctx, args) => {

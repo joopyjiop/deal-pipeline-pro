@@ -433,6 +433,7 @@ export default function Toolkit() {
   const crawlWithFirecrawl = useAction(api.mongodb.firecrawlCrawl);
   const qualifyStagedSource = useAction(api.mongodb.qualifyStagedSource);
   const estimateDeal = useAction(api.mongodb.estimateDeal);
+  const estimateByAddress = useAction(api.mongodb.estimateByAddress);
   const runAgentTeamAction = useAction(api.mongodb.runAgentTeam);
   const runBuyerMatchesAction = useAction(api.mongodb.runBuyerMatches);
   const listPipelineBriefAction = useAction(api.mongodb.listPipelineBrief);
@@ -501,19 +502,7 @@ export default function Toolkit() {
   const [rcRunning, setRcRunning] = useState(false);
   const [rcResult, setRcResult] = useState<RentcastResult | null>(null);
   const [rcUnderwriting, setRcUnderwriting] = useState(false);
-  const [estimateForm, setEstimateForm] = useState({
-    squareFeet: "1500",
-    yearBuilt: "",
-    repairTier: "MEDIUM" as "BASE" | "MEDIUM" | "GUT",
-    soldComps: "",
-    compSourceUrl: "",
-    compSourceDate: new Date().toISOString().slice(0, 10),
-    targetPct: "70",
-    wholesaleFee: "10000",
-    closingCosts: "5000",
-    holdingCosts: "5000",
-    acquisitionPrice: "",
-  });
+  const [estimateForm, setEstimateForm] = useState({ address: "", acquisitionPrice: "" });
   const [teamLeads, setTeamLeads] = useState<Array<{ _id: string; propertyAddress: string; city: string; state: string }>>([]);
   const [teamLeadId, setTeamLeadId] = useState("");
   const [loadingLeads, setLoadingLeads] = useState(false);
@@ -822,26 +811,16 @@ export default function Toolkit() {
   const handleEstimate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setEstimating(true);
+    setEstimateResult(null);
     try {
-      const compPrices = estimateForm.soldComps
-        .split(",")
-        .map((value) => Number(value.trim()))
-        .filter((value) => Number.isFinite(value) && value > 0);
-      const result = await estimateDeal({
-        squareFeet: Number(estimateForm.squareFeet),
-        yearBuilt: estimateForm.yearBuilt ? Number(estimateForm.yearBuilt) : undefined,
-        repairTier: estimateForm.repairTier,
-        soldComps: compPrices.map((salePrice) => ({ salePrice })),
-        compSourceUrl: estimateForm.compSourceUrl || undefined,
-        compSourceDate: estimateForm.compSourceDate || undefined,
-        targetPct: Number(estimateForm.targetPct),
-        wholesaleFee: Number(estimateForm.wholesaleFee),
-        closingCosts: Number(estimateForm.closingCosts),
-        holdingCosts: Number(estimateForm.holdingCosts),
+      const address = estimateForm.address.trim();
+      if (!address) throw new Error("Enter a property address");
+      const result = await estimateByAddress({
+        address,
         acquisitionPrice: estimateForm.acquisitionPrice ? Number(estimateForm.acquisitionPrice) : undefined,
       }) as EstimateResult;
       setEstimateResult(result);
-      toast.success(result.estimateStatus === "READY" ? "Underwriting estimate calculated." : "Estimate needs appraisal comps.");
+      toast.success(result.estimateStatus === "READY" ? "Underwriting calculated from a real property record." : "RentCast matched the address but found no sold comps — flagged for appraisal.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not calculate this estimate.");
     } finally {
@@ -1442,18 +1421,12 @@ export default function Toolkit() {
           </section>
 
           <section className="glass-panel rounded-[1.75rem] p-5 sm:p-6">
-            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-teal-100/80 text-teal-700"><Calculator className="size-5" /></div><div><p className="eyebrow">Deal estimator</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Underwrite from sourced numbers</h2><p className="mt-1 text-xs leading-5 text-slate-500">ARV comes from the sold comp median. No comps means <strong>NEEDS APPRAISAL</strong>, never a fabricated value.</p></div></div>
-            <form onSubmit={handleEstimate} className="mt-5 grid gap-3 sm:grid-cols-2">
-              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Square feet</span><Input required min="1" type="number" value={estimateForm.squareFeet} onChange={(event) => setEstimateForm((current) => ({ ...current, squareFeet: event.target.value }))} className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
-              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Year built <span className="font-normal text-slate-400">(optional)</span></span><Input type="number" value={estimateForm.yearBuilt} onChange={(event) => setEstimateForm((current) => ({ ...current, yearBuilt: event.target.value }))} placeholder="1985" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
-              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Repair tier</span><select value={estimateForm.repairTier} onChange={(event) => setEstimateForm((current) => ({ ...current, repairTier: event.target.value as typeof current.repairTier }))} className="h-10 rounded-xl border border-white/85 bg-white/70 px-3 text-sm text-slate-700 outline-none"><option value="BASE">Base · $15/SF</option><option value="MEDIUM">Medium · $30/SF</option><option value="GUT">Gut · $50/SF</option></select></label>
-              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Sold comp prices</span><Input value={estimateForm.soldComps} onChange={(event) => setEstimateForm((current) => ({ ...current, soldComps: event.target.value }))} placeholder="145000, 152000, 160000" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
-              <label className="grid gap-1.5 text-xs font-semibold text-slate-600 sm:col-span-2"><span>Comp source URL <span className="font-normal text-slate-400">(required when comps are entered)</span></span><Input type="url" value={estimateForm.compSourceUrl} onChange={(event) => setEstimateForm((current) => ({ ...current, compSourceUrl: event.target.value }))} placeholder="https://recorder.example.gov/comps" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
-              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Target percentage</span><Input required min="1" max="100" type="number" value={estimateForm.targetPct} onChange={(event) => setEstimateForm((current) => ({ ...current, targetPct: event.target.value }))} className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
-              <label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Acquisition / contract price</span><Input min="0" type="number" value={estimateForm.acquisitionPrice} onChange={(event) => setEstimateForm((current) => ({ ...current, acquisitionPrice: event.target.value }))} placeholder="Optional" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
-              <div className="grid grid-cols-3 gap-2 sm:col-span-2"><label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Wholesale fee</span><Input min="0" type="number" value={estimateForm.wholesaleFee} onChange={(event) => setEstimateForm((current) => ({ ...current, wholesaleFee: event.target.value }))} className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label><label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Closing</span><Input min="0" type="number" value={estimateForm.closingCosts} onChange={(event) => setEstimateForm((current) => ({ ...current, closingCosts: event.target.value }))} className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label><label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Holding</span><Input min="0" type="number" value={estimateForm.holdingCosts} onChange={(event) => setEstimateForm((current) => ({ ...current, holdingCosts: event.target.value }))} className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label></div>
-              <Button disabled={estimating || !access.estimatorEnabled} type="submit" className="h-11 gap-2 rounded-xl bg-teal-700 text-sm hover:bg-teal-800 sm:col-span-2">{estimating ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {estimating ? "Calculating…" : "Calculate estimate"}</Button>
-            </form>
+            <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-teal-100/80 text-teal-700"><Calculator className="size-5" /></div><div><p className="eyebrow">Deal estimator</p><h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">Underwrite from an address</h2><p className="mt-1 text-xs leading-5 text-slate-500">Square feet, repairs, rent, and sold comps are pulled from RentCast county records for that address. No comps means <strong>NEEDS APPRAISAL</strong>, never a fabricated value.</p></div></div>
+            <form onSubmit={handleEstimate} className="mt-5 grid gap-3">
+<label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Property address</span><Input required type="text" value={estimateForm.address} onChange={(event) => setEstimateForm((current) => ({ ...current, address: event.target.value }))} placeholder="123 Main St, Springfield, IL 62701" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
+<label className="grid gap-1.5 text-xs font-semibold text-slate-600"><span>Acquisition / contract price <span className="font-normal text-slate-400">(optional — shows your gross spread)</span></span><Input min="0" type="number" value={estimateForm.acquisitionPrice} onChange={(event) => setEstimateForm((current) => ({ ...current, acquisitionPrice: event.target.value }))} placeholder="Profit needs a buy price" className="h-10 rounded-xl border-white/85 bg-white/70 text-sm" /></label>
+<Button disabled={estimating || !access.estimatorEnabled} type="submit" className="h-11 gap-2 rounded-xl bg-teal-700 text-sm hover:bg-teal-800">{estimating ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {estimating ? "Underwriting…" : "Underwrite this address"}</Button>
+</form>
             {estimateResult && <div className="mt-5 rounded-2xl border border-teal-100 bg-teal-50/55 p-4"><div className="flex items-center justify-between gap-3"><div><Badge className={estimateResult.estimateStatus === "READY" ? "border-0 bg-teal-100/80 text-teal-800" : "border-0 bg-amber-100/80 text-amber-800"}>{pretty(estimateResult.estimateStatus)}</Badge><p className="mt-2 text-xs text-slate-500">{estimateResult.compCount} sourced comp{estimateResult.compCount === 1 ? "" : "s"} · repairs {money(estimateResult.repairs.total)}</p></div><p className="text-right text-xl font-semibold text-teal-800">{money(estimateResult.estimatedProfit)}<span className="block text-[0.65rem] font-medium text-slate-500">estimated gross spread</span></p></div>{estimateResult.arv && estimateResult.mao && <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs"><div className="glass-inset rounded-xl p-3"><p className="text-slate-400">Conservative ARV</p><p className="mt-1 font-semibold text-slate-700">{money(estimateResult.arv.conservative)}</p><p className="mt-2 text-slate-400">MAO {money(estimateResult.mao.conservative)}</p></div><div className="glass-inset rounded-xl border-teal-200/70 bg-white/55 p-3"><p className="text-slate-400">Median ARV</p><p className="mt-1 font-semibold text-slate-800">{money(estimateResult.arv.median)}</p><p className="mt-2 text-slate-400">MAO {money(estimateResult.mao.median)}</p></div><div className="glass-inset rounded-xl p-3"><p className="text-slate-400">Aggressive ARV</p><p className="mt-1 font-semibold text-slate-700">{money(estimateResult.arv.aggressive)}</p><p className="mt-2 text-slate-400">MAO {money(estimateResult.mao.aggressive)}</p></div></div>}</div>}
           </section>
         </div>
